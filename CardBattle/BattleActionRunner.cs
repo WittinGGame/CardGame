@@ -27,6 +27,10 @@ namespace CardBattle.Core
 
         public bool CanAcceptInput => !IsBusy && player != null && player.CanAct && player.IsAlive;
 
+        private bool waitingForHit;
+        private bool waitingForFinish;
+        private CardPlayContext pendingContext;
+
         public void TryPlayCard(CardInstance card, EnemyBattleUnit primaryTarget = null)
         {
             if (IsBusy || card?.Data == null || player == null || !player.IsAlive)
@@ -56,23 +60,37 @@ namespace CardBattle.Core
             deckController.PlayCardFromHand(card);
 
             bool isAttack = card.Data.CardType == CardType.Attack;
+            var context = new CardPlayContext(player, card, enemyActionSystem.Enemies, primaryTarget);
 
             if (isAttack)
             {
-                player.View?.PlayAttack();
-                yield return new WaitForSeconds(playerAttackWindup);
+                if (player.View != null)
+                {
+                    pendingContext = context;
+                    waitingForHit = true;
+                    waitingForFinish = true;
+
+                    SubscribeToPlayerAttackEvents();
+                    player.View.PlayAttack();
+
+                    yield return new WaitUntil(() => !waitingForFinish);
+                    UnsubscribeFromPlayerAttackEvents();
+                    pendingContext = null;
+                }
+                else
+                {
+                    cardResolver.Resolve(context);
+                    enemyActionSystem.HandlePlayerSuccessfullyPlayedCard();
+                }
+            }
+            else
+            {
+                cardResolver.Resolve(context);
+                enemyActionSystem.HandlePlayerSuccessfullyPlayedCard();
             }
 
-            var context = new CardPlayContext(player, card, enemyActionSystem.Enemies, primaryTarget);
-            cardResolver.Resolve(context);
-
-            if (isAttack && primaryTarget != null)
-                yield return new WaitForSeconds(hurtPause);
-
-            enemyActionSystem.HandlePlayerSuccessfullyPlayedCard();
-
-            // wait a little if any interrupt attacks/hurts happened visually
-            yield return new WaitForSeconds(enemyAttackWindup);
+            // wait until enemy interrupt actions (if any) are fully resolved
+            yield return new WaitUntil(() => enemyActionSystem == null || !enemyActionSystem.IsResolvingEnemyActions);
 
             RefreshExternalUI();
             IsBusy = false;
@@ -88,7 +106,7 @@ namespace CardBattle.Core
             yield return new WaitForSeconds(endTurnPause);
 
             enemyActionSystem.ResolveEndTurnAttacks();
-            yield return new WaitForSeconds(enemyAttackWindup);
+            yield return new WaitUntil(() => enemyActionSystem == null || !enemyActionSystem.IsResolvingEnemyActions);
 
             if (player != null && player.IsAlive && HasAliveEnemy())
             {
@@ -136,6 +154,52 @@ namespace CardBattle.Core
         {
             handUIController?.RefreshHandUI();
             battleHUDController?.RefreshUIExternal();
+        }
+
+        private void OnDisable()
+        {
+            UnsubscribeFromPlayerAttackEvents();
+            waitingForHit = false;
+            waitingForFinish = false;
+            pendingContext = null;
+        }
+
+        private void SubscribeToPlayerAttackEvents()
+        {
+            if (player?.View == null)
+                return;
+
+            UnsubscribeFromPlayerAttackEvents();
+            player.View.OnAttackHit += HandlePlayerAttackHit;
+            player.View.OnActionFinished += HandlePlayerActionFinished;
+        }
+
+        private void UnsubscribeFromPlayerAttackEvents()
+        {
+            if (player?.View == null)
+                return;
+
+            player.View.OnAttackHit -= HandlePlayerAttackHit;
+            player.View.OnActionFinished -= HandlePlayerActionFinished;
+        }
+
+        private void HandlePlayerAttackHit()
+        {
+            if (!waitingForHit)
+                return;
+
+            waitingForHit = false;
+            if (pendingContext != null)
+                cardResolver.Resolve(pendingContext);
+        }
+
+        private void HandlePlayerActionFinished()
+        {
+            if (!waitingForFinish)
+                return;
+
+            waitingForFinish = false;
+            enemyActionSystem.HandlePlayerSuccessfullyPlayedCard();
         }
     }
 }

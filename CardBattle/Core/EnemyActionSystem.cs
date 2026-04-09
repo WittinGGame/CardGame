@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -12,9 +13,11 @@ namespace CardBattle.Core
     {
         [SerializeField] private PlayerBattleUnit player;
         [SerializeField] private List<EnemyBattleUnit> enemies = new List<EnemyBattleUnit>();
+        private Coroutine runningEnemyActions;
 
         public PlayerBattleUnit Player => player;
         public IReadOnlyList<EnemyBattleUnit> Enemies => enemies;
+        public bool IsResolvingEnemyActions => runningEnemyActions != null;
 
 #if UNITY_EDITOR
         private void OnValidate()
@@ -72,9 +75,10 @@ namespace CardBattle.Core
             }
 
             ready.Sort((a, b) => b.Speed.CompareTo(a.Speed));
+            if (runningEnemyActions != null)
+                return;
 
-            foreach (var enemy in ready)
-                enemy.ExecuteCountdownAttack(player);
+            runningEnemyActions = StartCoroutine(RunCountdownAttacksSequentially(ready));
         }
 
         /// <summary>
@@ -102,9 +106,38 @@ namespace CardBattle.Core
             }
 
             actors.Sort((a, b) => b.Speed.CompareTo(a.Speed));
+            if (runningEnemyActions != null)
+                return;
 
-            foreach (var enemy in actors)
-                enemy.ExecuteEndTurnAttack(player);
+            runningEnemyActions = StartCoroutine(RunEndTurnAttacksSequentially(actors));
+        }
+
+        private IEnumerator RunCountdownAttacksSequentially(List<EnemyBattleUnit> ready)
+        {
+            for (int i = 0; i < ready.Count; i++)
+            {
+                var enemy = ready[i];
+                if (enemy == null)
+                    continue;
+
+                yield return enemy.ExecuteCountdownAttackRoutine(player);
+            }
+
+            runningEnemyActions = null;
+        }
+
+        private IEnumerator RunEndTurnAttacksSequentially(List<EnemyBattleUnit> actors)
+        {
+            for (int i = 0; i < actors.Count; i++)
+            {
+                var enemy = actors[i];
+                if (enemy == null)
+                    continue;
+
+                yield return enemy.ExecuteEndTurnAttackRoutine(player);
+            }
+
+            runningEnemyActions = null;
         }
     }
 }

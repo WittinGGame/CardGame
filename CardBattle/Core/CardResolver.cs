@@ -57,8 +57,6 @@ namespace CardBattle.Core
             if (target == null || !target.IsAlive)
                 return;
 
-            context.Player.View?.PlayAttack();
-
             var bonus = context.Player.ConsumeDamageBonus();
             var total = data.AttackDamage + bonus;
             bool wasAliveBeforeHit = target.IsAlive;
