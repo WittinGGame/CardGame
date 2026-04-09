@@ -16,6 +16,8 @@ namespace CardBattle.Core
         [SerializeField] private DeckController deckController;
         [SerializeField] private CardResolver cardResolver;
         [SerializeField] private EnemyActionSystem enemyActionSystem;
+        [SerializeField] private BattleUnitView battleUnitView;
+        public BattleUnitView View => battleUnitView;
 
         private int _pendingAttackBonus;
         private bool _turnCommitted;

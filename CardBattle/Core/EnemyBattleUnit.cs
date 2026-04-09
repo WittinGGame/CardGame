@@ -8,6 +8,8 @@ namespace CardBattle.Core
     public class EnemyBattleUnit : BattleUnit
     {
         [SerializeField] private EnemyData enemyData;
+        [SerializeField] private BattleUnitView battleUnitView;
+        public BattleUnitView View => battleUnitView;
 
         private int _countdown;
         private bool _hasAttackedThisPlayerRound;
@@ -94,8 +96,21 @@ namespace CardBattle.Core
             if (player == null || !player.IsAlive)
                 return;
 
+            View?.PlayAttack();
+
             var damage = enemyData != null ? enemyData.AttackDamage : 0;
+            bool wasAliveBeforeHit = player.IsAlive;
+
             player.TakeDamage(damage);
+
+            if (wasAliveBeforeHit)
+            {
+                if (player.IsAlive)
+                    player.View?.PlayHurt();
+                else
+                    player.View?.PlayDead();
+            }
+
             _hasAttackedThisPlayerRound = true;
         }
     }

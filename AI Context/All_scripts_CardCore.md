@@ -1,0 +1,1595 @@
+========================================
+FILE: BattleTestBootstrap.cs
+PATH: Assets/Scripts/CardBattle/Core/BattleTestBootstrap.cs
+========================================
+using System.Text;
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    /// <summary>
+    /// Minimal bootstrap for testing the core battle loop without UI.
+    ///
+    /// Controls:
+    /// 1 = Play hand card at index 0
+    /// 2 = Play hand card at index 1
+    /// 3 = Play hand card at index 2
+    /// 4 = Play hand card at index 3
+    /// 5 = Play hand card at index 4
+    /// E = End turn
+    /// R = Restart battle setup
+    /// T = Print battle state to console
+    /// </summary>
+    public class BattleTestBootstrap : MonoBehaviour
+    {
+        [Header("Core References")]
+        [SerializeField] private PlayerBattleUnit player;
+        [SerializeField] private DeckController deckController;
+        [SerializeField] private EnemyActionSystem enemyActionSystem;
+
+        [Header("Optional")]
+        [SerializeField] private bool autoStartOnPlay = true;
+        [SerializeField] private bool verboseLogs = true;
+        [SerializeField] private int defaultTargetEnemyIndex = 0;
+
+        private bool _initialized;
+
+        private void Start()
+        {
+            if (autoStartOnPlay)
+                StartTestBattle();
+        }
+
+        private void Update()
+        {
+            if (!_initialized)
+                return;
+
+            if (Input.GetKeyDown(KeyCode.Alpha1)) TryPlayCardAtHandIndex(0);
+            if (Input.GetKeyDown(KeyCode.Alpha2)) TryPlayCardAtHandIndex(1);
+            if (Input.GetKeyDown(KeyCode.Alpha3)) TryPlayCardAtHandIndex(2);
+            if (Input.GetKeyDown(KeyCode.Alpha4)) TryPlayCardAtHandIndex(3);
+            if (Input.GetKeyDown(KeyCode.Alpha5)) TryPlayCardAtHandIndex(4);
+
+            if (Input.GetKeyDown(KeyCode.E)) EndTurn();
+            if (Input.GetKeyDown(KeyCode.R)) StartTestBattle();
+            if (Input.GetKeyDown(KeyCode.T)) PrintBattleState();
+        }
+
+        [ContextMenu("Start Test Battle")]
+        public void StartTestBattle()
+        {
+            if (!ValidateReferences())
+                return;
+
+            deckController.BuildFromInspectorBlueprint();
+            enemyActionSystem.StartPlayerRound();
+            _initialized = true;
+
+            if (verboseLogs)
+            {
+                Debug.Log("=== Test Battle Started ===");
+                PrintBattleState();
+            }
+        }
+
+        public void TryPlayCardAtHandIndex(int handIndex)
+        {
+            if (!ValidateReferences())
+                return;
+
+            var hand = deckController.Hand;
+            if (handIndex < 0 || handIndex >= hand.Count)
+            {
+                if (verboseLogs)
+                    Debug.LogWarning($"No card in hand slot {handIndex}.");
+                return;
+            }
+
+            var card = hand[handIndex];
+            var target = GetDefaultAliveEnemy();
+
+            if (card == null)
+            {
+                if (verboseLogs)
+                    Debug.LogWarning($"Hand slot {handIndex} is null.");
+                return;
+            }
+
+            var success = player.TryPlayCard(card, target);
+
+            if (verboseLogs)
+            {
+                var targetName = target != null ? target.name : "None";
+                Debug.Log($"Play Card [{handIndex}] => {card.Data.DisplayName} | Target: {targetName} | Success: {success}");
+                PrintBattleState();
+            }
+
+            CheckSimpleBattleEnd();
+        }
+
+        public void EndTurn()
+        {
+            if (!ValidateReferences())
+                return;
+
+            player.RequestEndTurn();
+
+            if (verboseLogs)
+            {
+                Debug.Log("=== End Turn ===");
+                PrintBattleState();
+            }
+
+            CheckSimpleBattleEnd();
+
+            if (player != null && player.IsAlive && HasAliveEnemy())
+            {
+                enemyActionSystem.StartPlayerRound();
+
+                if (verboseLogs)
+                {
+                    Debug.Log("=== New Player Round Started ===");
+                    PrintBattleState();
+                }
+            }
+        }
+
+        [ContextMenu("Print Battle State")]
+        public void PrintBattleState()
+        {
+            if (!ValidateReferences())
+                return;
+
+            var sb = new StringBuilder();
+
+            sb.AppendLine("----- Battle State -----");
+
+            if (player != null)
+            {
+                sb.AppendLine($"Player HP: {player.CurrentHp}/{player.MaxHp}");
+                sb.AppendLine($"Player AP: {player.CurrentAp}/{player.ApPerRound}");
+                sb.AppendLine($"Player CanAct: {player.CanAct}");
+            }
+
+            sb.AppendLine($"Deck: {deckController.Deck.Count}");
+            sb.AppendLine($"Hand: {deckController.Hand.Count}");
+            sb.AppendLine($"Graveyard: {deckController.Graveyard.Count}");
+
+            for (int i = 0; i < deckController.Hand.Count; i++)
+            {
+                var card = deckController.Hand[i];
+                if (card?.Data == null) continue;
+
+                sb.AppendLine($"Hand[{i}] = {card.Data.DisplayName} | Cost: {card.Data.ApCost} | Type: {card.Data.CardType}");
+            }
+
+            var enemies = enemyActionSystem.Enemies;
+            for (int i = 0; i < enemies.Count; i++)
+            {
+                var enemy = enemies[i];
+                if (enemy == null) continue;
+
+                sb.AppendLine(
+                    $"Enemy[{i}] {enemy.name} | HP: {enemy.CurrentHp}/{enemy.MaxHp} | Alive: {enemy.IsAlive} | Behavior: {enemy.Behavior} | Countdown: {enemy.CurrentCountdown} | Speed: {enemy.Speed} | ActedThisRound: {enemy.HasAttackedThisPlayerRound}"
+                );
+            }
+
+            Debug.Log(sb.ToString());
+        }
+
+        private EnemyBattleUnit GetDefaultAliveEnemy()
+        {
+            var enemies = enemyActionSystem.Enemies;
+            if (enemies == null || enemies.Count == 0)
+                return null;
+
+            if (defaultTargetEnemyIndex >= 0 &&
+                defaultTargetEnemyIndex < enemies.Count &&
+                enemies[defaultTargetEnemyIndex] != null &&
+                enemies[defaultTargetEnemyIndex].IsAlive)
+            {
+                return enemies[defaultTargetEnemyIndex];
+            }
+
+            for (int i = 0; i < enemies.Count; i++)
+            {
+                if (enemies[i] != null && enemies[i].IsAlive)
+                    return enemies[i];
+            }
+
+            return null;
+        }
+
+        private bool HasAliveEnemy()
+        {
+            var enemies = enemyActionSystem.Enemies;
+            for (int i = 0; i < enemies.Count; i++)
+            {
+                if (enemies[i] != null && enemies[i].IsAlive)
+                    return true;
+            }
+
+            return false;
+        }
+
+        private void CheckSimpleBattleEnd()
+        {
+            if (player == null)
+                return;
+
+            if (!player.IsAlive)
+            {
+                Debug.Log("=== Defeat: Player HP reached 0 ===");
+                return;
+            }
+
+            if (!HasAliveEnemy())
+            {
+                Debug.Log("=== Victory: All enemies defeated ===");
+            }
+        }
+
+        private bool ValidateReferences()
+        {
+            bool valid = true;
+
+            if (player == null)
+            {
+                Debug.LogError("BattleTestBootstrap: PlayerBattleUnit reference is missing.");
+                valid = false;
+            }
+
+            if (deckController == null)
+            {
+                Debug.LogError("BattleTestBootstrap: DeckController reference is missing.");
+                valid = false;
+            }
+
+            if (enemyActionSystem == null)
+            {
+                Debug.LogError("BattleTestBootstrap: EnemyActionSystem reference is missing.");
+                valid = false;
+            }
+
+            return valid;
+        }
+    }
+}
+
+========================================
+FILE: BattleUnit.cs
+PATH: Assets/Scripts/CardBattle/Core/BattleUnit.cs
+========================================
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    /// <summary>
+    /// Shared combat stats for any unit on the battlefield (player or enemy).
+    /// Extend this type for role-specific logic; keep HP and damage hooks centralized.
+    /// </summary>
+    public abstract class BattleUnit : MonoBehaviour
+    {
+        [SerializeField] protected int maxHp = 10;
+        [SerializeField] protected int currentHp;
+
+        public int MaxHp => maxHp;
+        public int CurrentHp => currentHp;
+        public bool IsAlive => currentHp > 0;
+
+        protected virtual void Awake()
+        {
+            if (currentHp <= 0)
+                currentHp = maxHp;
+        }
+
+        /// <summary>Apply damage after any future mitigation hooks (armor, shields, etc.).</summary>
+        public virtual void TakeDamage(int amount)
+        {
+            if (amount <= 0 || !IsAlive)
+                return;
+
+            currentHp = Mathf.Max(0, currentHp - amount);
+            OnHpChanged();
+            if (currentHp == 0)
+                OnDefeated();
+        }
+
+        public virtual void Heal(int amount)
+        {
+            if (amount <= 0 || !IsAlive)
+                return;
+
+            currentHp = Mathf.Min(maxHp, currentHp + amount);
+            OnHpChanged();
+        }
+
+        public virtual void SetMaxHp(int value, bool refillToMax = false)
+        {
+            maxHp = Mathf.Max(1, value);
+            if (refillToMax)
+                currentHp = maxHp;
+            else
+                currentHp = Mathf.Min(currentHp, maxHp);
+            OnHpChanged();
+        }
+
+        protected virtual void OnHpChanged() { }
+        protected virtual void OnDefeated() { }
+    }
+}
+
+========================================
+FILE: CardData.cs
+PATH: Assets/Scripts/CardBattle/Core/CardData.cs
+========================================
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    /// <summary>
+    /// Designer-facing definition of a card. Runtime copies are <see cref="CardInstance"/>.
+    /// Keep numeric hooks here; layer modifiers via <see cref="ICardModifier"/> on instances later.
+    /// </summary>
+    [CreateAssetMenu(fileName = "NewCard", menuName = "Card Battle/Card Data", order = 0)]
+    public class CardData : ScriptableObject
+    {
+        [SerializeField] private string cardId;
+        [SerializeField] private string displayName;
+        [SerializeField] private CardType cardType = CardType.Attack;
+        [Tooltip("AP spent when the card is played successfully.")]
+        [SerializeField] private int apCost = 1;
+
+        [Header("Attack")]
+        [SerializeField] private int attackDamage = 3;
+
+        [Header("Heal")]
+        [SerializeField] private int healAmount = 2;
+
+        [Header("Buff")]
+        [Tooltip("Generic potency for buffs (e.g. extra damage on next attack, block, etc.). Wired in CardResolver / player hooks.")]
+        [SerializeField] private int buffPotency = 1;
+
+        public string CardId => string.IsNullOrEmpty(cardId) ? name : cardId;
+        public string DisplayName => string.IsNullOrEmpty(displayName) ? name : displayName;
+        public CardType CardType => cardType;
+        public int ApCost => Mathf.Max(0, apCost);
+        public int AttackDamage => Mathf.Max(0, attackDamage);
+        public int HealAmount => Mathf.Max(0, healAmount);
+        public int BuffPotency => buffPotency;
+    }
+}
+
+========================================
+FILE: CardInstance.cs
+PATH: Assets/Scripts/CardBattle/Core/CardInstance.cs
+========================================
+using System;
+using System.Collections.Generic;
+
+namespace CardBattle.Core
+{
+    /// <summary>
+    /// Runtime card in a pile (deck / hand / graveyard). Holds a reference to static <see cref="CardData"/>
+    /// plus optional modifiers for upgrades and temporary effects.
+    /// </summary>
+    public class CardInstance
+    {
+        public CardData Data { get; }
+        public Guid InstanceId { get; }
+
+        private readonly List<ICardModifier> _modifiers = new List<ICardModifier>();
+
+        public IReadOnlyList<ICardModifier> Modifiers => _modifiers;
+
+        public CardInstance(CardData data, Guid? instanceId = null)
+        {
+            Data = data ?? throw new ArgumentNullException(nameof(data));
+            InstanceId = instanceId ?? Guid.NewGuid();
+        }
+
+        public void AddModifier(ICardModifier modifier)
+        {
+            if (modifier != null)
+                _modifiers.Add(modifier);
+        }
+
+        public void ClearModifiers() => _modifiers.Clear();
+    }
+}
+
+========================================
+FILE: CardPlayContext.cs
+PATH: Assets/Scripts/CardBattle/Core/CardPlayContext.cs
+========================================
+using System.Collections.Generic;
+
+namespace CardBattle.Core
+{
+    /// <summary>Mutable snapshot passed through resolution so modifiers can read/write shared battle state.</summary>
+    public class CardPlayContext
+    {
+        public PlayerBattleUnit Player { get; }
+        public CardInstance Card { get; }
+        public IReadOnlyList<EnemyBattleUnit> Enemies { get; }
+        public EnemyBattleUnit PrimaryTarget { get; set; }
+
+        /// <summary>Set to false by modifiers to skip default type handling (e.g. replaced entirely by an upgrade).</summary>
+        public bool ApplyBaseCardLogic { get; set; } = true;
+
+        public CardPlayContext(PlayerBattleUnit player, CardInstance card, IReadOnlyList<EnemyBattleUnit> enemies, EnemyBattleUnit primaryTarget = null)
+        {
+            Player = player;
+            Card = card;
+            Enemies = enemies;
+            PrimaryTarget = primaryTarget;
+        }
+    }
+}
+
+========================================
+FILE: CardResolver.cs
+PATH: Assets/Scripts/CardBattle/Core/CardResolver.cs
+========================================
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    /// <summary>
+    /// Central place for card effect execution. Add branching per <see cref="CardType"/> here,
+    /// and let <see cref="ICardModifier"/> adjust <see cref="CardPlayContext"/> before/after.
+    /// </summary>
+    public class CardResolver : MonoBehaviour
+    {
+        [SerializeField] private bool logResolution;
+
+        public void Resolve(CardPlayContext context)
+        {
+            if (context?.Card?.Data == null || context.Player == null)
+                return;
+
+            foreach (var modifier in context.Card.Modifiers)
+            {
+                if (modifier != null && !modifier.PreResolve(context))
+                    context.ApplyBaseCardLogic = false;
+            }
+
+            if (context.ApplyBaseCardLogic)
+                ApplyCoreCardLogic(context);
+
+            foreach (var modifier in context.Card.Modifiers)
+                modifier?.PostResolve(context);
+
+            if (logResolution)
+                Debug.Log($"Resolved {context.Card.Data.DisplayName} ({context.Card.Data.CardType}).");
+        }
+
+        private static void ApplyCoreCardLogic(CardPlayContext context)
+        {
+            var data = context.Card.Data;
+            switch (data.CardType)
+            {
+                case CardType.Attack:
+                    ResolveAttack(context, data);
+                    break;
+                case CardType.Heal:
+                    context.Player.Heal(data.HealAmount);
+                    break;
+                case CardType.Buff:
+                    context.Player.ApplyBuffFromCard(data);
+                    break;
+                default:
+                    Debug.LogWarning($"Unhandled card type {data.CardType}.");
+                    break;
+            }
+        }
+
+        private static void ResolveAttack(CardPlayContext context, CardData data)
+        {
+            var target = ChooseAttackTarget(context);
+            if (target == null || !target.IsAlive)
+                return;
+
+            context.Player.View?.PlayAttack();
+
+            var bonus = context.Player.ConsumeDamageBonus();
+            var total = data.AttackDamage + bonus;
+            bool wasAliveBeforeHit = target.IsAlive;
+
+            target.TakeDamage(total);
+
+            if (wasAliveBeforeHit)
+            {
+                if (target.IsAlive)
+                    target.View?.PlayHurt();
+                else
+                    target.View?.PlayDead();
+            }
+        }
+
+        private static EnemyBattleUnit ChooseAttackTarget(CardPlayContext context)
+        {
+            if (context.PrimaryTarget != null && context.PrimaryTarget.IsAlive)
+                return context.PrimaryTarget;
+
+            if (context.Enemies == null)
+                return null;
+
+            foreach (var enemy in context.Enemies)
+            {
+                if (enemy != null && enemy.IsAlive)
+                    return enemy;
+            }
+
+            return null;
+        }
+    }
+}
+
+========================================
+FILE: CardType.cs
+PATH: Assets/Scripts/CardBattle/Core/CardType.cs
+========================================
+namespace CardBattle.Core
+{
+    /// <summary>Primary card families; extend with new enum values or parallel systems as content grows.</summary>
+    public enum CardType
+    {
+        Attack,
+        Buff,
+        Heal
+    }
+}
+
+========================================
+FILE: DeckController.cs
+PATH: Assets/Scripts/CardBattle/Core/DeckController.cs
+========================================
+using System;
+using System.Collections.Generic;
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    /// <summary>
+    /// Owns the three piles (deck, hand, graveyard) and draw/discard/shuffle rules.
+    /// When the deck is empty during a draw, the graveyard is shuffled back into the deck.
+    /// </summary>
+    public class DeckController : MonoBehaviour
+    {
+        [Tooltip("Optional designer list consumed by BuildFromCardDataList / BuildFromInspectorBlueprint at battle setup.")]
+        [SerializeField] private List<CardData> starterDeckBlueprint = new List<CardData>();
+
+        private readonly List<CardInstance> _deck = new List<CardInstance>();
+        private readonly List<CardInstance> _hand = new List<CardInstance>();
+        private readonly List<CardInstance> _graveyard = new List<CardInstance>();
+
+        public IReadOnlyList<CardInstance> Deck => _deck;
+        public IReadOnlyList<CardInstance> Hand => _hand;
+        public IReadOnlyList<CardInstance> Graveyard => _graveyard;
+
+        /// <summary>Fired after any pile mutation so UI or VFX can subscribe later.</summary>
+        public event Action OnPilesChanged;
+
+        /// <summary>Replace runtime piles using blueprint assets (one <see cref="CardInstance"/> per entry).</summary>
+        public void BuildFromCardDataList(IEnumerable<CardData> cards)
+        {
+            ClearAllPiles();
+            if (cards == null)
+                return;
+
+            foreach (var data in cards)
+            {
+                if (data != null)
+                    _deck.Add(new CardInstance(data));
+            }
+
+            ShuffleDeck();
+            NotifyChanged();
+        }
+
+        /// <summary>Uses the serialized starter blueprint when no explicit list is provided.</summary>
+        public void BuildFromInspectorBlueprint()
+        {
+            BuildFromCardDataList(starterDeckBlueprint);
+        }
+
+        public void ClearAllPiles()
+        {
+            _deck.Clear();
+            _hand.Clear();
+            _graveyard.Clear();
+            NotifyChanged();
+        }
+
+        public bool IsInHand(CardInstance card) => card != null && _hand.Contains(card);
+
+        /// <summary>Draw up to <paramref name="count"/> cards into the hand, reshuffling graveyard into deck as needed.</summary>
+        public void DrawCards(int count)
+        {
+            for (var i = 0; i < count; i++)
+            {
+                if (!TryDrawSingleCard())
+                    break;
+            }
+
+            NotifyChanged();
+        }
+
+        /// <summary>Move every card from hand to graveyard (end of player turn).</summary>
+        public void DiscardEntireHand()
+        {
+            for (var i = _hand.Count - 1; i >= 0; i--)
+                MoveToGraveyard(_hand[i]);
+
+            NotifyChanged();
+        }
+
+        /// <summary>Play resolution: remove from hand and send to graveyard.</summary>
+        public void PlayCardFromHand(CardInstance card)
+        {
+            if (card == null || !_hand.Remove(card))
+                return;
+
+            _graveyard.Add(card);
+            NotifyChanged();
+        }
+
+        public void ShuffleDeck()
+        {
+            ShuffleListInPlace(_deck);
+            NotifyChanged();
+        }
+
+        private bool TryDrawSingleCard()
+        {
+            if (_deck.Count == 0)
+                ReshuffleGraveyardIntoDeck();
+
+            if (_deck.Count == 0)
+                return false;
+
+            var index = _deck.Count - 1;
+            var drawn = _deck[index];
+            _deck.RemoveAt(index);
+            _hand.Add(drawn);
+            return true;
+        }
+
+        private void ReshuffleGraveyardIntoDeck()
+        {
+            if (_graveyard.Count == 0)
+                return;
+
+            _deck.AddRange(_graveyard);
+            _graveyard.Clear();
+            ShuffleListInPlace(_deck);
+        }
+
+        private static void ShuffleListInPlace(IList<CardInstance> list)
+        {
+            for (var i = list.Count - 1; i > 0; i--)
+            {
+                var j = UnityEngine.Random.Range(0, i + 1);
+                (list[i], list[j]) = (list[j], list[i]);
+            }
+        }
+
+        private void MoveToGraveyard(CardInstance card)
+        {
+            if (card == null)
+                return;
+
+            _hand.Remove(card);
+            _deck.Remove(card);
+            if (!_graveyard.Contains(card))
+                _graveyard.Add(card);
+        }
+
+        private void NotifyChanged() => OnPilesChanged?.Invoke();
+    }
+}
+
+========================================
+FILE: EnemyActionSystem.cs
+PATH: Assets/Scripts/CardBattle/Core/EnemyActionSystem.cs
+========================================
+using System.Collections.Generic;
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    /// <summary>
+    /// Coordinates enemy reactions to the player's cards and turn boundaries.
+    /// Handles countdown interrupts (sorted by <see cref="EnemyBattleUnit.Speed"/> descending)
+    /// and end-of-turn attackers while respecting the "one attack per enemy per player round" rule.
+    /// </summary>
+    public class EnemyActionSystem : MonoBehaviour
+    {
+        [SerializeField] private PlayerBattleUnit player;
+        [SerializeField] private List<EnemyBattleUnit> enemies = new List<EnemyBattleUnit>();
+
+        public PlayerBattleUnit Player => player;
+        public IReadOnlyList<EnemyBattleUnit> Enemies => enemies;
+
+#if UNITY_EDITOR
+        private void OnValidate()
+        {
+            enemies.RemoveAll(e => e == null);
+        }
+#endif
+
+        /// <summary>Designer helper to register enemies without code.</summary>
+        public void RegisterEnemy(EnemyBattleUnit enemy)
+        {
+            if (enemy != null && !enemies.Contains(enemy))
+                enemies.Add(enemy);
+        }
+
+        /// <summary>
+        /// Begins the player's round: clears enemy attack flags, refreshes AP, and draws cards.
+        /// Call this from your battle director after enemy phases (if any) complete.
+        /// </summary>
+        public void StartPlayerRound()
+        {
+            if (player == null)
+            {
+                Debug.LogError("EnemyActionSystem requires a PlayerBattleUnit reference.");
+                return;
+            }
+
+            foreach (var enemy in enemies)
+                enemy?.ResetRoundCombatFlags();
+
+            player.BeginRoundState();
+
+            if (player.DeckController != null)
+                player.DeckController.DrawCards(player.DrawPerRound);
+            else
+                Debug.LogError("Player is missing a DeckController.");
+        }
+
+        /// <summary>
+        /// Invoked after a card fully resolves. Steps countdowns, then processes simultaneous interrupts.
+        /// </summary>
+        public void HandlePlayerSuccessfullyPlayedCard()
+        {
+            if (player == null)
+                return;
+
+            foreach (var enemy in enemies)
+                enemy?.StepCountdownAfterPlayerCard();
+
+            var ready = new List<EnemyBattleUnit>();
+            foreach (var enemy in enemies)
+            {
+                if (enemy != null && enemy.IsCountdownReady)
+                    ready.Add(enemy);
+            }
+
+            ready.Sort((a, b) => b.Speed.CompareTo(a.Speed));
+
+            foreach (var enemy in ready)
+                enemy.ExecuteCountdownAttack(player);
+        }
+
+        /// <summary>
+        /// Runs after the player discards their hand for ending the turn.
+        /// Only <see cref="EnemyBehaviorType.EndTurnAttacker"/> enemies participate, and only if they have not attacked yet.
+        /// </summary>
+        public void ResolveEndTurnAttacks()
+        {
+            if (player == null)
+                return;
+
+            var actors = new List<EnemyBattleUnit>();
+            foreach (var enemy in enemies)
+            {
+                if (enemy == null || !enemy.IsAlive)
+                    continue;
+
+                if (enemy.Behavior != EnemyBehaviorType.EndTurnAttacker)
+                    continue;
+
+                if (enemy.HasAttackedThisPlayerRound)
+                    continue;
+
+                actors.Add(enemy);
+            }
+
+            actors.Sort((a, b) => b.Speed.CompareTo(a.Speed));
+
+            foreach (var enemy in actors)
+                enemy.ExecuteEndTurnAttack(player);
+        }
+    }
+}
+
+========================================
+FILE: EnemyBattleUnit.cs
+PATH: Assets/Scripts/CardBattle/Core/EnemyBattleUnit.cs
+========================================
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    /// <summary>
+    /// Enemy-specific state: behavior pattern, countdown, and per-player-round attack tracking.
+    /// </summary>
+    public class EnemyBattleUnit : BattleUnit
+    {
+        [SerializeField] private EnemyData enemyData;
+        [SerializeField] private BattleUnitView battleUnitView;
+        public BattleUnitView View => battleUnitView;
+
+        private int _countdown;
+        private bool _hasAttackedThisPlayerRound;
+
+        public EnemyData Data => enemyData;
+        public EnemyBehaviorType Behavior => enemyData != null ? enemyData.Behavior : EnemyBehaviorType.EndTurnAttacker;
+        public int Speed => enemyData != null ? enemyData.Speed : 0;
+        public int CurrentCountdown => _countdown;
+        public bool HasAttackedThisPlayerRound => _hasAttackedThisPlayerRound;
+
+        protected override void Awake()
+        {
+            base.Awake();
+            ApplyEnemyData();
+        }
+
+#if UNITY_EDITOR
+        private void OnValidate()
+        {
+            if (enemyData != null)
+                ApplyEnemyData();
+        }
+#endif
+
+        /// <summary>Swap template at runtime (e.g. encounter scripting).</summary>
+        public void BindEnemyData(EnemyData data)
+        {
+            enemyData = data;
+            ApplyEnemyData();
+        }
+
+        private void ApplyEnemyData()
+        {
+            if (enemyData == null)
+                return;
+
+            SetMaxHp(enemyData.MaxHp, true);
+            _countdown = enemyData.BaseCountdown;
+        }
+
+        /// <summary>Reset flags when a new player round begins.</summary>
+        public void ResetRoundCombatFlags()
+        {
+            _hasAttackedThisPlayerRound = false;
+        }
+
+        /// <summary>Countdown attackers lose one tick after each successful player card.</summary>
+        public void StepCountdownAfterPlayerCard()
+        {
+            if (!IsAlive || Behavior != EnemyBehaviorType.CountdownAttacker)
+                return;
+
+            if (_countdown > 0)
+                _countdown--;
+        }
+
+        /// <summary>True immediately after stepping when this unit should interrupt the player.</summary>
+        public bool IsCountdownReady => Behavior == EnemyBehaviorType.CountdownAttacker && IsAlive && _countdown <= 0;
+
+        /// <summary>Perform the interrupt attack, mark round flag, and reload countdown.</summary>
+        public void ExecuteCountdownAttack(PlayerBattleUnit player)
+        {
+            if (!IsCountdownReady)
+                return;
+
+            PerformStrike(player);
+            _countdown = enemyData != null ? enemyData.BaseCountdown : 0;
+        }
+
+        /// <summary>End-of-turn attack for <see cref="EnemyBehaviorType.EndTurnAttacker"/>.</summary>
+        public void ExecuteEndTurnAttack(PlayerBattleUnit player)
+        {
+            if (!IsAlive || Behavior != EnemyBehaviorType.EndTurnAttacker)
+                return;
+
+            if (_hasAttackedThisPlayerRound)
+                return;
+
+            PerformStrike(player);
+        }
+
+        private void PerformStrike(PlayerBattleUnit player)
+        {
+            if (player == null || !player.IsAlive)
+                return;
+
+            View?.PlayAttack();
+
+            var damage = enemyData != null ? enemyData.AttackDamage : 0;
+            bool wasAliveBeforeHit = player.IsAlive;
+
+            player.TakeDamage(damage);
+
+            if (wasAliveBeforeHit)
+            {
+                if (player.IsAlive)
+                    player.View?.PlayHurt();
+                else
+                    player.View?.PlayDead();
+            }
+
+            _hasAttackedThisPlayerRound = true;
+        }
+    }
+}
+
+
+========================================
+FILE: EnemyBehaviorType.cs
+PATH: Assets/Scripts/CardBattle/Core/EnemyBehaviorType.cs
+========================================
+namespace CardBattle.Core
+{
+    public enum EnemyBehaviorType
+    {
+        /// <summary>Strikes the player once when the player ends their turn (if it has not attacked this round).</summary>
+        EndTurnAttacker,
+
+        /// <summary>Countdown drops by 1 each time the player successfully plays a card. At 0, attacks during the player's turn.</summary>
+        CountdownAttacker
+    }
+}
+
+========================================
+FILE: EnemyData.cs
+PATH: Assets/Scripts/CardBattle/Core/EnemyData.cs
+========================================
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    /// <summary>
+    /// Static template for an enemy. <see cref="EnemyBattleUnit"/> copies values at runtime.
+    /// </summary>
+    [CreateAssetMenu(fileName = "NewEnemy", menuName = "Card Battle/Enemy Data", order = 1)]
+    public class EnemyData : ScriptableObject
+    {
+        [SerializeField] private string enemyId;
+        [SerializeField] private string displayName;
+        [SerializeField] private EnemyBehaviorType behavior = EnemyBehaviorType.EndTurnAttacker;
+        [SerializeField] private int maxHp = 12;
+        [SerializeField] private int attackDamage = 2;
+        [Tooltip("Used when multiple enemies act on the same beat; higher acts first.")]
+        [SerializeField] private int speed = 5;
+        [Tooltip("Starting countdown for CountdownAttacker; reapplied after each countdown attack.")]
+        [SerializeField] private int baseCountdown = 3;
+
+        public string EnemyId => string.IsNullOrEmpty(enemyId) ? name : enemyId;
+        public string DisplayName => string.IsNullOrEmpty(displayName) ? name : displayName;
+        public EnemyBehaviorType Behavior => behavior;
+        public int MaxHp => Mathf.Max(1, maxHp);
+        public int AttackDamage => Mathf.Max(0, attackDamage);
+        public int Speed => speed;
+        public int BaseCountdown => Mathf.Max(0, baseCountdown);
+    }
+}
+
+========================================
+FILE: ICardModifier.cs
+PATH: Assets/Scripts/CardBattle/Core/ICardModifier.cs
+========================================
+namespace CardBattle.Core
+{
+    /// <summary>
+    /// Hook for future upgrades, relics, or temporary effects that alter how a card resolves.
+    /// CardResolver can iterate modifiers before/after base resolution.
+    /// </summary>
+    public interface ICardModifier
+    {
+        /// <summary>Called before base card logic; return false to cancel further resolution for this play.</summary>
+        bool PreResolve(CardPlayContext context);
+
+        /// <summary>Called after base card logic.</summary>
+        void PostResolve(CardPlayContext context);
+    }
+}
+
+========================================
+FILE: PlayerBattleUnit.cs
+PATH: Assets/Scripts/CardBattle/Core/PlayerBattleUnit.cs
+========================================
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    /// <summary>
+    /// Player-facing state: AP pool, deck access, and hooks buff cards can influence.
+    /// Turn flow: <see cref="BeginRoundState"/> → play cards until out of AP or <see cref="RequestEndTurn"/> → enemies react.
+    /// </summary>
+    public class PlayerBattleUnit : BattleUnit
+    {
+        [Header("Turn Rules")]
+        [SerializeField] private int apPerRound = 3;
+        [SerializeField] private int drawPerRound = 5;
+
+        [Header("Systems")]
+        [SerializeField] private DeckController deckController;
+        [SerializeField] private CardResolver cardResolver;
+        [SerializeField] private EnemyActionSystem enemyActionSystem;
+        [SerializeField] private BattleUnitView battleUnitView;
+        public BattleUnitView View => battleUnitView;
+
+        private int _pendingAttackBonus;
+        private bool _turnCommitted;
+
+        public int CurrentAp { get; private set; }
+        public int ApPerRound => apPerRound;
+        public int DrawPerRound => drawPerRound;
+        public bool HasCommittedTurn => _turnCommitted;
+        public bool CanAct => !_turnCommitted && IsAlive;
+
+        public DeckController DeckController => deckController;
+
+        /// <summary>True when the player may attempt to spend AP on a card.</summary>
+        public bool CanSpendAp(int amount) => CanAct && CurrentAp >= amount;
+
+        /// <summary>Reset AP, unlock input, and clear transient modifiers at the start of the player's round.</summary>
+        public void BeginRoundState()
+        {
+            _turnCommitted = false;
+            CurrentAp = Mathf.Max(0, apPerRound);
+            _pendingAttackBonus = 0;
+        }
+
+        /// <summary>
+        /// Attempts to play a card: spends AP, moves it to the graveyard, resolves effects, then notifies enemies.
+        /// Returns false if the turn is locked, the card is not in hand, or AP is insufficient.
+        /// </summary>
+        public bool TryPlayCard(CardInstance card, EnemyBattleUnit primaryTarget = null)
+        {
+            if (!CanAct || card?.Data == null)
+                return false;
+
+            if (deckController == null || cardResolver == null || enemyActionSystem == null)
+            {
+                Debug.LogError("PlayerBattleUnit missing one of its serialized systems.");
+                return false;
+            }
+
+            if (!deckController.IsInHand(card))
+                return false;
+
+            var cost = card.Data.ApCost;
+            if (!CanSpendAp(cost))
+                return false;
+
+            CurrentAp -= cost;
+            deckController.PlayCardFromHand(card);
+
+            var context = new CardPlayContext(this, card, enemyActionSystem.Enemies, primaryTarget);
+            cardResolver.Resolve(context);
+
+            enemyActionSystem.HandlePlayerSuccessfullyPlayedCard();
+            return true;
+        }
+
+        /// <summary>
+        /// Locks further plays, discards the hand, then lets end-of-turn enemies strike.
+        /// Countdown enemies that already attacked this round are skipped automatically.
+        /// </summary>
+        public void RequestEndTurn()
+        {
+            if (!IsAlive || _turnCommitted)
+                return;
+
+            if (deckController == null || enemyActionSystem == null)
+            {
+                Debug.LogError("PlayerBattleUnit missing deck or enemy system references.");
+                return;
+            }
+
+            _turnCommitted = true;
+            deckController.DiscardEntireHand();
+            enemyActionSystem.ResolveEndTurnAttacks();
+        }
+
+        /// <summary>Buff cards add to the next attack's damage; consumed when an attack card resolves.</summary>
+        public void ApplyBuffFromCard(CardData data)
+        {
+            if (data == null)
+                return;
+
+            _pendingAttackBonus += Mathf.Max(0, data.BuffPotency);
+        }
+
+        /// <summary>Called by <see cref="CardResolver"/> when applying attack damage.</summary>
+        public int ConsumeDamageBonus()
+        {
+            var bonus = _pendingAttackBonus;
+            _pendingAttackBonus = 0;
+            return bonus;
+        }
+    }
+}
+
+========================================
+FILE: BattleHUDController.cs
+PATH: Assets/Scripts/CardBattle/BattleHUDController.cs
+========================================
+using TMPro;
+using UnityEngine;
+using UnityEngine.UI;
+
+namespace CardBattle.Core
+{
+    public class BattleHUDController : MonoBehaviour
+    {
+        [Header("Core References")]
+        [SerializeField] private PlayerBattleUnit player;
+        [SerializeField] private EnemyActionSystem enemyActionSystem;
+
+        [Header("UI References")]
+        [SerializeField] private TextMeshProUGUI playerApText;
+        [SerializeField] private TextMeshProUGUI playerHpText;
+        [SerializeField] private TextMeshProUGUI enemy1Text;
+        [SerializeField] private TextMeshProUGUI enemy2Text;
+        [SerializeField] private Button endTurnButton;
+
+        private void Start()
+        {
+            if (endTurnButton != null)
+            {
+                endTurnButton.onClick.RemoveAllListeners();
+                endTurnButton.onClick.AddListener(OnClickEndTurn);
+            }
+
+            RefreshUI();
+        }
+
+        private void Update()
+        {
+            RefreshUI();
+        }
+
+        private void OnClickEndTurn()
+        {
+            if (player == null || !player.IsAlive)
+                return;
+
+            player.RequestEndTurn();
+
+            if (enemyActionSystem != null && player.IsAlive && HasAliveEnemy())
+            {
+                enemyActionSystem.StartPlayerRound();
+            }
+
+            RefreshUI();
+        }
+
+        private void RefreshUI()
+        {
+            if (playerApText != null && player != null)
+            {
+                playerApText.text = $"AP: {player.CurrentAp}/{player.ApPerRound}";
+            }
+
+            if (playerHpText != null && player != null)
+            {
+                playerHpText.text = $"Player HP: {player.CurrentHp}/{player.MaxHp}";
+            }
+
+            var enemies = enemyActionSystem != null ? enemyActionSystem.Enemies : null;
+
+            if (enemy1Text != null)
+            {
+                enemy1Text.text = BuildEnemyText(enemies, 0);
+            }
+
+            if (enemy2Text != null)
+            {
+                enemy2Text.text = BuildEnemyText(enemies, 1);
+            }
+
+            if (endTurnButton != null && player != null)
+            {
+                endTurnButton.interactable = player.CanAct;
+            }
+        }
+
+        private string BuildEnemyText(System.Collections.Generic.IReadOnlyList<EnemyBattleUnit> enemies, int index)
+        {
+            if (enemies == null || index < 0 || index >= enemies.Count || enemies[index] == null)
+                return $"Enemy {index + 1}: None";
+
+            var enemy = enemies[index];
+            return
+                $"{enemy.name}\n" +
+                $"HP: {enemy.CurrentHp}/{enemy.MaxHp}\n" +
+                $"Type: {enemy.Behavior}\n" +
+                $"CD: {enemy.CurrentCountdown}\n" +
+                $"SPD: {enemy.Speed}";
+        }
+
+        private bool HasAliveEnemy()
+        {
+            if (enemyActionSystem == null)
+                return false;
+
+            var enemies = enemyActionSystem.Enemies;
+            for (int i = 0; i < enemies.Count; i++)
+            {
+                if (enemies[i] != null && enemies[i].IsAlive)
+                    return true;
+            }
+
+            return false;
+        }
+    }
+}
+
+========================================
+FILE: BattleUnitView.cs
+PATH: Assets/Scripts/CardBattle/BattleUnitView.cs
+========================================
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    public class BattleUnitView : MonoBehaviour
+    {
+        [SerializeField] private Animator animator;
+
+        private static readonly int AttackHash = Animator.StringToHash("Attack");
+        private static readonly int HurtHash = Animator.StringToHash("Hurt");
+        private static readonly int DeadHash = Animator.StringToHash("Dead");
+
+        public void PlayAttack()
+        {
+            if (animator == null) return;
+            animator.SetTrigger(AttackHash);
+        }
+
+        public void PlayHurt()
+        {
+            if (animator == null) return;
+            animator.SetTrigger(HurtHash);
+        }
+
+        public void PlayDead()
+        {
+            if (animator == null) return;
+            animator.SetTrigger(DeadHash);
+        }
+    }
+}
+
+========================================
+FILE: HandUIController.cs
+PATH: Assets/Scripts/CardBattle/HandUIController.cs
+========================================
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.UI;
+using TMPro;
+
+namespace CardBattle.Core
+{
+    /// <summary>
+    /// Minimal hand UI for testing card play without fancy visuals.
+    /// - Rebuilds the hand whenever deck piles change
+    /// - Creates one button per card in hand
+    /// - Clicking a button plays that card
+    /// - Uses the first alive enemy as default target for attack cards
+    /// </summary>
+    public class HandUIController : MonoBehaviour
+    {
+        [Header("Core References")]
+        [SerializeField] private DeckController deckController;
+        [SerializeField] private PlayerBattleUnit player;
+        [SerializeField] private EnemyActionSystem enemyActionSystem;
+        [SerializeField] private TargetSelectionSystem targetSelectionSystem;
+
+        [Header("UI References")]
+        [SerializeField] private Transform handContainer;
+        [SerializeField] private Button cardButtonPrefab;
+
+        [Header("Options")]
+        [SerializeField] private bool autoRefreshOnStart = true;
+        [SerializeField] private bool showCost = true;
+        [SerializeField] private bool showType = true;
+        [SerializeField] private bool disableUnplayableCards = true;
+        [SerializeField] private bool verboseLogs = false;
+
+        private readonly List<Button> _spawnedButtons = new List<Button>();
+
+        private void OnEnable()
+        {
+            if (deckController != null)
+                deckController.OnPilesChanged += RefreshHandUI;
+        }
+
+        private void OnDisable()
+        {
+            if (deckController != null)
+                deckController.OnPilesChanged -= RefreshHandUI;
+        }
+
+        private void Start()
+        {
+            if (autoRefreshOnStart)
+                RefreshHandUI();
+        }
+
+        [ContextMenu("Refresh Hand UI")]
+        public void RefreshHandUI()
+        {
+            if (!ValidateReferences())
+                return;
+
+            ClearSpawnedButtons();
+
+            var hand = deckController.Hand;
+            for (int i = 0; i < hand.Count; i++)
+            {
+                var card = hand[i];
+                if (card?.Data == null)
+                    continue;
+
+                var button = Instantiate(cardButtonPrefab, handContainer);
+                _spawnedButtons.Add(button);
+
+                SetButtonLabel(button, BuildCardLabel(card));
+                SetupButton(button, card);
+            }
+        }
+
+        private void SetupButton(Button button, CardInstance card)
+        {
+            if (button == null || card?.Data == null)
+                return;
+
+            bool canPlay = player != null &&
+                           player.CanAct &&
+                           player.CanSpendAp(card.Data.ApCost) &&
+                           deckController != null &&
+                           deckController.IsInHand(card);
+
+            if (disableUnplayableCards)
+                button.interactable = canPlay;
+
+            button.onClick.RemoveAllListeners();
+            button.onClick.AddListener(() =>
+            {
+                TryPlayCardFromButton(card);
+            });
+        }
+
+        private void TryPlayCardFromButton(CardInstance card)
+        {
+            if (player == null || card?.Data == null)
+                return;
+
+            if (card.Data.CardType == CardType.Attack)
+            {
+                if (targetSelectionSystem != null)
+                {
+                    targetSelectionSystem.BeginTargetSelection(card);
+
+                    if (verboseLogs)
+                        Debug.Log($"[HandUI] Waiting for target selection: {card.Data.DisplayName}");
+
+                    return;
+                }
+            }
+
+            EnemyBattleUnit target = GetDefaultAliveEnemy();
+            bool success = player.TryPlayCard(card, target);
+
+            if (verboseLogs)
+            {
+                string targetName = target != null ? target.name : "None";
+                Debug.Log($"[HandUI] Clicked {card.Data.DisplayName} | Target: {targetName} | Success: {success}");
+            }
+
+            RefreshHandUI();
+        }
+
+        private EnemyBattleUnit GetDefaultAliveEnemy()
+        {
+            if (enemyActionSystem == null)
+                return null;
+
+            var enemies = enemyActionSystem.Enemies;
+            for (int i = 0; i < enemies.Count; i++)
+            {
+                if (enemies[i] != null && enemies[i].IsAlive)
+                    return enemies[i];
+            }
+
+            return null;
+        }
+
+        private string BuildCardLabel(CardInstance card)
+        {
+            var data = card.Data;
+            string label = data.DisplayName;
+
+            if (showCost)
+                label += $"\nAP: {data.ApCost}";
+
+            if (showType)
+                label += $"\n{data.CardType}";
+
+            switch (data.CardType)
+            {
+                case CardType.Attack:
+                    label += $"\nDMG: {data.AttackDamage}";
+                    break;
+
+                case CardType.Heal:
+                    label += $"\nHEAL: {data.HealAmount}";
+                    break;
+
+                case CardType.Buff:
+                    label += $"\nBUFF: {data.BuffPotency}";
+                    break;
+            }
+
+            return label;
+        }
+
+        private void SetButtonLabel(Button button, string textValue)
+        {
+            if (button == null)
+                return;
+
+            // First try TMP
+            var tmp = button.GetComponentInChildren<TextMeshProUGUI>();
+            if (tmp != null)
+            {
+                tmp.text = textValue;
+                return;
+            }
+
+            // Fallback to legacy Text
+            var legacyText = button.GetComponentInChildren<Text>();
+            if (legacyText != null)
+            {
+                legacyText.text = textValue;
+            }
+        }
+
+        private void ClearSpawnedButtons()
+        {
+            for (int i = 0; i < _spawnedButtons.Count; i++)
+            {
+                if (_spawnedButtons[i] != null)
+                    Destroy(_spawnedButtons[i].gameObject);
+            }
+
+            _spawnedButtons.Clear();
+        }
+
+        private bool ValidateReferences()
+        {
+            bool valid = true;
+
+            if (deckController == null)
+            {
+                Debug.LogError("HandUIController: DeckController reference is missing.");
+                valid = false;
+            }
+
+            if (player == null)
+            {
+                Debug.LogError("HandUIController: PlayerBattleUnit reference is missing.");
+                valid = false;
+            }
+
+            if (enemyActionSystem == null)
+            {
+                Debug.LogError("HandUIController: EnemyActionSystem reference is missing.");
+                valid = false;
+            }
+
+            if (handContainer == null)
+            {
+                Debug.LogError("HandUIController: Hand container reference is missing.");
+                valid = false;
+            }
+
+            if (cardButtonPrefab == null)
+            {
+                Debug.LogError("HandUIController: Card button prefab reference is missing.");
+                valid = false;
+            }
+
+            return valid;
+        }
+    }
+}
+
+========================================
+FILE: TargetableEnemy.cs
+PATH: Assets/Scripts/CardBattle/TargetableEnemy.cs
+========================================
+using UnityEngine;
+using UnityEngine.EventSystems;
+
+namespace CardBattle.Core
+{
+    public class TargetableEnemy : MonoBehaviour, IPointerClickHandler
+    {
+        [SerializeField] private EnemyBattleUnit enemyBattleUnit;
+        [SerializeField] private TargetSelectionSystem targetSelectionSystem;
+
+        public void OnPointerClick(PointerEventData eventData)
+        {
+            if (enemyBattleUnit == null || targetSelectionSystem == null)
+                return;
+
+            targetSelectionSystem.ConfirmTarget(enemyBattleUnit);
+        }
+    }
+}
+
+========================================
+FILE: TargetSelectionSystem.cs
+PATH: Assets/Scripts/CardBattle/TargetSelectionSystem.cs
+========================================
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    public class TargetSelectionSystem : MonoBehaviour
+    {
+        [SerializeField] private PlayerBattleUnit player;
+        [SerializeField] private HandUIController handUIController;
+
+        public bool IsSelectingTarget => _pendingCard != null;
+
+        private CardInstance _pendingCard;
+
+        public void BeginTargetSelection(CardInstance card)
+        {
+            if (card?.Data == null)
+                return;
+
+            _pendingCard = card;
+            Debug.Log($"Selecting target for card: {card.Data.DisplayName}");
+        }
+
+        public void CancelTargetSelection()
+        {
+            _pendingCard = null;
+            Debug.Log("Target selection cancelled.");
+        }
+
+        public void ConfirmTarget(EnemyBattleUnit target)
+        {
+            if (_pendingCard == null || player == null || target == null || !target.IsAlive)
+                return;
+
+            bool success = player.TryPlayCard(_pendingCard, target);
+
+            if (success)
+            {
+                Debug.Log($"Played {_pendingCard.Data.DisplayName} on {target.name}");
+            }
+            else
+            {
+                Debug.LogWarning($"Failed to play {_pendingCard.Data.DisplayName} on {target.name}");
+            }
+
+            _pendingCard = null;
+
+            if (handUIController != null)
+                handUIController.RefreshHandUI();
+        }
+    }
+}

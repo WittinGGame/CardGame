@@ -57,9 +57,21 @@ namespace CardBattle.Core
             if (target == null || !target.IsAlive)
                 return;
 
+            context.Player.View?.PlayAttack();
+
             var bonus = context.Player.ConsumeDamageBonus();
             var total = data.AttackDamage + bonus;
+            bool wasAliveBeforeHit = target.IsAlive;
+
             target.TakeDamage(total);
+
+            if (wasAliveBeforeHit)
+            {
+                if (target.IsAlive)
+                    target.View?.PlayHurt();
+                else
+                    target.View?.PlayDead();
+            }
         }
 
         private static EnemyBattleUnit ChooseAttackTarget(CardPlayContext context)

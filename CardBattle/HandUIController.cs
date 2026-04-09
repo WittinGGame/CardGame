@@ -18,6 +18,7 @@ namespace CardBattle.Core
         [SerializeField] private DeckController deckController;
         [SerializeField] private PlayerBattleUnit player;
         [SerializeField] private EnemyActionSystem enemyActionSystem;
+        [SerializeField] private TargetSelectionSystem targetSelectionSystem;
 
         [Header("UI References")]
         [SerializeField] private Transform handContainer;
@@ -99,8 +100,20 @@ namespace CardBattle.Core
             if (player == null || card?.Data == null)
                 return;
 
-            EnemyBattleUnit target = GetDefaultAliveEnemy();
+            if (card.Data.CardType == CardType.Attack)
+            {
+                if (targetSelectionSystem != null)
+                {
+                    targetSelectionSystem.BeginTargetSelection(card);
 
+                    if (verboseLogs)
+                        Debug.Log($"[HandUI] Waiting for target selection: {card.Data.DisplayName}");
+
+                    return;
+                }
+            }
+
+            EnemyBattleUnit target = GetDefaultAliveEnemy();
             bool success = player.TryPlayCard(card, target);
 
             if (verboseLogs)
@@ -109,7 +122,6 @@ namespace CardBattle.Core
                 Debug.Log($"[HandUI] Clicked {card.Data.DisplayName} | Target: {targetName} | Success: {success}");
             }
 
-            // Safety refresh in case some future flow does not trigger OnPilesChanged
             RefreshHandUI();
         }
 
