@@ -109,5 +109,24 @@ namespace CardBattle.Core
             _pendingAttackBonus = 0;
             return bonus;
         }
+
+        public void SpendApFromRunner(int amount)
+        {
+            if (amount <= 0)
+                return;
+
+            CurrentAp = Mathf.Max(0, CurrentAp - amount);
+        }
+
+        public void CommitEndTurnFromRunner()
+        {
+            if (!IsAlive || _turnCommitted)
+                return;
+
+            _turnCommitted = true;
+
+            if (deckController != null)
+                deckController.DiscardEntireHand();
+        }
     }
 }

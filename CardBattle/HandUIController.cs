@@ -19,6 +19,7 @@ namespace CardBattle.Core
         [SerializeField] private PlayerBattleUnit player;
         [SerializeField] private EnemyActionSystem enemyActionSystem;
         [SerializeField] private TargetSelectionSystem targetSelectionSystem;
+        [SerializeField] private BattleActionRunner battleActionRunner;
 
         [Header("UI References")]
         [SerializeField] private Transform handContainer;
@@ -80,13 +81,13 @@ namespace CardBattle.Core
                 return;
 
             bool canPlay = player != null &&
-                           player.CanAct &&
-                           player.CanSpendAp(card.Data.ApCost) &&
-                           deckController != null &&
-                           deckController.IsInHand(card);
+                        player.CanAct &&
+                        player.CanSpendAp(card.Data.ApCost) &&
+                        deckController != null &&
+                        deckController.IsInHand(card);
 
-            if (disableUnplayableCards)
-                button.interactable = canPlay;
+            if (battleActionRunner != null)
+                canPlay = canPlay && battleActionRunner.CanAcceptInput;
 
             button.onClick.RemoveAllListeners();
             button.onClick.AddListener(() =>
@@ -97,7 +98,7 @@ namespace CardBattle.Core
 
         private void TryPlayCardFromButton(CardInstance card)
         {
-            if (player == null || card?.Data == null)
+            if (card?.Data == null || battleActionRunner == null)
                 return;
 
             if (card.Data.CardType == CardType.Attack)
@@ -109,17 +110,18 @@ namespace CardBattle.Core
                     if (verboseLogs)
                         Debug.Log($"[HandUI] Waiting for target selection: {card.Data.DisplayName}");
 
+                    RefreshHandUI();
                     return;
                 }
             }
 
             EnemyBattleUnit target = GetDefaultAliveEnemy();
-            bool success = player.TryPlayCard(card, target);
+            battleActionRunner.TryPlayCard(card, target);
 
             if (verboseLogs)
             {
                 string targetName = target != null ? target.name : "None";
-                Debug.Log($"[HandUI] Clicked {card.Data.DisplayName} | Target: {targetName} | Success: {success}");
+                Debug.Log($"[HandUI] Clicked {card.Data.DisplayName} | Target: {targetName}");
             }
 
             RefreshHandUI();

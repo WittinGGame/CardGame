@@ -6,6 +6,7 @@ namespace CardBattle.Core
     {
         [SerializeField] private PlayerBattleUnit player;
         [SerializeField] private HandUIController handUIController;
+        [SerializeField] private BattleActionRunner battleActionRunner;
 
         public bool IsSelectingTarget => _pendingCard != null;
 
@@ -28,20 +29,10 @@ namespace CardBattle.Core
 
         public void ConfirmTarget(EnemyBattleUnit target)
         {
-            if (_pendingCard == null || player == null || target == null || !target.IsAlive)
+            if (_pendingCard == null || battleActionRunner == null || target == null || !target.IsAlive)
                 return;
 
-            bool success = player.TryPlayCard(_pendingCard, target);
-
-            if (success)
-            {
-                Debug.Log($"Played {_pendingCard.Data.DisplayName} on {target.name}");
-            }
-            else
-            {
-                Debug.LogWarning($"Failed to play {_pendingCard.Data.DisplayName} on {target.name}");
-            }
-
+            battleActionRunner.TryPlayCard(_pendingCard, target);
             _pendingCard = null;
 
             if (handUIController != null)

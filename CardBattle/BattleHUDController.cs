@@ -9,6 +9,7 @@ namespace CardBattle.Core
         [Header("Core References")]
         [SerializeField] private PlayerBattleUnit player;
         [SerializeField] private EnemyActionSystem enemyActionSystem;
+        [SerializeField] private BattleActionRunner battleActionRunner;
 
         [Header("UI References")]
         [SerializeField] private TextMeshProUGUI playerApText;
@@ -35,16 +36,14 @@ namespace CardBattle.Core
 
         private void OnClickEndTurn()
         {
-            if (player == null || !player.IsAlive)
+            if (battleActionRunner == null)
                 return;
 
-            player.RequestEndTurn();
+            battleActionRunner.TryEndTurn();
+        }
 
-            if (enemyActionSystem != null && player.IsAlive && HasAliveEnemy())
-            {
-                enemyActionSystem.StartPlayerRound();
-            }
-
+        public void RefreshUIExternal()
+        {
             RefreshUI();
         }
 
@@ -74,7 +73,12 @@ namespace CardBattle.Core
 
             if (endTurnButton != null && player != null)
             {
-                endTurnButton.interactable = player.CanAct;
+                bool canClick = player.CanAct;
+
+                if (battleActionRunner != null)
+                    canClick = canClick && battleActionRunner.CanAcceptInput;
+
+                endTurnButton.interactable = canClick;
             }
         }
 
