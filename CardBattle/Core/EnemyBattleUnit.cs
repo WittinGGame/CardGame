@@ -25,6 +25,8 @@ namespace CardBattle.Core
         public int CurrentCountdown => _countdown;
         public bool HasAttackedThisPlayerRound => _hasAttackedThisPlayerRound;
         public bool IsAttackInProgress => attackInProgress;
+        public bool AllowEndTurnAttackAfterCountdownAttackThisRound =>
+            enemyData != null && enemyData.AllowEndTurnAttackAfterCountdownAttackThisRound;
 
         protected override void Awake()
         {
@@ -91,6 +93,27 @@ namespace CardBattle.Core
 
             yield return PerformStrike(player);
             _countdown = enemyData != null ? enemyData.BaseCountdown : 0;
+        }
+
+        public bool CanExecuteCountdownAttackAtEndTurn()
+        {
+            if (!IsAlive || Behavior != EnemyBehaviorType.CountdownAttacker)
+                return false;
+
+            if (!_hasAttackedThisPlayerRound)
+                return true;
+
+            return AllowEndTurnAttackAfterCountdownAttackThisRound;
+        }
+
+        public IEnumerator ExecuteEndTurnCountdownAttackRoutine(PlayerBattleUnit player)
+        {
+            if (!CanExecuteCountdownAttackAtEndTurn())
+                yield break;
+
+            // End-turn rule: eligible countdown attackers can force-ready and strike now.
+            _countdown = 0;
+            yield return ExecuteCountdownAttackRoutine(player);
         }
 
         /// <summary>End-of-turn attack for <see cref="EnemyBehaviorType.EndTurnAttacker"/>.</summary>

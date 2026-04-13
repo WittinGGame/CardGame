@@ -83,7 +83,7 @@ namespace CardBattle.Core
 
         /// <summary>
         /// Runs after the player discards their hand for ending the turn.
-        /// Only <see cref="EnemyBehaviorType.EndTurnAttacker"/> enemies participate, and only if they have not attacked yet.
+        /// Includes end-turn attackers and eligible countdown attackers.
         /// </summary>
         public void ResolveEndTurnAttacks()
         {
@@ -96,10 +96,12 @@ namespace CardBattle.Core
                 if (enemy == null || !enemy.IsAlive)
                     continue;
 
-                if (enemy.Behavior != EnemyBehaviorType.EndTurnAttacker)
-                    continue;
+                bool isEndTurnAttacker =
+                    enemy.Behavior == EnemyBehaviorType.EndTurnAttacker && !enemy.HasAttackedThisPlayerRound;
+                bool isEligibleCountdownAttacker =
+                    enemy.Behavior == EnemyBehaviorType.CountdownAttacker && enemy.CanExecuteCountdownAttackAtEndTurn();
 
-                if (enemy.HasAttackedThisPlayerRound)
+                if (!isEndTurnAttacker && !isEligibleCountdownAttacker)
                     continue;
 
                 actors.Add(enemy);
@@ -134,7 +136,10 @@ namespace CardBattle.Core
                 if (enemy == null)
                     continue;
 
-                yield return enemy.ExecuteEndTurnAttackRoutine(player);
+                if (enemy.Behavior == EnemyBehaviorType.CountdownAttacker)
+                    yield return enemy.ExecuteEndTurnCountdownAttackRoutine(player);
+                else
+                    yield return enemy.ExecuteEndTurnAttackRoutine(player);
             }
 
             runningEnemyActions = null;

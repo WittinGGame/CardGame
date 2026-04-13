@@ -261,14 +261,11 @@ namespace CardBattle.Core
 FILE: BattleUnit.cs
 PATH: Assets/Scripts/CardBattle/Core/BattleUnit.cs
 ========================================
+using System;
 using UnityEngine;
 
 namespace CardBattle.Core
 {
-    /// <summary>
-    /// Shared combat stats for any unit on the battlefield (player or enemy).
-    /// Extend this type for role-specific logic; keep HP and damage hooks centralized.
-    /// </summary>
     public abstract class BattleUnit : MonoBehaviour
     {
         [SerializeField] protected int maxHp = 10;
@@ -278,13 +275,16 @@ namespace CardBattle.Core
         public int CurrentHp => currentHp;
         public bool IsAlive => currentHp > 0;
 
+        public event Action<int, int> OnHpChangedEvent;
+
         protected virtual void Awake()
         {
             if (currentHp <= 0)
                 currentHp = maxHp;
+
+            NotifyHpChanged();
         }
 
-        /// <summary>Apply damage after any future mitigation hooks (armor, shields, etc.).</summary>
         public virtual void TakeDamage(int amount)
         {
             if (amount <= 0 || !IsAlive)
@@ -292,6 +292,8 @@ namespace CardBattle.Core
 
             currentHp = Mathf.Max(0, currentHp - amount);
             OnHpChanged();
+            NotifyHpChanged();
+
             if (currentHp == 0)
                 OnDefeated();
         }
@@ -303,20 +305,29 @@ namespace CardBattle.Core
 
             currentHp = Mathf.Min(maxHp, currentHp + amount);
             OnHpChanged();
+            NotifyHpChanged();
         }
 
         public virtual void SetMaxHp(int value, bool refillToMax = false)
         {
             maxHp = Mathf.Max(1, value);
+
             if (refillToMax)
                 currentHp = maxHp;
             else
                 currentHp = Mathf.Min(currentHp, maxHp);
+
             OnHpChanged();
+            NotifyHpChanged();
         }
 
         protected virtual void OnHpChanged() { }
         protected virtual void OnDefeated() { }
+
+        private void NotifyHpChanged()
+        {
+            OnHpChangedEvent?.Invoke(currentHp, maxHp);
+        }
     }
 }
 
@@ -351,6 +362,9 @@ namespace CardBattle.Core
         [Tooltip("Generic potency for buffs (e.g. extra damage on next attack, block, etc.). Wired in CardResolver / player hooks.")]
         [SerializeField] private int buffPotency = 1;
 
+        [Header("Visuals")]
+        [SerializeField] private Sprite artwork;
+
         public string CardId => string.IsNullOrEmpty(cardId) ? name : cardId;
         public string DisplayName => string.IsNullOrEmpty(displayName) ? name : displayName;
         public CardType CardType => cardType;
@@ -358,8 +372,10 @@ namespace CardBattle.Core
         public int AttackDamage => Mathf.Max(0, attackDamage);
         public int HealAmount => Mathf.Max(0, healAmount);
         public int BuffPotency => buffPotency;
+        public Sprite Artwork => artwork;
     }
 }
+
 
 ========================================
 FILE: CardInstance.cs
@@ -695,6 +711,7 @@ namespace CardBattle.Core
 FILE: EnemyActionSystem.cs
 PATH: Assets/Scripts/CardBattle/Core/EnemyActionSystem.cs
 ========================================
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -709,9 +726,11 @@ namespace CardBattle.Core
     {
         [SerializeField] private PlayerBattleUnit player;
         [SerializeField] private List<EnemyBattleUnit> enemies = new List<EnemyBattleUnit>();
+        private Coroutine runningEnemyActions;
 
         public PlayerBattleUnit Player => player;
         public IReadOnlyList<EnemyBattleUnit> Enemies => enemies;
+        public bool IsResolvingEnemyActions => runningEnemyActions != null;
 
 #if UNITY_EDITOR
         private void OnValidate()
@@ -769,14 +788,15 @@ namespace CardBattle.Core
             }
 
             ready.Sort((a, b) => b.Speed.CompareTo(a.Speed));
+            if (runningEnemyActions != null)
+                return;
 
-            foreach (var enemy in ready)
-                enemy.ExecuteCountdownAttack(player);
+            runningEnemyActions = StartCoroutine(RunCountdownAttacksSequentially(ready));
         }
 
         /// <summary>
         /// Runs after the player discards their hand for ending the turn.
-        /// Only <see cref="EnemyBehaviorType.EndTurnAttacker"/> enemies participate, and only if they have not attacked yet.
+        /// Includes end-turn attackers and eligible countdown attackers.
         /// </summary>
         public void ResolveEndTurnAttacks()
         {
@@ -789,19 +809,53 @@ namespace CardBattle.Core
                 if (enemy == null || !enemy.IsAlive)
                     continue;
 
-                if (enemy.Behavior != EnemyBehaviorType.EndTurnAttacker)
-                    continue;
+                bool isEndTurnAttacker =
+                    enemy.Behavior == EnemyBehaviorType.EndTurnAttacker && !enemy.HasAttackedThisPlayerRound;
+                bool isEligibleCountdownAttacker =
+                    enemy.Behavior == EnemyBehaviorType.CountdownAttacker && enemy.CanExecuteCountdownAttackAtEndTurn();
 
-                if (enemy.HasAttackedThisPlayerRound)
+                if (!isEndTurnAttacker && !isEligibleCountdownAttacker)
                     continue;
 
                 actors.Add(enemy);
             }
 
             actors.Sort((a, b) => b.Speed.CompareTo(a.Speed));
+            if (runningEnemyActions != null)
+                return;
 
-            foreach (var enemy in actors)
-                enemy.ExecuteEndTurnAttack(player);
+            runningEnemyActions = StartCoroutine(RunEndTurnAttacksSequentially(actors));
+        }
+
+        private IEnumerator RunCountdownAttacksSequentially(List<EnemyBattleUnit> ready)
+        {
+            for (int i = 0; i < ready.Count; i++)
+            {
+                var enemy = ready[i];
+                if (enemy == null)
+                    continue;
+
+                yield return enemy.ExecuteCountdownAttackRoutine(player);
+            }
+
+            runningEnemyActions = null;
+        }
+
+        private IEnumerator RunEndTurnAttacksSequentially(List<EnemyBattleUnit> actors)
+        {
+            for (int i = 0; i < actors.Count; i++)
+            {
+                var enemy = actors[i];
+                if (enemy == null)
+                    continue;
+
+                if (enemy.Behavior == EnemyBehaviorType.CountdownAttacker)
+                    yield return enemy.ExecuteEndTurnCountdownAttackRoutine(player);
+                else
+                    yield return enemy.ExecuteEndTurnAttackRoutine(player);
+            }
+
+            runningEnemyActions = null;
         }
     }
 }
@@ -810,6 +864,7 @@ namespace CardBattle.Core
 FILE: EnemyBattleUnit.cs
 PATH: Assets/Scripts/CardBattle/Core/EnemyBattleUnit.cs
 ========================================
+using System.Collections;
 using UnityEngine;
 
 namespace CardBattle.Core
@@ -825,12 +880,19 @@ namespace CardBattle.Core
 
         private int _countdown;
         private bool _hasAttackedThisPlayerRound;
+        private bool waitingForHit;
+        private bool waitingForFinish;
+        private PlayerBattleUnit pendingTarget;
+        private bool attackInProgress;
 
         public EnemyData Data => enemyData;
         public EnemyBehaviorType Behavior => enemyData != null ? enemyData.Behavior : EnemyBehaviorType.EndTurnAttacker;
         public int Speed => enemyData != null ? enemyData.Speed : 0;
         public int CurrentCountdown => _countdown;
         public bool HasAttackedThisPlayerRound => _hasAttackedThisPlayerRound;
+        public bool IsAttackInProgress => attackInProgress;
+        public bool AllowEndTurnAttackAfterCountdownAttackThisRound =>
+            enemyData != null && enemyData.AllowEndTurnAttackAfterCountdownAttackThisRound;
 
         protected override void Awake()
         {
@@ -887,8 +949,37 @@ namespace CardBattle.Core
             if (!IsCountdownReady)
                 return;
 
-            PerformStrike(player);
+            StartCoroutine(ExecuteCountdownAttackRoutine(player));
+        }
+
+        public IEnumerator ExecuteCountdownAttackRoutine(PlayerBattleUnit player)
+        {
+            if (!IsCountdownReady)
+                yield break;
+
+            yield return PerformStrike(player);
             _countdown = enemyData != null ? enemyData.BaseCountdown : 0;
+        }
+
+        public bool CanExecuteCountdownAttackAtEndTurn()
+        {
+            if (!IsAlive || Behavior != EnemyBehaviorType.CountdownAttacker)
+                return false;
+
+            if (!_hasAttackedThisPlayerRound)
+                return true;
+
+            return AllowEndTurnAttackAfterCountdownAttackThisRound;
+        }
+
+        public IEnumerator ExecuteEndTurnCountdownAttackRoutine(PlayerBattleUnit player)
+        {
+            if (!CanExecuteCountdownAttackAtEndTurn())
+                yield break;
+
+            // End-turn rule: eligible countdown attackers can force-ready and strike now.
+            _countdown = 0;
+            yield return ExecuteCountdownAttackRoutine(player);
         }
 
         /// <summary>End-of-turn attack for <see cref="EnemyBehaviorType.EndTurnAttacker"/>.</summary>
@@ -900,34 +991,116 @@ namespace CardBattle.Core
             if (_hasAttackedThisPlayerRound)
                 return;
 
-            PerformStrike(player);
+            StartCoroutine(ExecuteEndTurnAttackRoutine(player));
         }
 
-        private void PerformStrike(PlayerBattleUnit player)
+        public IEnumerator ExecuteEndTurnAttackRoutine(PlayerBattleUnit player)
         {
-            if (player == null || !player.IsAlive)
+            if (!IsAlive || Behavior != EnemyBehaviorType.EndTurnAttacker)
+                yield break;
+
+            if (_hasAttackedThisPlayerRound)
+                yield break;
+
+            yield return PerformStrike(player);
+        }
+
+        private IEnumerator PerformStrike(PlayerBattleUnit player)
+        {
+            if (attackInProgress || player == null || !player.IsAlive)
+                yield break;
+
+            attackInProgress = true;
+            pendingTarget = player;
+            waitingForHit = true;
+            waitingForFinish = true;
+
+            if (View != null)
+            {
+                SubscribeToViewEvents();
+                View.PlayAttack();
+
+                yield return new WaitUntil(() => !waitingForFinish);
+                UnsubscribeFromViewEvents();
+            }
+            else
+            {
+                ApplyDamageOnHit();
+                waitingForFinish = false;
+            }
+
+            waitingForHit = false;
+            pendingTarget = null;
+            attackInProgress = false;
+        }
+
+        private void OnDisable()
+        {
+            UnsubscribeFromViewEvents();
+            waitingForHit = false;
+            waitingForFinish = false;
+            pendingTarget = null;
+            attackInProgress = false;
+        }
+
+        private void SubscribeToViewEvents()
+        {
+            if (View == null)
                 return;
 
-            View?.PlayAttack();
+            UnsubscribeFromViewEvents();
+            View.OnAttackHit += HandleAttackHit;
+            View.OnActionFinished += HandleActionFinished;
+        }
+
+        private void UnsubscribeFromViewEvents()
+        {
+            if (View == null)
+                return;
+
+            View.OnAttackHit -= HandleAttackHit;
+            View.OnActionFinished -= HandleActionFinished;
+        }
+
+        private void HandleAttackHit()
+        {
+            if (!waitingForHit)
+                return;
+
+            waitingForHit = false;
+            ApplyDamageOnHit();
+        }
+
+        private void HandleActionFinished()
+        {
+            if (!waitingForFinish)
+                return;
+
+            waitingForFinish = false;
+        }
+
+        private void ApplyDamageOnHit()
+        {
+            if (pendingTarget == null || !pendingTarget.IsAlive)
+                return;
 
             var damage = enemyData != null ? enemyData.AttackDamage : 0;
-            bool wasAliveBeforeHit = player.IsAlive;
+            bool wasAliveBeforeHit = pendingTarget.IsAlive;
 
-            player.TakeDamage(damage);
+            pendingTarget.TakeDamage(damage);
 
             if (wasAliveBeforeHit)
             {
-                if (player.IsAlive)
-                    player.View?.PlayHurt();
+                if (pendingTarget.IsAlive)
+                    pendingTarget.View?.PlayHurt();
                 else
-                    player.View?.PlayDead();
+                    pendingTarget.View?.PlayDead();
             }
 
             _hasAttackedThisPlayerRound = true;
         }
     }
 }
-
 
 ========================================
 FILE: EnemyBehaviorType.cs
@@ -968,6 +1141,8 @@ namespace CardBattle.Core
         [SerializeField] private int speed = 5;
         [Tooltip("Starting countdown for CountdownAttacker; reapplied after each countdown attack.")]
         [SerializeField] private int baseCountdown = 3;
+        [Tooltip("If true, a CountdownAttacker that already attacked this player round may also attack again at end turn.")]
+        [SerializeField] private bool allowEndTurnAttackAfterCountdownAttackThisRound = false;
 
         public string EnemyId => string.IsNullOrEmpty(enemyId) ? name : enemyId;
         public string DisplayName => string.IsNullOrEmpty(displayName) ? name : displayName;
@@ -976,6 +1151,7 @@ namespace CardBattle.Core
         public int AttackDamage => Mathf.Max(0, attackDamage);
         public int Speed => speed;
         public int BaseCountdown => Mathf.Max(0, baseCountdown);
+        public bool AllowEndTurnAttackAfterCountdownAttackThisRound => allowEndTurnAttackAfterCountdownAttackThisRound;
     }
 }
 
@@ -1158,7 +1334,10 @@ namespace CardBattle.Core
         [SerializeField] private TextMeshProUGUI playerHpText;
         [SerializeField] private TextMeshProUGUI enemy1Text;
         [SerializeField] private TextMeshProUGUI enemy2Text;
+        [SerializeField] private EnemyStatusUI enemyStatusUI1;
+        [SerializeField] private EnemyStatusUI enemyStatusUI2;
         [SerializeField] private Button endTurnButton;
+        [SerializeField] private HpBarUI playerHpBar;
 
         private void Start()
         {
@@ -1168,6 +1347,7 @@ namespace CardBattle.Core
                 endTurnButton.onClick.AddListener(OnClickEndTurn);
             }
 
+            BindEnemyStatusUI();
             RefreshUI();
         }
 
@@ -1189,19 +1369,51 @@ namespace CardBattle.Core
             RefreshUI();
         }
 
+        private void BindEnemyStatusUI()
+        {
+            if (enemyActionSystem == null)
+                return;
+
+            var enemies = enemyActionSystem.Enemies;
+
+            if (enemyStatusUI1 != null)
+            {
+                if (enemies.Count > 0 && enemies[0] != null)
+                    enemyStatusUI1.SetTarget(enemies[0]);
+                else
+                    enemyStatusUI1.SetTarget(null);
+            }
+
+            if (enemyStatusUI2 != null)
+            {
+                if (enemies.Count > 1 && enemies[1] != null)
+                    enemyStatusUI2.SetTarget(enemies[1]);
+                else
+                    enemyStatusUI2.SetTarget(null);
+            }
+        }
+
         private void RefreshUI()
         {
             if (playerApText != null && player != null)
             {
-                playerApText.text = $"AP: {player.CurrentAp}/{player.ApPerRound}";
+                //playerApText.text = $"AP: {player.CurrentAp}/{player.ApPerRound}";
+                playerApText.text = $"{player.CurrentAp}";
             }
 
             if (playerHpText != null && player != null)
             {
-                playerHpText.text = $"Player HP: {player.CurrentHp}/{player.MaxHp}";
+                playerHpText.text = $"{player.CurrentHp}/{player.MaxHp}";
+            }
+
+            if (playerHpBar != null && player != null)
+            {
+                playerHpBar.SetHp(player.CurrentHp, player.MaxHp);
             }
 
             var enemies = enemyActionSystem != null ? enemyActionSystem.Enemies : null;
+            enemyStatusUI1?.Refresh();
+            enemyStatusUI2?.Refresh();
 
             if (enemy1Text != null)
             {
@@ -1752,6 +1964,323 @@ namespace CardBattle.Core
         {
             handUIController?.RefreshHandUI();
             battleHUDController?.RefreshUIExternal();
+        }
+    }
+}
+
+========================================
+FILE: CardViewUI.cs
+PATH: Assets/Scripts/UI/CardViewUI.cs
+========================================
+using TMPro;
+using UnityEngine;
+using UnityEngine.UI;
+
+namespace CardBattle.Core
+{
+    public class CardViewUI : MonoBehaviour
+    {
+        [Header("UI References")]
+        [SerializeField] private Image artworkImage;
+        [SerializeField] private TextMeshProUGUI costText;
+        [SerializeField] private TextMeshProUGUI nameText;
+        [SerializeField] private TextMeshProUGUI typeText;
+        [SerializeField] private TextMeshProUGUI descriptionText;
+
+        public void Bind(CardData data)
+        {
+            if (data == null)
+                return;
+
+            // Cost
+            costText.text = data.ApCost.ToString();
+
+            // Name
+            nameText.text = data.DisplayName;
+
+            // Type
+            typeText.text = data.CardType.ToString();
+
+            // Artwork
+            artworkImage.sprite = data.Artwork;
+
+            // Description
+            descriptionText.text = GetDescription(data);
+        }
+
+        private string GetDescription(CardData data)
+        {
+            switch (data.CardType)
+            {
+                case CardType.Attack:
+                    return $"Deal {data.AttackDamage} damage";
+
+                case CardType.Heal:
+                    return $"Heal {data.HealAmount}";
+
+                case CardType.Buff:
+                    return $"Gain +{data.BuffPotency}";
+
+                default:
+                    return "";
+            }
+        }
+    }
+}
+
+========================================
+FILE: EnemyStatusUI.cs
+PATH: Assets/Scripts/UI/EnemyStatusUI.cs
+========================================
+using TMPro;
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    public class EnemyStatusUI : MonoBehaviour
+    {
+        [Header("Target")]
+        [SerializeField] private EnemyBattleUnit targetEnemy;
+
+        [Header("UI References")]
+        [SerializeField] private TextMeshProUGUI enemyNameText;
+        [SerializeField] private TextMeshProUGUI hpText;
+        [SerializeField] private TextMeshProUGUI countdownText;
+        [SerializeField] private HpBarUI hpBarUI;
+
+        public EnemyBattleUnit TargetEnemy => targetEnemy;
+
+        public void SetTarget(EnemyBattleUnit enemy)
+        {
+            targetEnemy = enemy;
+            Refresh();
+        }
+
+        public void Refresh()
+        {
+            if (targetEnemy == null)
+            {
+                SetEmptyState();
+                return;
+            }
+
+            if (!targetEnemy.IsAlive)
+            {
+                gameObject.SetActive(false);
+                return;
+            }
+
+            if (enemyNameText != null)
+            {
+                if (targetEnemy.Data != null)
+                    enemyNameText.text = targetEnemy.Data.DisplayName;
+                else
+                    enemyNameText.text = targetEnemy.name;
+            }
+
+            if (hpText != null)
+                hpText.text = $"{targetEnemy.CurrentHp}/{targetEnemy.MaxHp}";
+
+            if (hpBarUI != null)
+                hpBarUI.SetHp(targetEnemy.CurrentHp, targetEnemy.MaxHp);
+
+            if (countdownText != null)
+            {
+                if (!targetEnemy.IsAlive)
+                {
+                    countdownText.text = "-";
+                }
+                else if (targetEnemy.Behavior == EnemyBehaviorType.CountdownAttacker)
+                {
+                    countdownText.text = $"{targetEnemy.CurrentCountdown}";
+                }
+                else
+                {
+                    countdownText.text = "-";
+                }
+            }
+        }
+
+        private void SetEmptyState()
+        {
+            if (enemyNameText != null)
+                enemyNameText.text = "None";
+
+            if (hpText != null)
+                hpText.text = "-";
+
+            if (countdownText != null)
+                countdownText.text = "-";
+
+            if (hpBarUI != null)
+                hpBarUI.SetHp(0, 1);
+        }
+    }
+}
+
+========================================
+FILE: HpBarUI.cs
+PATH: Assets/Scripts/UI/HpBarUI.cs
+========================================
+using TMPro;
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    public class HpBarUI : MonoBehaviour
+    {
+        [Header("References")]
+        [SerializeField] private RectTransform colorBarRect;
+        [SerializeField] private TextMeshProUGUI hpText;
+
+        [Header("Bar Size")]
+        [SerializeField] private float maxWidth = 620f;
+
+        public void SetHp(int currentHp, int maxHp)
+        {
+            if (maxHp <= 0)
+                maxHp = 1;
+
+            currentHp = Mathf.Clamp(currentHp, 0, maxHp);
+
+            float percent = (float)currentHp / maxHp;
+            float width = maxWidth * percent;
+
+            Debug.Log($"SetHp called -> HP: {currentHp}/{maxHp}, width: {width}");
+
+            if (colorBarRect != null)
+            {
+                colorBarRect.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, width);
+                Debug.Log($"Applied to: {colorBarRect.name}, new width: {colorBarRect.rect.width}");
+            }
+
+            if (hpText != null)
+                hpText.text = $"{currentHp}/{maxHp}";
+        }
+    }
+}
+
+========================================
+FILE: PlayerHpBarBinder.cs
+PATH: Assets/Scripts/UI/PlayerHpBarBinder.cs
+========================================
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    public class PlayerHpBarBinder : MonoBehaviour
+    {
+        [SerializeField] private PlayerBattleUnit player;
+        [SerializeField] private HpBarUI hpBarUI;
+
+        private void OnEnable()
+        {
+            if (player != null)
+                player.OnHpChangedEvent += HandleHpChanged;
+        }
+
+        private void Start()
+        {
+            RefreshNow();
+        }
+
+        private void OnDisable()
+        {
+            if (player != null)
+                player.OnHpChangedEvent -= HandleHpChanged;
+        }
+
+        private void HandleHpChanged(int currentHp, int maxHp)
+        {
+            if (hpBarUI != null)
+                hpBarUI.SetHp(currentHp, maxHp);
+        }
+
+        [ContextMenu("Refresh Now")]
+        public void RefreshNow()
+        {
+            if (player == null || hpBarUI == null)
+                return;
+
+            hpBarUI.SetHp(player.CurrentHp, player.MaxHp);
+        }
+    }
+}
+
+========================================
+FILE: WorldToUIFollow.cs
+PATH: Assets/Scripts/UI/WorldToUIFollow.cs
+========================================
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    public class WorldToUIFollow : MonoBehaviour
+    {
+        [Header("Target")]
+        [SerializeField] private Transform target;
+        [SerializeField] private Vector3 worldOffset = Vector3.zero;
+
+        [Header("UI References")]
+        [SerializeField] private RectTransform uiRectTransform;
+        [SerializeField] private Canvas parentCanvas;
+        [SerializeField] private Camera targetCamera;
+
+        [Header("Options")]
+        [SerializeField] private bool hideWhenBehindCamera = true;
+
+        private void Reset()
+        {
+            uiRectTransform = transform as RectTransform;
+            parentCanvas = GetComponentInParent<Canvas>();
+
+            if (Camera.main != null)
+                targetCamera = Camera.main;
+        }
+
+        private void LateUpdate()
+        {
+            if (target == null || uiRectTransform == null || parentCanvas == null)
+                return;
+
+            if (targetCamera == null)
+                targetCamera = Camera.main;
+
+            if (targetCamera == null)
+                return;
+
+            Vector3 worldPos = target.position + worldOffset;
+            Vector3 screenPos = targetCamera.WorldToScreenPoint(worldPos);
+
+            if (hideWhenBehindCamera && screenPos.z < 0f)
+            {
+                if (uiRectTransform.gameObject.activeSelf)
+                    uiRectTransform.gameObject.SetActive(false);
+                return;
+            }
+
+            if (!uiRectTransform.gameObject.activeSelf)
+                uiRectTransform.gameObject.SetActive(true);
+
+            RectTransform canvasRect = parentCanvas.transform as RectTransform;
+
+            Camera eventCamera = null;
+            if (parentCanvas.renderMode != RenderMode.ScreenSpaceOverlay)
+                eventCamera = targetCamera;
+
+            if (RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                    canvasRect,
+                    screenPos,
+                    eventCamera,
+                    out Vector2 localPoint))
+            {
+                uiRectTransform.localPosition = localPoint;
+            }
+        }
+
+        public void SetTarget(Transform newTarget)
+        {
+            target = newTarget;
         }
     }
 }

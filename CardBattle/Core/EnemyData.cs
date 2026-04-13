@@ -17,6 +17,8 @@ namespace CardBattle.Core
         [SerializeField] private int speed = 5;
         [Tooltip("Starting countdown for CountdownAttacker; reapplied after each countdown attack.")]
         [SerializeField] private int baseCountdown = 3;
+        [Tooltip("If true, a CountdownAttacker that already attacked this player round may also attack again at end turn.")]
+        [SerializeField] private bool allowEndTurnAttackAfterCountdownAttackThisRound = false;
 
         public string EnemyId => string.IsNullOrEmpty(enemyId) ? name : enemyId;
         public string DisplayName => string.IsNullOrEmpty(displayName) ? name : displayName;
@@ -25,5 +27,6 @@ namespace CardBattle.Core
         public int AttackDamage => Mathf.Max(0, attackDamage);
         public int Speed => speed;
         public int BaseCountdown => Mathf.Max(0, baseCountdown);
+        public bool AllowEndTurnAttackAfterCountdownAttackThisRound => allowEndTurnAttackAfterCountdownAttackThisRound;
     }
 }

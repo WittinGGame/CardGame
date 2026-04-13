@@ -1,11 +1,8 @@
+using System;
 using UnityEngine;
 
 namespace CardBattle.Core
 {
-    /// <summary>
-    /// Shared combat stats for any unit on the battlefield (player or enemy).
-    /// Extend this type for role-specific logic; keep HP and damage hooks centralized.
-    /// </summary>
     public abstract class BattleUnit : MonoBehaviour
     {
         [SerializeField] protected int maxHp = 10;
@@ -15,13 +12,16 @@ namespace CardBattle.Core
         public int CurrentHp => currentHp;
         public bool IsAlive => currentHp > 0;
 
+        public event Action<int, int> OnHpChangedEvent;
+
         protected virtual void Awake()
         {
             if (currentHp <= 0)
                 currentHp = maxHp;
+
+            NotifyHpChanged();
         }
 
-        /// <summary>Apply damage after any future mitigation hooks (armor, shields, etc.).</summary>
         public virtual void TakeDamage(int amount)
         {
             if (amount <= 0 || !IsAlive)
@@ -29,6 +29,8 @@ namespace CardBattle.Core
 
             currentHp = Mathf.Max(0, currentHp - amount);
             OnHpChanged();
+            NotifyHpChanged();
+
             if (currentHp == 0)
                 OnDefeated();
         }
@@ -40,19 +42,28 @@ namespace CardBattle.Core
 
             currentHp = Mathf.Min(maxHp, currentHp + amount);
             OnHpChanged();
+            NotifyHpChanged();
         }
 
         public virtual void SetMaxHp(int value, bool refillToMax = false)
         {
             maxHp = Mathf.Max(1, value);
+
             if (refillToMax)
                 currentHp = maxHp;
             else
                 currentHp = Mathf.Min(currentHp, maxHp);
+
             OnHpChanged();
+            NotifyHpChanged();
         }
 
         protected virtual void OnHpChanged() { }
         protected virtual void OnDefeated() { }
+
+        private void NotifyHpChanged()
+        {
+            OnHpChangedEvent?.Invoke(currentHp, maxHp);
+        }
     }
 }

@@ -16,7 +16,10 @@ namespace CardBattle.Core
         [SerializeField] private TextMeshProUGUI playerHpText;
         [SerializeField] private TextMeshProUGUI enemy1Text;
         [SerializeField] private TextMeshProUGUI enemy2Text;
+        [SerializeField] private EnemyStatusUI enemyStatusUI1;
+        [SerializeField] private EnemyStatusUI enemyStatusUI2;
         [SerializeField] private Button endTurnButton;
+        [SerializeField] private HpBarUI playerHpBar;
 
         private void Start()
         {
@@ -26,6 +29,7 @@ namespace CardBattle.Core
                 endTurnButton.onClick.AddListener(OnClickEndTurn);
             }
 
+            BindEnemyStatusUI();
             RefreshUI();
         }
 
@@ -47,19 +51,51 @@ namespace CardBattle.Core
             RefreshUI();
         }
 
+        private void BindEnemyStatusUI()
+        {
+            if (enemyActionSystem == null)
+                return;
+
+            var enemies = enemyActionSystem.Enemies;
+
+            if (enemyStatusUI1 != null)
+            {
+                if (enemies.Count > 0 && enemies[0] != null)
+                    enemyStatusUI1.SetTarget(enemies[0]);
+                else
+                    enemyStatusUI1.SetTarget(null);
+            }
+
+            if (enemyStatusUI2 != null)
+            {
+                if (enemies.Count > 1 && enemies[1] != null)
+                    enemyStatusUI2.SetTarget(enemies[1]);
+                else
+                    enemyStatusUI2.SetTarget(null);
+            }
+        }
+
         private void RefreshUI()
         {
             if (playerApText != null && player != null)
             {
-                playerApText.text = $"AP: {player.CurrentAp}/{player.ApPerRound}";
+                //playerApText.text = $"AP: {player.CurrentAp}/{player.ApPerRound}";
+                playerApText.text = $"{player.CurrentAp}";
             }
 
             if (playerHpText != null && player != null)
             {
-                playerHpText.text = $"Player HP: {player.CurrentHp}/{player.MaxHp}";
+                playerHpText.text = $"{player.CurrentHp}/{player.MaxHp}";
+            }
+
+            if (playerHpBar != null && player != null)
+            {
+                playerHpBar.SetHp(player.CurrentHp, player.MaxHp);
             }
 
             var enemies = enemyActionSystem != null ? enemyActionSystem.Enemies : null;
+            enemyStatusUI1?.Refresh();
+            enemyStatusUI2?.Refresh();
 
             if (enemy1Text != null)
             {
