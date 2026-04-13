@@ -1,5 +1,5 @@
-using UnityEngine;
 using System;
+using UnityEngine;
 
 namespace CardBattle.Core
 {
@@ -32,13 +32,13 @@ namespace CardBattle.Core
             animator.SetTrigger(DeadHash);
         }
 
-        // Animation Event hook: place at the exact hit frame.
+        // Animation Event
         public void AnimEvent_AttackHit()
         {
             OnAttackHit?.Invoke();
         }
 
-        // Animation Event hook: place at the end of the action animation.
+        // Animation Event
         public void AnimEvent_ActionFinished()
         {
             OnActionFinished?.Invoke();

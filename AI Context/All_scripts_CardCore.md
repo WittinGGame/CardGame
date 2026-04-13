@@ -507,8 +507,6 @@ namespace CardBattle.Core
             if (target == null || !target.IsAlive)
                 return;
 
-            context.Player.View?.PlayAttack();
-
             var bonus = context.Player.ConsumeDamageBonus();
             var total = data.AttackDamage + bonus;
             bool wasAliveBeforeHit = target.IsAlive;
@@ -1471,6 +1469,7 @@ namespace CardBattle.Core
 FILE: BattleUnitView.cs
 PATH: Assets/Scripts/CardBattle/BattleUnitView.cs
 ========================================
+using System;
 using UnityEngine;
 
 namespace CardBattle.Core
@@ -1482,6 +1481,9 @@ namespace CardBattle.Core
         private static readonly int AttackHash = Animator.StringToHash("Attack");
         private static readonly int HurtHash = Animator.StringToHash("Hurt");
         private static readonly int DeadHash = Animator.StringToHash("Dead");
+
+        public event Action OnAttackHit;
+        public event Action OnActionFinished;
 
         public void PlayAttack()
         {
@@ -1500,6 +1502,18 @@ namespace CardBattle.Core
             if (animator == null) return;
             animator.SetTrigger(DeadHash);
         }
+
+        // Animation Event
+        public void AnimEvent_AttackHit()
+        {
+            OnAttackHit?.Invoke();
+        }
+
+        // Animation Event
+        public void AnimEvent_ActionFinished()
+        {
+            OnActionFinished?.Invoke();
+        }
     }
 }
 
@@ -1509,18 +1523,9 @@ PATH: Assets/Scripts/CardBattle/HandUIController.cs
 ========================================
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.UI;
-using TMPro;
 
 namespace CardBattle.Core
 {
-    /// <summary>
-    /// Minimal hand UI for testing card play without fancy visuals.
-    /// - Rebuilds the hand whenever deck piles change
-    /// - Creates one button per card in hand
-    /// - Clicking a button plays that card
-    /// - Uses the first alive enemy as default target for attack cards
-    /// </summary>
     public class HandUIController : MonoBehaviour
     {
         [Header("Core References")]
@@ -1532,16 +1537,14 @@ namespace CardBattle.Core
 
         [Header("UI References")]
         [SerializeField] private Transform handContainer;
-        [SerializeField] private Button cardButtonPrefab;
+        [SerializeField] private CardViewUI cardViewPrefab;
 
         [Header("Options")]
         [SerializeField] private bool autoRefreshOnStart = true;
-        [SerializeField] private bool showCost = true;
-        [SerializeField] private bool showType = true;
         [SerializeField] private bool disableUnplayableCards = true;
         [SerializeField] private bool verboseLogs = false;
 
-        private readonly List<Button> _spawnedButtons = new List<Button>();
+        private readonly List<CardViewUI> spawnedCards = new List<CardViewUI>();
 
         private void OnEnable()
         {
@@ -1567,7 +1570,7 @@ namespace CardBattle.Core
             if (!ValidateReferences())
                 return;
 
-            ClearSpawnedButtons();
+            ClearSpawnedCards();
 
             var hand = deckController.Hand;
             for (int i = 0; i < hand.Count; i++)
@@ -1576,36 +1579,38 @@ namespace CardBattle.Core
                 if (card?.Data == null)
                     continue;
 
-                var button = Instantiate(cardButtonPrefab, handContainer);
-                _spawnedButtons.Add(button);
+                var view = Instantiate(cardViewPrefab, handContainer);
+                spawnedCards.Add(view);
 
-                SetButtonLabel(button, BuildCardLabel(card));
-                SetupButton(button, card);
+                view.Bind(card);
+                SetupCardView(view, card);
             }
         }
 
-        private void SetupButton(Button button, CardInstance card)
+        private void SetupCardView(CardViewUI view, CardInstance card)
         {
-            if (button == null || card?.Data == null)
+            if (view == null || card?.Data == null)
                 return;
 
             bool canPlay = player != null &&
-                        player.CanAct &&
-                        player.CanSpendAp(card.Data.ApCost) &&
-                        deckController != null &&
-                        deckController.IsInHand(card);
+                           player.CanAct &&
+                           player.CanSpendAp(card.Data.ApCost) &&
+                           deckController != null &&
+                           deckController.IsInHand(card);
 
             if (battleActionRunner != null)
                 canPlay = canPlay && battleActionRunner.CanAcceptInput;
 
-            button.onClick.RemoveAllListeners();
-            button.onClick.AddListener(() =>
+            if (disableUnplayableCards)
+                view.SetInteractable(canPlay);
+
+            view.SetClickAction(() =>
             {
-                TryPlayCardFromButton(card);
+                TryPlayCardFromView(card);
             });
         }
 
-        private void TryPlayCardFromButton(CardInstance card)
+        private void TryPlayCardFromView(CardInstance card)
         {
             if (card?.Data == null || battleActionRunner == null)
                 return;
@@ -1651,65 +1656,15 @@ namespace CardBattle.Core
             return null;
         }
 
-        private string BuildCardLabel(CardInstance card)
+        private void ClearSpawnedCards()
         {
-            var data = card.Data;
-            string label = data.DisplayName;
-
-            if (showCost)
-                label += $"\nAP: {data.ApCost}";
-
-            if (showType)
-                label += $"\n{data.CardType}";
-
-            switch (data.CardType)
+            for (int i = 0; i < spawnedCards.Count; i++)
             {
-                case CardType.Attack:
-                    label += $"\nDMG: {data.AttackDamage}";
-                    break;
-
-                case CardType.Heal:
-                    label += $"\nHEAL: {data.HealAmount}";
-                    break;
-
-                case CardType.Buff:
-                    label += $"\nBUFF: {data.BuffPotency}";
-                    break;
+                if (spawnedCards[i] != null)
+                    Destroy(spawnedCards[i].gameObject);
             }
 
-            return label;
-        }
-
-        private void SetButtonLabel(Button button, string textValue)
-        {
-            if (button == null)
-                return;
-
-            // First try TMP
-            var tmp = button.GetComponentInChildren<TextMeshProUGUI>();
-            if (tmp != null)
-            {
-                tmp.text = textValue;
-                return;
-            }
-
-            // Fallback to legacy Text
-            var legacyText = button.GetComponentInChildren<Text>();
-            if (legacyText != null)
-            {
-                legacyText.text = textValue;
-            }
-        }
-
-        private void ClearSpawnedButtons()
-        {
-            for (int i = 0; i < _spawnedButtons.Count; i++)
-            {
-                if (_spawnedButtons[i] != null)
-                    Destroy(_spawnedButtons[i].gameObject);
-            }
-
-            _spawnedButtons.Clear();
+            spawnedCards.Clear();
         }
 
         private bool ValidateReferences()
@@ -1740,9 +1695,9 @@ namespace CardBattle.Core
                 valid = false;
             }
 
-            if (cardButtonPrefab == null)
+            if (cardViewPrefab == null)
             {
-                Debug.LogError("HandUIController: Card button prefab reference is missing.");
+                Debug.LogError("HandUIController: CardView prefab reference is missing.");
                 valid = false;
             }
 
@@ -1832,8 +1787,10 @@ using UnityEngine;
 namespace CardBattle.Core
 {
     /// <summary>
-    /// Simple action sequencer for one card/action at a time.
-    /// Locks player input while resolving animations and gameplay steps.
+    /// Event-driven action sequencer.
+    /// Player attack timing is controlled by BattleUnitView animation events:
+    /// - AnimEvent_AttackHit
+    /// - AnimEvent_ActionFinished
     /// </summary>
     public class BattleActionRunner : MonoBehaviour
     {
@@ -1845,15 +1802,19 @@ namespace CardBattle.Core
         [SerializeField] private HandUIController handUIController;
         [SerializeField] private BattleHUDController battleHUDController;
 
-        [Header("Timing")]
-        [SerializeField] private float playerAttackWindup = 0.25f;
-        [SerializeField] private float hurtPause = 0.2f;
-        [SerializeField] private float enemyAttackWindup = 0.25f;
+        [Header("Fallback / Non-Attack Timing")]
+        [SerializeField] private float nonAttackResolvePause = 0.05f;
         [SerializeField] private float endTurnPause = 0.2f;
+        [SerializeField] private float enemyResolveSafetyPause = 0.1f;
 
         public bool IsBusy { get; private set; }
-
         public bool CanAcceptInput => !IsBusy && player != null && player.CanAct && player.IsAlive;
+
+        private bool waitingForPlayerHit;
+        private bool waitingForPlayerFinish;
+        private bool playerAttackResolved;
+        private CardPlayContext pendingPlayerCardContext;
+        private EnemyBattleUnit pendingPrimaryTarget;
 
         public void TryPlayCard(CardInstance card, EnemyBattleUnit primaryTarget = null)
         {
@@ -1884,23 +1845,46 @@ namespace CardBattle.Core
             deckController.PlayCardFromHand(card);
 
             bool isAttack = card.Data.CardType == CardType.Attack;
+            pendingPrimaryTarget = primaryTarget;
 
             if (isAttack)
             {
-                player.View?.PlayAttack();
-                yield return new WaitForSeconds(playerAttackWindup);
+                if (player?.View == null)
+                {
+                    Debug.LogWarning("BattleActionRunner: Player view is missing, falling back to immediate resolve.");
+                    ResolvePlayerCardImmediate(card, primaryTarget);
+                }
+                else
+                {
+                    pendingPlayerCardContext = new CardPlayContext(player, card, enemyActionSystem.Enemies, primaryTarget);
+                    waitingForPlayerHit = true;
+                    waitingForPlayerFinish = true;
+                    playerAttackResolved = false;
+
+                    SubscribePlayerViewEvents();
+                    player.View.PlayAttack();
+
+                    yield return new WaitUntil(() => !waitingForPlayerFinish);
+
+                    CleanupPlayerAttackState();
+                }
             }
-
-            var context = new CardPlayContext(player, card, enemyActionSystem.Enemies, primaryTarget);
-            cardResolver.Resolve(context);
-
-            if (isAttack && primaryTarget != null)
-                yield return new WaitForSeconds(hurtPause);
+            else
+            {
+                ResolvePlayerCardImmediate(card, primaryTarget);
+                yield return new WaitForSeconds(nonAttackResolvePause);
+            }
 
             enemyActionSystem.HandlePlayerSuccessfullyPlayedCard();
 
-            // wait a little if any interrupt attacks/hurts happened visually
-            yield return new WaitForSeconds(enemyAttackWindup);
+            if (enemyActionSystem.IsResolvingEnemyActions)
+            {
+                yield return new WaitUntil(() => !enemyActionSystem.IsResolvingEnemyActions);
+            }
+            else
+            {
+                yield return new WaitForSeconds(enemyResolveSafetyPause);
+            }
 
             RefreshExternalUI();
             IsBusy = false;
@@ -1916,16 +1900,86 @@ namespace CardBattle.Core
             yield return new WaitForSeconds(endTurnPause);
 
             enemyActionSystem.ResolveEndTurnAttacks();
-            yield return new WaitForSeconds(enemyAttackWindup);
+
+            if (enemyActionSystem.IsResolvingEnemyActions)
+            {
+                yield return new WaitUntil(() => !enemyActionSystem.IsResolvingEnemyActions);
+            }
+            else
+            {
+                yield return new WaitForSeconds(enemyResolveSafetyPause);
+            }
 
             if (player != null && player.IsAlive && HasAliveEnemy())
-            {
                 enemyActionSystem.StartPlayerRound();
-            }
 
             RefreshExternalUI();
             IsBusy = false;
             RefreshExternalUI();
+        }
+
+        private void ResolvePlayerCardImmediate(CardInstance card, EnemyBattleUnit primaryTarget)
+        {
+            var context = new CardPlayContext(player, card, enemyActionSystem.Enemies, primaryTarget);
+            cardResolver.Resolve(context);
+        }
+
+        private void SubscribePlayerViewEvents()
+        {
+            if (player?.View == null)
+                return;
+
+            CleanupPlayerViewSubscriptions();
+            player.View.OnAttackHit += HandlePlayerAttackHit;
+            player.View.OnActionFinished += HandlePlayerActionFinished;
+        }
+
+        private void CleanupPlayerViewSubscriptions()
+        {
+            if (player?.View == null)
+                return;
+
+            player.View.OnAttackHit -= HandlePlayerAttackHit;
+            player.View.OnActionFinished -= HandlePlayerActionFinished;
+        }
+
+        private void HandlePlayerAttackHit()
+        {
+            if (!waitingForPlayerHit || playerAttackResolved)
+                return;
+
+            waitingForPlayerHit = false;
+            playerAttackResolved = true;
+
+            if (pendingPlayerCardContext != null)
+                cardResolver.Resolve(pendingPlayerCardContext);
+        }
+
+        private void HandlePlayerActionFinished()
+        {
+            if (!waitingForPlayerFinish)
+                return;
+
+            if (waitingForPlayerHit && !playerAttackResolved)
+            {
+                waitingForPlayerHit = false;
+                playerAttackResolved = true;
+
+                if (pendingPlayerCardContext != null)
+                    cardResolver.Resolve(pendingPlayerCardContext);
+            }
+
+            waitingForPlayerFinish = false;
+        }
+
+        private void CleanupPlayerAttackState()
+        {
+            CleanupPlayerViewSubscriptions();
+            waitingForPlayerHit = false;
+            waitingForPlayerFinish = false;
+            playerAttackResolved = false;
+            pendingPlayerCardContext = null;
+            pendingPrimaryTarget = null;
         }
 
         private bool ValidateCardPlay(CardInstance card)
@@ -1965,6 +2019,12 @@ namespace CardBattle.Core
             handUIController?.RefreshHandUI();
             battleHUDController?.RefreshUIExternal();
         }
+
+        private void OnDisable()
+        {
+            CleanupPlayerAttackState();
+            IsBusy = false;
+        }
     }
 }
 
@@ -1986,26 +2046,52 @@ namespace CardBattle.Core
         [SerializeField] private TextMeshProUGUI nameText;
         [SerializeField] private TextMeshProUGUI typeText;
         [SerializeField] private TextMeshProUGUI descriptionText;
+        [SerializeField] private Button button;
 
-        public void Bind(CardData data)
+        private CardInstance boundCard;
+
+        public CardInstance BoundCard => boundCard;
+
+        public void Bind(CardInstance card)
         {
-            if (data == null)
+            boundCard = card;
+
+            if (card?.Data == null)
                 return;
 
-            // Cost
-            costText.text = data.ApCost.ToString();
+            var data = card.Data;
 
-            // Name
-            nameText.text = data.DisplayName;
+            if (costText != null)
+                costText.text = data.ApCost.ToString();
 
-            // Type
-            typeText.text = data.CardType.ToString();
+            if (nameText != null)
+                nameText.text = data.DisplayName;
 
-            // Artwork
-            artworkImage.sprite = data.Artwork;
+            if (typeText != null)
+                typeText.text = data.CardType.ToString();
 
-            // Description
-            descriptionText.text = GetDescription(data);
+            if (artworkImage != null)
+                artworkImage.sprite = data.Artwork;
+
+            if (descriptionText != null)
+                descriptionText.text = GetDescription(data);
+        }
+
+        public void SetInteractable(bool value)
+        {
+            if (button != null)
+                button.interactable = value;
+        }
+
+        public void SetClickAction(UnityEngine.Events.UnityAction action)
+        {
+            if (button == null)
+                return;
+
+            button.onClick.RemoveAllListeners();
+
+            if (action != null)
+                button.onClick.AddListener(action);
         }
 
         private string GetDescription(CardData data)

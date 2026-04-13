@@ -1,17 +1,8 @@
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.UI;
-using TMPro;
 
 namespace CardBattle.Core
 {
-    /// <summary>
-    /// Minimal hand UI for testing card play without fancy visuals.
-    /// - Rebuilds the hand whenever deck piles change
-    /// - Creates one button per card in hand
-    /// - Clicking a button plays that card
-    /// - Uses the first alive enemy as default target for attack cards
-    /// </summary>
     public class HandUIController : MonoBehaviour
     {
         [Header("Core References")]
@@ -23,16 +14,14 @@ namespace CardBattle.Core
 
         [Header("UI References")]
         [SerializeField] private Transform handContainer;
-        [SerializeField] private Button cardButtonPrefab;
+        [SerializeField] private CardViewUI cardViewPrefab;
 
         [Header("Options")]
         [SerializeField] private bool autoRefreshOnStart = true;
-        [SerializeField] private bool showCost = true;
-        [SerializeField] private bool showType = true;
         [SerializeField] private bool disableUnplayableCards = true;
         [SerializeField] private bool verboseLogs = false;
 
-        private readonly List<Button> _spawnedButtons = new List<Button>();
+        private readonly List<CardViewUI> spawnedCards = new List<CardViewUI>();
 
         private void OnEnable()
         {
@@ -58,7 +47,7 @@ namespace CardBattle.Core
             if (!ValidateReferences())
                 return;
 
-            ClearSpawnedButtons();
+            ClearSpawnedCards();
 
             var hand = deckController.Hand;
             for (int i = 0; i < hand.Count; i++)
@@ -67,36 +56,38 @@ namespace CardBattle.Core
                 if (card?.Data == null)
                     continue;
 
-                var button = Instantiate(cardButtonPrefab, handContainer);
-                _spawnedButtons.Add(button);
+                var view = Instantiate(cardViewPrefab, handContainer);
+                spawnedCards.Add(view);
 
-                SetButtonLabel(button, BuildCardLabel(card));
-                SetupButton(button, card);
+                view.Bind(card);
+                SetupCardView(view, card);
             }
         }
 
-        private void SetupButton(Button button, CardInstance card)
+        private void SetupCardView(CardViewUI view, CardInstance card)
         {
-            if (button == null || card?.Data == null)
+            if (view == null || card?.Data == null)
                 return;
 
             bool canPlay = player != null &&
-                        player.CanAct &&
-                        player.CanSpendAp(card.Data.ApCost) &&
-                        deckController != null &&
-                        deckController.IsInHand(card);
+                           player.CanAct &&
+                           player.CanSpendAp(card.Data.ApCost) &&
+                           deckController != null &&
+                           deckController.IsInHand(card);
 
             if (battleActionRunner != null)
                 canPlay = canPlay && battleActionRunner.CanAcceptInput;
 
-            button.onClick.RemoveAllListeners();
-            button.onClick.AddListener(() =>
+            if (disableUnplayableCards)
+                view.SetInteractable(canPlay);
+
+            view.SetClickAction(() =>
             {
-                TryPlayCardFromButton(card);
+                TryPlayCardFromView(card);
             });
         }
 
-        private void TryPlayCardFromButton(CardInstance card)
+        private void TryPlayCardFromView(CardInstance card)
         {
             if (card?.Data == null || battleActionRunner == null)
                 return;
@@ -142,65 +133,15 @@ namespace CardBattle.Core
             return null;
         }
 
-        private string BuildCardLabel(CardInstance card)
+        private void ClearSpawnedCards()
         {
-            var data = card.Data;
-            string label = data.DisplayName;
-
-            if (showCost)
-                label += $"\nAP: {data.ApCost}";
-
-            if (showType)
-                label += $"\n{data.CardType}";
-
-            switch (data.CardType)
+            for (int i = 0; i < spawnedCards.Count; i++)
             {
-                case CardType.Attack:
-                    label += $"\nDMG: {data.AttackDamage}";
-                    break;
-
-                case CardType.Heal:
-                    label += $"\nHEAL: {data.HealAmount}";
-                    break;
-
-                case CardType.Buff:
-                    label += $"\nBUFF: {data.BuffPotency}";
-                    break;
+                if (spawnedCards[i] != null)
+                    Destroy(spawnedCards[i].gameObject);
             }
 
-            return label;
-        }
-
-        private void SetButtonLabel(Button button, string textValue)
-        {
-            if (button == null)
-                return;
-
-            // First try TMP
-            var tmp = button.GetComponentInChildren<TextMeshProUGUI>();
-            if (tmp != null)
-            {
-                tmp.text = textValue;
-                return;
-            }
-
-            // Fallback to legacy Text
-            var legacyText = button.GetComponentInChildren<Text>();
-            if (legacyText != null)
-            {
-                legacyText.text = textValue;
-            }
-        }
-
-        private void ClearSpawnedButtons()
-        {
-            for (int i = 0; i < _spawnedButtons.Count; i++)
-            {
-                if (_spawnedButtons[i] != null)
-                    Destroy(_spawnedButtons[i].gameObject);
-            }
-
-            _spawnedButtons.Clear();
+            spawnedCards.Clear();
         }
 
         private bool ValidateReferences()
@@ -231,9 +172,9 @@ namespace CardBattle.Core
                 valid = false;
             }
 
-            if (cardButtonPrefab == null)
+            if (cardViewPrefab == null)
             {
-                Debug.LogError("HandUIController: Card button prefab reference is missing.");
+                Debug.LogError("HandUIController: CardView prefab reference is missing.");
                 valid = false;
             }
 

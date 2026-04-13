@@ -4,8 +4,10 @@ using UnityEngine;
 namespace CardBattle.Core
 {
     /// <summary>
-    /// Simple action sequencer for one card/action at a time.
-    /// Locks player input while resolving animations and gameplay steps.
+    /// Event-driven action sequencer.
+    /// Player attack timing is controlled by BattleUnitView animation events:
+    /// - AnimEvent_AttackHit
+    /// - AnimEvent_ActionFinished
     /// </summary>
     public class BattleActionRunner : MonoBehaviour
     {
@@ -17,19 +19,19 @@ namespace CardBattle.Core
         [SerializeField] private HandUIController handUIController;
         [SerializeField] private BattleHUDController battleHUDController;
 
-        [Header("Timing")]
-        [SerializeField] private float playerAttackWindup = 0.25f;
-        [SerializeField] private float hurtPause = 0.2f;
-        [SerializeField] private float enemyAttackWindup = 0.25f;
+        [Header("Fallback / Non-Attack Timing")]
+        [SerializeField] private float nonAttackResolvePause = 0.05f;
         [SerializeField] private float endTurnPause = 0.2f;
+        [SerializeField] private float enemyResolveSafetyPause = 0.1f;
 
         public bool IsBusy { get; private set; }
-
         public bool CanAcceptInput => !IsBusy && player != null && player.CanAct && player.IsAlive;
 
-        private bool waitingForHit;
-        private bool waitingForFinish;
-        private CardPlayContext pendingContext;
+        private bool waitingForPlayerHit;
+        private bool waitingForPlayerFinish;
+        private bool playerAttackResolved;
+        private CardPlayContext pendingPlayerCardContext;
+        private EnemyBattleUnit pendingPrimaryTarget;
 
         public void TryPlayCard(CardInstance card, EnemyBattleUnit primaryTarget = null)
         {
@@ -60,37 +62,46 @@ namespace CardBattle.Core
             deckController.PlayCardFromHand(card);
 
             bool isAttack = card.Data.CardType == CardType.Attack;
-            var context = new CardPlayContext(player, card, enemyActionSystem.Enemies, primaryTarget);
+            pendingPrimaryTarget = primaryTarget;
 
             if (isAttack)
             {
-                if (player.View != null)
+                if (player?.View == null)
                 {
-                    pendingContext = context;
-                    waitingForHit = true;
-                    waitingForFinish = true;
-
-                    SubscribeToPlayerAttackEvents();
-                    player.View.PlayAttack();
-
-                    yield return new WaitUntil(() => !waitingForFinish);
-                    UnsubscribeFromPlayerAttackEvents();
-                    pendingContext = null;
+                    Debug.LogWarning("BattleActionRunner: Player view is missing, falling back to immediate resolve.");
+                    ResolvePlayerCardImmediate(card, primaryTarget);
                 }
                 else
                 {
-                    cardResolver.Resolve(context);
-                    enemyActionSystem.HandlePlayerSuccessfullyPlayedCard();
+                    pendingPlayerCardContext = new CardPlayContext(player, card, enemyActionSystem.Enemies, primaryTarget);
+                    waitingForPlayerHit = true;
+                    waitingForPlayerFinish = true;
+                    playerAttackResolved = false;
+
+                    SubscribePlayerViewEvents();
+                    player.View.PlayAttack();
+
+                    yield return new WaitUntil(() => !waitingForPlayerFinish);
+
+                    CleanupPlayerAttackState();
                 }
             }
             else
             {
-                cardResolver.Resolve(context);
-                enemyActionSystem.HandlePlayerSuccessfullyPlayedCard();
+                ResolvePlayerCardImmediate(card, primaryTarget);
+                yield return new WaitForSeconds(nonAttackResolvePause);
             }
 
-            // wait until enemy interrupt actions (if any) are fully resolved
-            yield return new WaitUntil(() => enemyActionSystem == null || !enemyActionSystem.IsResolvingEnemyActions);
+            enemyActionSystem.HandlePlayerSuccessfullyPlayedCard();
+
+            if (enemyActionSystem.IsResolvingEnemyActions)
+            {
+                yield return new WaitUntil(() => !enemyActionSystem.IsResolvingEnemyActions);
+            }
+            else
+            {
+                yield return new WaitForSeconds(enemyResolveSafetyPause);
+            }
 
             RefreshExternalUI();
             IsBusy = false;
@@ -106,16 +117,86 @@ namespace CardBattle.Core
             yield return new WaitForSeconds(endTurnPause);
 
             enemyActionSystem.ResolveEndTurnAttacks();
-            yield return new WaitUntil(() => enemyActionSystem == null || !enemyActionSystem.IsResolvingEnemyActions);
+
+            if (enemyActionSystem.IsResolvingEnemyActions)
+            {
+                yield return new WaitUntil(() => !enemyActionSystem.IsResolvingEnemyActions);
+            }
+            else
+            {
+                yield return new WaitForSeconds(enemyResolveSafetyPause);
+            }
 
             if (player != null && player.IsAlive && HasAliveEnemy())
-            {
                 enemyActionSystem.StartPlayerRound();
-            }
 
             RefreshExternalUI();
             IsBusy = false;
             RefreshExternalUI();
+        }
+
+        private void ResolvePlayerCardImmediate(CardInstance card, EnemyBattleUnit primaryTarget)
+        {
+            var context = new CardPlayContext(player, card, enemyActionSystem.Enemies, primaryTarget);
+            cardResolver.Resolve(context);
+        }
+
+        private void SubscribePlayerViewEvents()
+        {
+            if (player?.View == null)
+                return;
+
+            CleanupPlayerViewSubscriptions();
+            player.View.OnAttackHit += HandlePlayerAttackHit;
+            player.View.OnActionFinished += HandlePlayerActionFinished;
+        }
+
+        private void CleanupPlayerViewSubscriptions()
+        {
+            if (player?.View == null)
+                return;
+
+            player.View.OnAttackHit -= HandlePlayerAttackHit;
+            player.View.OnActionFinished -= HandlePlayerActionFinished;
+        }
+
+        private void HandlePlayerAttackHit()
+        {
+            if (!waitingForPlayerHit || playerAttackResolved)
+                return;
+
+            waitingForPlayerHit = false;
+            playerAttackResolved = true;
+
+            if (pendingPlayerCardContext != null)
+                cardResolver.Resolve(pendingPlayerCardContext);
+        }
+
+        private void HandlePlayerActionFinished()
+        {
+            if (!waitingForPlayerFinish)
+                return;
+
+            if (waitingForPlayerHit && !playerAttackResolved)
+            {
+                waitingForPlayerHit = false;
+                playerAttackResolved = true;
+
+                if (pendingPlayerCardContext != null)
+                    cardResolver.Resolve(pendingPlayerCardContext);
+            }
+
+            waitingForPlayerFinish = false;
+        }
+
+        private void CleanupPlayerAttackState()
+        {
+            CleanupPlayerViewSubscriptions();
+            waitingForPlayerHit = false;
+            waitingForPlayerFinish = false;
+            playerAttackResolved = false;
+            pendingPlayerCardContext = null;
+            pendingPrimaryTarget = null;
         }
 
         private bool ValidateCardPlay(CardInstance card)
@@ -158,48 +239,8 @@ namespace CardBattle.Core
 
         private void OnDisable()
         {
-            UnsubscribeFromPlayerAttackEvents();
-            waitingForHit = false;
-            waitingForFinish = false;
-            pendingContext = null;
-        }
-
-        private void SubscribeToPlayerAttackEvents()
-        {
-            if (player?.View == null)
-                return;
-
-            UnsubscribeFromPlayerAttackEvents();
-            player.View.OnAttackHit += HandlePlayerAttackHit;
-            player.View.OnActionFinished += HandlePlayerActionFinished;
-        }
-
-        private void UnsubscribeFromPlayerAttackEvents()
-        {
-            if (player?.View == null)
-                return;
-
-            player.View.OnAttackHit -= HandlePlayerAttackHit;
-            player.View.OnActionFinished -= HandlePlayerActionFinished;
-        }
-
-        private void HandlePlayerAttackHit()
-        {
-            if (!waitingForHit)
-                return;
-
-            waitingForHit = false;
-            if (pendingContext != null)
-                cardResolver.Resolve(pendingContext);
-        }
-
-        private void HandlePlayerActionFinished()
-        {
-            if (!waitingForFinish)
-                return;
-
-            waitingForFinish = false;
-            enemyActionSystem.HandlePlayerSuccessfullyPlayedCard();
+            CleanupPlayerAttackState();
+            IsBusy = false;
         }
     }
 }

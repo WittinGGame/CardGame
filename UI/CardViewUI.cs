@@ -12,26 +12,52 @@ namespace CardBattle.Core
         [SerializeField] private TextMeshProUGUI nameText;
         [SerializeField] private TextMeshProUGUI typeText;
         [SerializeField] private TextMeshProUGUI descriptionText;
+        [SerializeField] private Button button;
 
-        public void Bind(CardData data)
+        private CardInstance boundCard;
+
+        public CardInstance BoundCard => boundCard;
+
+        public void Bind(CardInstance card)
         {
-            if (data == null)
+            boundCard = card;
+
+            if (card?.Data == null)
                 return;
 
-            // Cost
-            costText.text = data.ApCost.ToString();
+            var data = card.Data;
 
-            // Name
-            nameText.text = data.DisplayName;
+            if (costText != null)
+                costText.text = data.ApCost.ToString();
 
-            // Type
-            typeText.text = data.CardType.ToString();
+            if (nameText != null)
+                nameText.text = data.DisplayName;
 
-            // Artwork
-            artworkImage.sprite = data.Artwork;
+            if (typeText != null)
+                typeText.text = data.CardType.ToString();
 
-            // Description
-            descriptionText.text = GetDescription(data);
+            if (artworkImage != null)
+                artworkImage.sprite = data.Artwork;
+
+            if (descriptionText != null)
+                descriptionText.text = GetDescription(data);
+        }
+
+        public void SetInteractable(bool value)
+        {
+            if (button != null)
+                button.interactable = value;
+        }
+
+        public void SetClickAction(UnityEngine.Events.UnityAction action)
+        {
+            if (button == null)
+                return;
+
+            button.onClick.RemoveAllListeners();
+
+            if (action != null)
+                button.onClick.AddListener(action);
         }
 
         private string GetDescription(CardData data)
