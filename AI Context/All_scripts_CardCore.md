@@ -1330,8 +1330,6 @@ namespace CardBattle.Core
         [Header("UI References")]
         [SerializeField] private TextMeshProUGUI playerApText;
         [SerializeField] private TextMeshProUGUI playerHpText;
-        [SerializeField] private TextMeshProUGUI enemy1Text;
-        [SerializeField] private TextMeshProUGUI enemy2Text;
         [SerializeField] private EnemyStatusUI enemyStatusUI1;
         [SerializeField] private EnemyStatusUI enemyStatusUI2;
         [SerializeField] private Button endTurnButton;
@@ -1413,16 +1411,6 @@ namespace CardBattle.Core
             enemyStatusUI1?.Refresh();
             enemyStatusUI2?.Refresh();
 
-            if (enemy1Text != null)
-            {
-                enemy1Text.text = BuildEnemyText(enemies, 0);
-            }
-
-            if (enemy2Text != null)
-            {
-                enemy2Text.text = BuildEnemyText(enemies, 1);
-            }
-
             if (endTurnButton != null && player != null)
             {
                 bool canClick = player.CanAct;
@@ -1432,20 +1420,6 @@ namespace CardBattle.Core
 
                 endTurnButton.interactable = canClick;
             }
-        }
-
-        private string BuildEnemyText(System.Collections.Generic.IReadOnlyList<EnemyBattleUnit> enemies, int index)
-        {
-            if (enemies == null || index < 0 || index >= enemies.Count || enemies[index] == null)
-                return $"Enemy {index + 1}: None";
-
-            var enemy = enemies[index];
-            return
-                $"{enemy.name}\n" +
-                $"HP: {enemy.CurrentHp}/{enemy.MaxHp}\n" +
-                $"Type: {enemy.Behavior}\n" +
-                $"CD: {enemy.CurrentCountdown}\n" +
-                $"SPD: {enemy.Speed}";
         }
 
         private bool HasAliveEnemy()
@@ -1773,6 +1747,7 @@ namespace CardBattle.Core
         [SerializeField] private PlayerBattleUnit player;
         [SerializeField] private HandUIController handUIController;
         [SerializeField] private BattleActionRunner battleActionRunner;
+        [SerializeField] private EnemyTargetHighlight[] enemyHighlights;
 
         public bool IsSelectingTarget => _pendingCard != null;
 
@@ -1804,6 +1779,9 @@ namespace CardBattle.Core
                 return;
 
             _pendingCard = card;
+
+            SetHighlight(true);
+
             Debug.Log($"Selecting target for card: {card.Data.DisplayName}");
         }
 
@@ -1816,6 +1794,8 @@ namespace CardBattle.Core
 
             _pendingCard = null;
 
+            SetHighlight(false);
+
             if (handUIController != null)
                 handUIController.DeselectCurrentCard();
         }
@@ -1825,11 +1805,25 @@ namespace CardBattle.Core
             if (_pendingCard == null || battleActionRunner == null || target == null || !target.IsAlive)
                 return;
 
+            SetHighlight(false);
+
             battleActionRunner.TryPlayCard(_pendingCard, target);
             _pendingCard = null;
 
             if (handUIController != null)
                 handUIController.RefreshHandUI();
+        }
+
+        private void SetHighlight(bool value)
+        {
+            if (enemyHighlights == null)
+                return;
+
+            for (int i = 0; i < enemyHighlights.Length; i++)
+            {
+                if (enemyHighlights[i] != null)
+                    enemyHighlights[i].SetSelectable(value);
+            }
         }
     }
 }
@@ -2606,5 +2600,54 @@ namespace CardBattle.Core
         {
             target = newTarget;
         }
+    }
+}
+
+========================================
+FILE: EnemyTargetHighlight.cs
+PATH: Assets/Scripts/CardBattle/Enemy/EnemyTargetHighlight.cs
+========================================
+using UnityEngine;
+using UnityEngine.EventSystems;
+
+public class EnemyTargetHighlight : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler
+{
+    [SerializeField] private GameObject targetRing;
+    [SerializeField] private float hoverMultiplier = 1.2f;
+
+    private bool isSelectable;
+    private Vector3 baseScale;
+
+    private void Awake()
+    {
+        if (targetRing != null)
+            baseScale = targetRing.transform.localScale;
+    }
+
+    public void SetSelectable(bool value)
+    {
+        isSelectable = value;
+
+        if (targetRing != null)
+        {
+            targetRing.SetActive(value);
+            targetRing.transform.localScale = baseScale;
+        }
+    }
+
+    public void OnPointerEnter(PointerEventData eventData)
+    {
+        if (!isSelectable || targetRing == null)
+            return;
+
+        targetRing.transform.localScale = baseScale * hoverMultiplier;
+    }
+
+    public void OnPointerExit(PointerEventData eventData)
+    {
+        if (!isSelectable || targetRing == null)
+            return;
+
+        targetRing.transform.localScale = baseScale;
     }
 }

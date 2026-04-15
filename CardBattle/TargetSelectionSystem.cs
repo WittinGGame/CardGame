@@ -7,6 +7,7 @@ namespace CardBattle.Core
         [SerializeField] private PlayerBattleUnit player;
         [SerializeField] private HandUIController handUIController;
         [SerializeField] private BattleActionRunner battleActionRunner;
+        [SerializeField] private EnemyTargetHighlight[] enemyHighlights;
 
         public bool IsSelectingTarget => _pendingCard != null;
 
@@ -38,6 +39,9 @@ namespace CardBattle.Core
                 return;
 
             _pendingCard = card;
+
+            SetHighlight(true);
+
             Debug.Log($"Selecting target for card: {card.Data.DisplayName}");
         }
 
@@ -50,6 +54,8 @@ namespace CardBattle.Core
 
             _pendingCard = null;
 
+            SetHighlight(false);
+
             if (handUIController != null)
                 handUIController.DeselectCurrentCard();
         }
@@ -59,11 +65,25 @@ namespace CardBattle.Core
             if (_pendingCard == null || battleActionRunner == null || target == null || !target.IsAlive)
                 return;
 
+            SetHighlight(false);
+
             battleActionRunner.TryPlayCard(_pendingCard, target);
             _pendingCard = null;
 
             if (handUIController != null)
                 handUIController.RefreshHandUI();
+        }
+
+        private void SetHighlight(bool value)
+        {
+            if (enemyHighlights == null)
+                return;
+
+            for (int i = 0; i < enemyHighlights.Length; i++)
+            {
+                if (enemyHighlights[i] != null)
+                    enemyHighlights[i].SetSelectable(value);
+            }
         }
     }
 }

@@ -14,8 +14,6 @@ namespace CardBattle.Core
         [Header("UI References")]
         [SerializeField] private TextMeshProUGUI playerApText;
         [SerializeField] private TextMeshProUGUI playerHpText;
-        [SerializeField] private TextMeshProUGUI enemy1Text;
-        [SerializeField] private TextMeshProUGUI enemy2Text;
         [SerializeField] private EnemyStatusUI enemyStatusUI1;
         [SerializeField] private EnemyStatusUI enemyStatusUI2;
         [SerializeField] private Button endTurnButton;
@@ -97,16 +95,6 @@ namespace CardBattle.Core
             enemyStatusUI1?.Refresh();
             enemyStatusUI2?.Refresh();
 
-            if (enemy1Text != null)
-            {
-                enemy1Text.text = BuildEnemyText(enemies, 0);
-            }
-
-            if (enemy2Text != null)
-            {
-                enemy2Text.text = BuildEnemyText(enemies, 1);
-            }
-
             if (endTurnButton != null && player != null)
             {
                 bool canClick = player.CanAct;
@@ -116,20 +104,6 @@ namespace CardBattle.Core
 
                 endTurnButton.interactable = canClick;
             }
-        }
-
-        private string BuildEnemyText(System.Collections.Generic.IReadOnlyList<EnemyBattleUnit> enemies, int index)
-        {
-            if (enemies == null || index < 0 || index >= enemies.Count || enemies[index] == null)
-                return $"Enemy {index + 1}: None";
-
-            var enemy = enemies[index];
-            return
-                $"{enemy.name}\n" +
-                $"HP: {enemy.CurrentHp}/{enemy.MaxHp}\n" +
-                $"Type: {enemy.Behavior}\n" +
-                $"CD: {enemy.CurrentCountdown}\n" +
-                $"SPD: {enemy.Speed}";
         }
 
         private bool HasAliveEnemy()
