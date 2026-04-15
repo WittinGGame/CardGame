@@ -12,6 +12,26 @@ namespace CardBattle.Core
 
         private CardInstance _pendingCard;
 
+        private void Update()
+        {
+            if (!IsSelectingTarget)
+                return;
+
+            // คลิกขวา
+            if (Input.GetMouseButtonDown(1))
+            {
+                CancelTargetSelection();
+                return;
+            }
+
+            // กด ESC
+            if (Input.GetKeyDown(KeyCode.Escape))
+            {
+                CancelTargetSelection();
+                return;
+            }
+        }
+
         public void BeginTargetSelection(CardInstance card)
         {
             if (card?.Data == null)
@@ -23,8 +43,15 @@ namespace CardBattle.Core
 
         public void CancelTargetSelection()
         {
-            _pendingCard = null;
+            if (_pendingCard == null)
+                return;
+
             Debug.Log("Target selection cancelled.");
+
+            _pendingCard = null;
+
+            if (handUIController != null)
+                handUIController.DeselectCurrentCard();
         }
 
         public void ConfirmTarget(EnemyBattleUnit target)
