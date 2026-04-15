@@ -22,6 +22,7 @@ namespace CardBattle.Core
         [SerializeField] private bool verboseLogs = false;
 
         private readonly List<CardViewUI> spawnedCards = new List<CardViewUI>();
+        private CardViewUI selectedView;
 
         private void OnEnable()
         {
@@ -48,6 +49,7 @@ namespace CardBattle.Core
                 return;
 
             ClearSpawnedCards();
+            selectedView = null;
 
             var hand = deckController.Hand;
             for (int i = 0; i < hand.Count; i++)
@@ -80,11 +82,38 @@ namespace CardBattle.Core
 
             if (disableUnplayableCards)
                 view.SetInteractable(canPlay);
+            else
+                view.SetInteractable(true);
 
             view.SetClickAction(() =>
             {
+                if (!view.IsInteractable)
+                    return;
+
+                SelectView(view);
                 TryPlayCardFromView(card);
             });
+        }
+
+        private void SelectView(CardViewUI view)
+        {
+            if (view == null)
+                return;
+
+            if (selectedView != null && selectedView != view)
+                selectedView.Deselect();
+
+            selectedView = view;
+            selectedView.Select();
+        }
+
+        public void DeselectCurrentCard()
+        {
+            if (selectedView != null)
+            {
+                selectedView.Deselect();
+                selectedView = null;
+            }
         }
 
         private void TryPlayCardFromView(CardInstance card)
@@ -101,7 +130,8 @@ namespace CardBattle.Core
                     if (verboseLogs)
                         Debug.Log($"[HandUI] Waiting for target selection: {card.Data.DisplayName}");
 
-                    RefreshHandUI();
+                    // สำคัญ: อย่า RefreshHandUI ตรงนี้
+                    // เพื่อให้ selected state ค้างอยู่
                     return;
                 }
             }
