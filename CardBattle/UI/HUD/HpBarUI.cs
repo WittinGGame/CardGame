@@ -22,12 +22,9 @@ namespace CardBattle.Core
             float percent = (float)currentHp / maxHp;
             float width = maxWidth * percent;
 
-            Debug.Log($"SetHp called -> HP: {currentHp}/{maxHp}, width: {width}");
-
             if (colorBarRect != null)
             {
                 colorBarRect.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, width);
-                Debug.Log($"Applied to: {colorBarRect.name}, new width: {colorBarRect.rect.width}");
             }
 
             if (hpText != null)

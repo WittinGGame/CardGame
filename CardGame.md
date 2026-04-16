@@ -1,4 +1,0 @@
-WittingEngine
-==========================
-
-CardGame
