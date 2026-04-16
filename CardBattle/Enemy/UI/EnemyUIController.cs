@@ -17,8 +17,6 @@ namespace CardBattle.Core
         [SerializeField] private WorldToUIFollow intentFollow;
         [SerializeField] private WorldToUIFollow buffFollow;
 
-        private bool isBound = false;
-
         public EnemyBattleUnit Target => target;
         public WorldToUIFollow HpFollow => hpFollow;
         public WorldToUIFollow IntentFollow => intentFollow;
@@ -27,28 +25,20 @@ namespace CardBattle.Core
         private void Start()
         {
             if (target != null)
-            {
                 BindAll();
-            }
+
+            RefreshAll();
         }
 
-        private void Update()
+        private void OnEnable()
         {
-            if (!isBound || target == null)
-                return;
+            SubscribeTargetEvents();
+            RefreshAll();
+        }
 
-            if (!target.IsAlive)
-            {
-                HideAll();
-                return;
-            }
-
-            ShowAll();
-
-            // fallback update (phase นี้ยังใช้ได้)
-            hpUI?.Refresh();
-            intentUI?.Refresh();
-            buffUI?.Refresh();
+        private void OnDisable()
+        {
+            UnsubscribeTargetEvents();
         }
 
         // =========================
@@ -57,8 +47,11 @@ namespace CardBattle.Core
 
         public void SetTarget(EnemyBattleUnit enemy)
         {
+            UnsubscribeTargetEvents();
             target = enemy;
             BindAll();
+            SubscribeTargetEvents();
+            RefreshAll();
         }
 
         // =========================
@@ -68,7 +61,10 @@ namespace CardBattle.Core
         private void BindAll()
         {
             if (target == null)
+            {
+                HideAll();
                 return;
+            }
 
             // bind UI data
             if (hpUI != null)
@@ -82,8 +78,6 @@ namespace CardBattle.Core
 
             // bind follow anchors
             BindFollow();
-
-            isBound = true;
         }
 
         private void BindFollow()
@@ -125,6 +119,55 @@ namespace CardBattle.Core
             {
                 Debug.LogWarning($"Buff Follow missing | buffFollow={(buffFollow != null)} | anchor={(target.UIAnchorBuff != null)}");
             }
+        }
+
+        private void SubscribeTargetEvents()
+        {
+            if (target == null)
+                return;
+
+            target.OnHpChangedEvent += HandleHpChanged;
+            target.OnEnemyStateChanged += HandleEnemyStateChanged;
+        }
+
+        private void UnsubscribeTargetEvents()
+        {
+            if (target == null)
+                return;
+
+            target.OnHpChangedEvent -= HandleHpChanged;
+            target.OnEnemyStateChanged -= HandleEnemyStateChanged;
+        }
+
+        private void HandleHpChanged(int currentHp, int maxHp)
+        {
+            RefreshAll();
+        }
+
+        private void HandleEnemyStateChanged()
+        {
+            RefreshAll();
+        }
+
+        private void RefreshAll()
+        {
+            if (target == null)
+            {
+                HideAll();
+                return;
+            }
+
+            if (!target.IsAlive)
+            {
+                HideAll();
+                return;
+            }
+
+            ShowAll();
+
+            hpUI?.Refresh();
+            intentUI?.Refresh();
+            buffUI?.Refresh();
         }
 
         // =========================

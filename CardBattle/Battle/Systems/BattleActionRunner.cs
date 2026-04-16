@@ -25,6 +25,7 @@ namespace CardBattle.Core
         [SerializeField] private float enemyResolveSafetyPause = 0.1f;
 
         public bool IsBusy { get; private set; }
+        public event System.Action<bool> OnBusyStateChanged;
         public bool CanAcceptInput => !IsBusy && player != null && player.CanAct && player.IsAlive;
 
         private bool waitingForPlayerHit;
@@ -54,7 +55,7 @@ namespace CardBattle.Core
             if (!ValidateCardPlay(card))
                 yield break;
 
-            IsBusy = true;
+            SetBusy(true);
             RefreshExternalUI();
 
             int cost = card.Data.ApCost;
@@ -104,13 +105,13 @@ namespace CardBattle.Core
             }
 
             RefreshExternalUI();
-            IsBusy = false;
+            SetBusy(false);
             RefreshExternalUI();
         }
 
         private IEnumerator EndTurnSequence()
         {
-            IsBusy = true;
+            SetBusy(true);
             RefreshExternalUI();
 
             player.CommitEndTurnFromRunner();
@@ -131,7 +132,7 @@ namespace CardBattle.Core
                 enemyActionSystem.StartPlayerRound();
 
             RefreshExternalUI();
-            IsBusy = false;
+            SetBusy(false);
             RefreshExternalUI();
         }
 
@@ -240,7 +241,16 @@ namespace CardBattle.Core
         private void OnDisable()
         {
             CleanupPlayerAttackState();
-            IsBusy = false;
+            SetBusy(false);
+        }
+
+        private void SetBusy(bool value)
+        {
+            if (IsBusy == value)
+                return;
+
+            IsBusy = value;
+            OnBusyStateChanged?.Invoke(IsBusy);
         }
     }
 }

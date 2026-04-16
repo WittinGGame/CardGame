@@ -27,6 +27,7 @@ namespace CardBattle.Core
         private bool waitingForFinish;
         private PlayerBattleUnit pendingTarget;
         private bool attackInProgress;
+        public event System.Action OnEnemyStateChanged;
 
         public EnemyData Data => enemyData;
         public EnemyBehaviorType Behavior => enemyData != null ? enemyData.Behavior : EnemyBehaviorType.EndTurnAttacker;
@@ -71,6 +72,7 @@ namespace CardBattle.Core
         public void ResetRoundCombatFlags()
         {
             _hasAttackedThisPlayerRound = false;
+            NotifyStateChanged();
         }
 
         /// <summary>Countdown attackers lose one tick after each successful player card.</summary>
@@ -80,7 +82,10 @@ namespace CardBattle.Core
                 return;
 
             if (_countdown > 0)
+            {
                 _countdown--;
+                NotifyStateChanged();
+            }
         }
 
         /// <summary>True immediately after stepping when this unit should interrupt the player.</summary>
@@ -102,6 +107,7 @@ namespace CardBattle.Core
 
             yield return PerformStrike(player);
             _countdown = enemyData != null ? enemyData.BaseCountdown : 0;
+            NotifyStateChanged();
         }
 
         public bool CanExecuteCountdownAttackAtEndTurn()
@@ -122,6 +128,7 @@ namespace CardBattle.Core
 
             // End-turn rule: eligible countdown attackers can force-ready and strike now.
             _countdown = 0;
+            NotifyStateChanged();
             yield return ExecuteCountdownAttackRoutine(player);
         }
 
@@ -175,6 +182,7 @@ namespace CardBattle.Core
             waitingForHit = false;
             pendingTarget = null;
             attackInProgress = false;
+            NotifyStateChanged();
         }
 
         private void OnDisable()
@@ -241,6 +249,11 @@ namespace CardBattle.Core
             }
 
             _hasAttackedThisPlayerRound = true;
+        }
+
+        private void NotifyStateChanged()
+        {
+            OnEnemyStateChanged?.Invoke();
         }
     }
 }

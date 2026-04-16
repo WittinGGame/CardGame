@@ -21,6 +21,8 @@ namespace CardBattle.Core
 
         private int _pendingAttackBonus;
         private bool _turnCommitted;
+        public event System.Action<int, int> OnApChangedEvent;
+        public event System.Action<bool> OnTurnStateChanged;
 
         public int CurrentAp { get; private set; }
         public int ApPerRound => apPerRound;
@@ -39,6 +41,8 @@ namespace CardBattle.Core
             _turnCommitted = false;
             CurrentAp = Mathf.Max(0, apPerRound);
             _pendingAttackBonus = 0;
+            NotifyApChanged();
+            NotifyTurnStateChanged();
         }
 
         /// <summary>
@@ -64,6 +68,7 @@ namespace CardBattle.Core
                 return false;
 
             CurrentAp -= cost;
+            NotifyApChanged();
             deckController.PlayCardFromHand(card);
 
             var context = new CardPlayContext(this, card, enemyActionSystem.Enemies, primaryTarget);
@@ -89,6 +94,7 @@ namespace CardBattle.Core
             }
 
             _turnCommitted = true;
+            NotifyTurnStateChanged();
             deckController.DiscardEntireHand();
             enemyActionSystem.ResolveEndTurnAttacks();
         }
@@ -116,6 +122,7 @@ namespace CardBattle.Core
                 return;
 
             CurrentAp = Mathf.Max(0, CurrentAp - amount);
+            NotifyApChanged();
         }
 
         public void CommitEndTurnFromRunner()
@@ -124,9 +131,26 @@ namespace CardBattle.Core
                 return;
 
             _turnCommitted = true;
+            NotifyTurnStateChanged();
 
             if (deckController != null)
                 deckController.DiscardEntireHand();
+        }
+
+        private void NotifyApChanged()
+        {
+            OnApChangedEvent?.Invoke(CurrentAp, ApPerRound);
+        }
+
+        private void NotifyTurnStateChanged()
+        {
+            OnTurnStateChanged?.Invoke(CanAct);
+        }
+
+        protected override void OnDefeated()
+        {
+            base.OnDefeated();
+            NotifyTurnStateChanged();
         }
     }
 }
