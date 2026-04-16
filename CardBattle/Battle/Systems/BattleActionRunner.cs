@@ -234,7 +234,7 @@ namespace CardBattle.Core
 
         private void RefreshExternalUI()
         {
-            handUIController?.RefreshHandUI();
+            handUIController?.RefreshInteractivityExternal();
             battleHUDController?.RefreshUIExternal();
         }
 

@@ -193,6 +193,11 @@ namespace CardBattle.Core
             }
         }
 
+        public void RefreshInteractivityExternal()
+        {
+            RefreshCardInteractivity();
+        }
+
         private EnemyBattleUnit GetDefaultAliveEnemy()
         {
             if (enemyActionSystem == null)
