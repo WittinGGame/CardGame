@@ -693,12 +693,30 @@ namespace CardBattle.Core
         {
             if (deckController != null)
                 deckController.OnPilesChanged += RefreshHandUI;
+
+            if (player != null)
+            {
+                player.OnApChangedEvent += HandlePlayerApChanged;
+                player.OnTurnStateChanged += HandlePlayerTurnStateChanged;
+            }
+
+            if (battleActionRunner != null)
+                battleActionRunner.OnBusyStateChanged += HandleBusyStateChanged;
         }
 
         private void OnDisable()
         {
             if (deckController != null)
                 deckController.OnPilesChanged -= RefreshHandUI;
+
+            if (player != null)
+            {
+                player.OnApChangedEvent -= HandlePlayerApChanged;
+                player.OnTurnStateChanged -= HandlePlayerTurnStateChanged;
+            }
+
+            if (battleActionRunner != null)
+                battleActionRunner.OnBusyStateChanged -= HandleBusyStateChanged;
         }
 
         private void Start()
@@ -729,26 +747,14 @@ namespace CardBattle.Core
                 view.Bind(card);
                 SetupCardView(view, card);
             }
+
+            RefreshCardInteractivity();
         }
 
         private void SetupCardView(CardViewUI view, CardInstance card)
         {
             if (view == null || card?.Data == null)
                 return;
-
-            bool canPlay = player != null &&
-                           player.CanAct &&
-                           player.CanSpendAp(card.Data.ApCost) &&
-                           deckController != null &&
-                           deckController.IsInHand(card);
-
-            if (battleActionRunner != null)
-                canPlay = canPlay && battleActionRunner.CanAcceptInput;
-
-            if (disableUnplayableCards)
-                view.SetInteractable(canPlay);
-            else
-                view.SetInteractable(true);
 
             view.SetClickAction(() =>
             {
@@ -809,8 +815,52 @@ namespace CardBattle.Core
                 string targetName = target != null ? target.name : "None";
                 Debug.Log($"[HandUI] Clicked {card.Data.DisplayName} | Target: {targetName}");
             }
+        }
 
-            RefreshHandUI();
+        private void HandlePlayerApChanged(int currentAp, int maxAp)
+        {
+            RefreshCardInteractivity();
+        }
+
+        private void HandlePlayerTurnStateChanged(bool canAct)
+        {
+            RefreshCardInteractivity();
+        }
+
+        private void HandleBusyStateChanged(bool isBusy)
+        {
+            RefreshCardInteractivity();
+        }
+
+        private void RefreshCardInteractivity()
+        {
+            for (int i = 0; i < spawnedCards.Count; i++)
+            {
+                var view = spawnedCards[i];
+                if (view == null || view.BoundCard?.Data == null)
+                    continue;
+
+                var card = view.BoundCard;
+
+                bool canPlay = player != null &&
+                               player.CanAct &&
+                               player.CanSpendAp(card.Data.ApCost) &&
+                               deckController != null &&
+                               deckController.IsInHand(card);
+
+                if (battleActionRunner != null)
+                    canPlay = canPlay && battleActionRunner.CanAcceptInput;
+
+                if (disableUnplayableCards)
+                    view.SetInteractable(canPlay);
+                else
+                    view.SetInteractable(true);
+            }
+        }
+
+        public void RefreshInteractivityExternal()
+        {
+            RefreshCardInteractivity();
         }
 
         private EnemyBattleUnit GetDefaultAliveEnemy()

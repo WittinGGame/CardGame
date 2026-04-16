@@ -32,12 +32,38 @@ namespace CardBattle.Core
             }
 
             BindEnemyStatusUI();
-            RefreshUI();
+            if (player != null)
+            {
+                HandlePlayerHpChanged(player.CurrentHp, player.MaxHp);
+                HandlePlayerApChanged(player.CurrentAp, player.ApPerRound);
+            }
+            RefreshUIExternal();
         }
 
-        private void Update()
+        private void OnEnable()
         {
-            RefreshUI();
+            if (player != null)
+            {
+                player.OnHpChangedEvent += HandlePlayerHpChanged;
+                player.OnApChangedEvent += HandlePlayerApChanged;
+                player.OnTurnStateChanged += HandleTurnStateChanged;
+            }
+
+            if (battleActionRunner != null)
+                battleActionRunner.OnBusyStateChanged += HandleBusyStateChanged;
+        }
+
+        private void OnDisable()
+        {
+            if (player != null)
+            {
+                player.OnHpChangedEvent -= HandlePlayerHpChanged;
+                player.OnApChangedEvent -= HandlePlayerApChanged;
+                player.OnTurnStateChanged -= HandleTurnStateChanged;
+            }
+
+            if (battleActionRunner != null)
+                battleActionRunner.OnBusyStateChanged -= HandleBusyStateChanged;
         }
 
         private void OnClickEndTurn()
@@ -50,7 +76,9 @@ namespace CardBattle.Core
 
         public void RefreshUIExternal()
         {
-            RefreshUI();
+            enemyStatusUI1?.Refresh();
+            enemyStatusUI2?.Refresh();
+            RefreshEndTurnButtonState();
         }
 
         private void BindEnemyStatusUI()
@@ -77,37 +105,42 @@ namespace CardBattle.Core
             }
         }
 
-        private void RefreshUI()
+        private void HandlePlayerHpChanged(int currentHp, int maxHp)
         {
-            if (playerApText != null && player != null)
-            {
-                //playerApText.text = $"AP: {player.CurrentAp}/{player.ApPerRound}";
-                playerApText.text = $"{player.CurrentAp}";
-            }
+            if (playerHpText != null)
+                playerHpText.text = $"{currentHp}/{maxHp}";
 
-            if (playerHpText != null && player != null)
-            {
-                playerHpText.text = $"{player.CurrentHp}/{player.MaxHp}";
-            }
+            if (playerHpBar != null)
+                playerHpBar.SetHp(currentHp, maxHp);
+        }
 
-            if (playerHpBar != null && player != null)
-            {
-                playerHpBar.SetHp(player.CurrentHp, player.MaxHp);
-            }
+        private void HandlePlayerApChanged(int currentAp, int maxAp)
+        {
+            if (playerApText != null)
+                playerApText.text = $"{currentAp}";
+        }
 
-            var enemies = enemyActionSystem != null ? enemyActionSystem.Enemies : null;
-            enemyStatusUI1?.Refresh();
-            enemyStatusUI2?.Refresh();
+        private void HandleTurnStateChanged(bool canAct)
+        {
+            RefreshEndTurnButtonState();
+        }
 
-            if (endTurnButton != null && player != null)
-            {
-                bool canClick = player.CanAct;
+        private void HandleBusyStateChanged(bool isBusy)
+        {
+            RefreshEndTurnButtonState();
+        }
 
-                if (battleActionRunner != null)
-                    canClick = canClick && battleActionRunner.CanAcceptInput;
+        private void RefreshEndTurnButtonState()
+        {
+            if (endTurnButton == null || player == null)
+                return;
 
-                endTurnButton.interactable = canClick;
-            }
+            bool canClick = player.CanAct;
+
+            if (battleActionRunner != null)
+                canClick = canClick && battleActionRunner.CanAcceptInput;
+
+            endTurnButton.interactable = canClick;
         }
 
         private bool HasAliveEnemy()

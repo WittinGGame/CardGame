@@ -288,6 +288,7 @@ namespace CardBattle.Core
         [SerializeField] private float enemyResolveSafetyPause = 0.1f;
 
         public bool IsBusy { get; private set; }
+        public event System.Action<bool> OnBusyStateChanged;
         public bool CanAcceptInput => !IsBusy && player != null && player.CanAct && player.IsAlive;
 
         private bool waitingForPlayerHit;
@@ -317,7 +318,7 @@ namespace CardBattle.Core
             if (!ValidateCardPlay(card))
                 yield break;
 
-            IsBusy = true;
+            SetBusy(true);
             RefreshExternalUI();
 
             int cost = card.Data.ApCost;
@@ -367,13 +368,13 @@ namespace CardBattle.Core
             }
 
             RefreshExternalUI();
-            IsBusy = false;
+            SetBusy(false);
             RefreshExternalUI();
         }
 
         private IEnumerator EndTurnSequence()
         {
-            IsBusy = true;
+            SetBusy(true);
             RefreshExternalUI();
 
             player.CommitEndTurnFromRunner();
@@ -394,7 +395,7 @@ namespace CardBattle.Core
                 enemyActionSystem.StartPlayerRound();
 
             RefreshExternalUI();
-            IsBusy = false;
+            SetBusy(false);
             RefreshExternalUI();
         }
 
@@ -496,14 +497,23 @@ namespace CardBattle.Core
 
         private void RefreshExternalUI()
         {
-            handUIController?.RefreshHandUI();
+            handUIController?.RefreshInteractivityExternal();
             battleHUDController?.RefreshUIExternal();
         }
 
         private void OnDisable()
         {
             CleanupPlayerAttackState();
-            IsBusy = false;
+            SetBusy(false);
+        }
+
+        private void SetBusy(bool value)
+        {
+            if (IsBusy == value)
+                return;
+
+            IsBusy = value;
+            OnBusyStateChanged?.Invoke(IsBusy);
         }
     }
 }
@@ -862,6 +872,7 @@ namespace CardBattle.Core
         private bool waitingForFinish;
         private PlayerBattleUnit pendingTarget;
         private bool attackInProgress;
+        public event System.Action OnEnemyStateChanged;
 
         public EnemyData Data => enemyData;
         public EnemyBehaviorType Behavior => enemyData != null ? enemyData.Behavior : EnemyBehaviorType.EndTurnAttacker;
@@ -906,6 +917,7 @@ namespace CardBattle.Core
         public void ResetRoundCombatFlags()
         {
             _hasAttackedThisPlayerRound = false;
+            NotifyStateChanged();
         }
 
         /// <summary>Countdown attackers lose one tick after each successful player card.</summary>
@@ -915,7 +927,10 @@ namespace CardBattle.Core
                 return;
 
             if (_countdown > 0)
+            {
                 _countdown--;
+                NotifyStateChanged();
+            }
         }
 
         /// <summary>True immediately after stepping when this unit should interrupt the player.</summary>
@@ -937,6 +952,7 @@ namespace CardBattle.Core
 
             yield return PerformStrike(player);
             _countdown = enemyData != null ? enemyData.BaseCountdown : 0;
+            NotifyStateChanged();
         }
 
         public bool CanExecuteCountdownAttackAtEndTurn()
@@ -957,6 +973,7 @@ namespace CardBattle.Core
 
             // End-turn rule: eligible countdown attackers can force-ready and strike now.
             _countdown = 0;
+            NotifyStateChanged();
             yield return ExecuteCountdownAttackRoutine(player);
         }
 
@@ -1010,6 +1027,7 @@ namespace CardBattle.Core
             waitingForHit = false;
             pendingTarget = null;
             attackInProgress = false;
+            NotifyStateChanged();
         }
 
         private void OnDisable()
@@ -1077,9 +1095,13 @@ namespace CardBattle.Core
 
             _hasAttackedThisPlayerRound = true;
         }
+
+        private void NotifyStateChanged()
+        {
+            OnEnemyStateChanged?.Invoke();
+        }
     }
 }
-
 
 ================================================================================
 FILE: PlayerBattleUnit.cs
@@ -1108,6 +1130,8 @@ namespace CardBattle.Core
 
         private int _pendingAttackBonus;
         private bool _turnCommitted;
+        public event System.Action<int, int> OnApChangedEvent;
+        public event System.Action<bool> OnTurnStateChanged;
 
         public int CurrentAp { get; private set; }
         public int ApPerRound => apPerRound;
@@ -1126,6 +1150,8 @@ namespace CardBattle.Core
             _turnCommitted = false;
             CurrentAp = Mathf.Max(0, apPerRound);
             _pendingAttackBonus = 0;
+            NotifyApChanged();
+            NotifyTurnStateChanged();
         }
 
         /// <summary>
@@ -1151,6 +1177,7 @@ namespace CardBattle.Core
                 return false;
 
             CurrentAp -= cost;
+            NotifyApChanged();
             deckController.PlayCardFromHand(card);
 
             var context = new CardPlayContext(this, card, enemyActionSystem.Enemies, primaryTarget);
@@ -1176,6 +1203,7 @@ namespace CardBattle.Core
             }
 
             _turnCommitted = true;
+            NotifyTurnStateChanged();
             deckController.DiscardEntireHand();
             enemyActionSystem.ResolveEndTurnAttacks();
         }
@@ -1203,6 +1231,7 @@ namespace CardBattle.Core
                 return;
 
             CurrentAp = Mathf.Max(0, CurrentAp - amount);
+            NotifyApChanged();
         }
 
         public void CommitEndTurnFromRunner()
@@ -1211,13 +1240,29 @@ namespace CardBattle.Core
                 return;
 
             _turnCommitted = true;
+            NotifyTurnStateChanged();
 
             if (deckController != null)
                 deckController.DiscardEntireHand();
         }
+
+        private void NotifyApChanged()
+        {
+            OnApChangedEvent?.Invoke(CurrentAp, ApPerRound);
+        }
+
+        private void NotifyTurnStateChanged()
+        {
+            OnTurnStateChanged?.Invoke(CanAct);
+        }
+
+        protected override void OnDefeated()
+        {
+            base.OnDefeated();
+            NotifyTurnStateChanged();
+        }
     }
 }
-
 
 ================================================================================
 FILE: BattleUnitView.cs

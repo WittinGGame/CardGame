@@ -177,25 +177,31 @@ namespace CardBattle.Core
         {
             if (target == null || !target.IsAlive)
             {
-                intentRoot.SetActive(false);
+                if (intentRoot != null)
+                    intentRoot.SetActive(false);
+
                 return;
             }
 
-            intentRoot.SetActive(true);
+            if (intentRoot != null)
+                intentRoot.SetActive(true);
 
-            // Attack Value
             int damage = target.Data != null ? target.Data.AttackDamage : 0;
-            attackValueText.text = damage.ToString();
 
-            // Countdown
-            if (target.Behavior == EnemyBehaviorType.CountdownAttacker)
+            if (attackValueText != null)
+                attackValueText.text = damage.ToString();
+
+            bool showCountdown = target.Behavior == EnemyBehaviorType.CountdownAttacker;
+
+            if (countdownRoot != null)
+                countdownRoot.SetActive(showCountdown);
+
+            if (countdownValueText != null)
             {
-                countdownValueText.gameObject.SetActive(true);
-                countdownValueText.text = target.CurrentCountdown.ToString();
-            }
-            else
-            {
-                countdownValueText.gameObject.SetActive(false);
+                countdownValueText.gameObject.SetActive(showCountdown);
+
+                if (showCountdown)
+                    countdownValueText.text = target.CurrentCountdown.ToString();
             }
         }
     }
