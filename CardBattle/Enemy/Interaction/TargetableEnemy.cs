@@ -13,6 +13,9 @@ namespace CardBattle.Core
             if (enemyBattleUnit == null || targetSelectionSystem == null)
                 return;
 
+            if (!enemyBattleUnit.IsAlive)
+                return;
+
             targetSelectionSystem.ConfirmTarget(enemyBattleUnit);
         }
     }
