@@ -10,7 +10,16 @@ namespace CardBattle.Core
     {
         [SerializeField] private EnemyData enemyData;
         [SerializeField] private BattleUnitView battleUnitView;
+
+        [Header("UI")]
+        [SerializeField] private Transform uiAnchorHP;
+        [SerializeField] private Transform uiAnchorIntent;
+        [SerializeField] private Transform uiAnchorBuff;
+
         public BattleUnitView View => battleUnitView;
+        public Transform UIAnchorHP => uiAnchorHP;
+        public Transform UIAnchorIntent => uiAnchorIntent;
+        public Transform UIAnchorBuff => uiAnchorBuff;
 
         private int _countdown;
         private bool _hasAttackedThisPlayerRound;

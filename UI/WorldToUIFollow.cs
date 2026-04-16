@@ -69,5 +69,15 @@ namespace CardBattle.Core
         {
             target = newTarget;
         }
+
+        public void SetParentCanvas(Canvas canvas)
+        {
+            parentCanvas = canvas;
+        }
+
+        public void SetTargetCamera(Camera cam)
+        {
+            targetCamera = cam;
+        }
     }
 }

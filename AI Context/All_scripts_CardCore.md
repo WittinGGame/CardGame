@@ -2600,6 +2600,16 @@ namespace CardBattle.Core
         {
             target = newTarget;
         }
+
+        public void SetParentCanvas(Canvas canvas)
+        {
+            parentCanvas = canvas;
+        }
+
+        public void SetTargetCamera(Camera cam)
+        {
+            targetCamera = cam;
+        }
     }
 }
 
@@ -2651,3 +2661,415 @@ public class EnemyTargetHighlight : MonoBehaviour, IPointerEnterHandler, IPointe
         targetRing.transform.localScale = baseScale;
     }
 }
+
+========================================
+FILE: EnemyUIManager.cs
+PATH: Assets/Scripts/CardBattle/Enemy/EnemyUIManager.cs
+========================================
+using System.Collections.Generic;
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    public class EnemyUIManager : MonoBehaviour
+    {
+        [Header("Core References")]
+        [SerializeField] private EnemyActionSystem enemyActionSystem;
+        [Header("Scene References")]
+        [SerializeField] private Canvas parentCanvas;
+        [SerializeField] private Camera targetCamera;
+
+        [Header("UI Spawn")]
+        [SerializeField] private EnemyUIController enemyUIPrefab;
+        [SerializeField] private Transform uiContainer;
+
+        [Header("Options")]
+        [SerializeField] private bool buildOnStart = true;
+        [SerializeField] private bool clearBeforeBuild = true;
+        [SerializeField] private bool verboseLogs = false;
+
+        private readonly List<EnemyUIController> spawnedUIs = new List<EnemyUIController>();
+
+        private void Start()
+        {
+            if (buildOnStart)
+                RebuildUI();
+        }
+
+        [ContextMenu("Rebuild Enemy UI")]
+        public void RebuildUI()
+        {
+            if (!ValidateReferences())
+                return;
+
+            if (clearBeforeBuild)
+                ClearSpawnedUI();
+
+            var enemies = enemyActionSystem.Enemies;
+            for (int i = 0; i < enemies.Count; i++)
+            {
+                var enemy = enemies[i];
+                if (enemy == null)
+                    continue;
+
+                var ui = Instantiate(enemyUIPrefab, uiContainer);
+                ui.name = $"EnemyUI_{i}_{enemy.name}";
+                ui.SetTarget(enemy);
+                SetupWorldToUIFollow(ui);
+
+                spawnedUIs.Add(ui);
+
+                if (verboseLogs)
+                    Debug.Log($"[EnemyUIManager] Spawned UI for enemy: {enemy.name}");
+            }
+        }
+
+        [ContextMenu("Clear Enemy UI")]
+        public void ClearSpawnedUI()
+        {
+            for (int i = 0; i < spawnedUIs.Count; i++)
+            {
+                if (spawnedUIs[i] != null)
+                    Destroy(spawnedUIs[i].gameObject);
+            }
+
+            spawnedUIs.Clear();
+        }
+
+        public EnemyUIController GetUIForEnemy(EnemyBattleUnit enemy)
+        {
+            if (enemy == null)
+                return null;
+
+            for (int i = 0; i < spawnedUIs.Count; i++)
+            {
+                if (spawnedUIs[i] == null)
+                    continue;
+
+                if (spawnedUIs[i].Target == enemy)
+                    return spawnedUIs[i];
+            }
+
+            return null;
+        }
+
+        private bool ValidateReferences()
+        {
+            bool valid = true;
+
+            if (enemyActionSystem == null)
+            {
+                Debug.LogError("EnemyUIManager: EnemyActionSystem reference is missing.");
+                valid = false;
+            }
+
+            if (enemyUIPrefab == null)
+            {
+                Debug.LogError("EnemyUIManager: Enemy UI Prefab reference is missing.");
+                valid = false;
+            }
+
+            if (uiContainer == null)
+            {
+                Debug.LogError("EnemyUIManager: UI Container reference is missing.");
+                valid = false;
+            }
+
+            if (parentCanvas == null)
+            {
+                Debug.LogError("EnemyUIManager: Parent Canvas reference is missing.");
+                valid = false;
+            }
+
+            if (targetCamera == null)
+            {
+                Debug.LogError("EnemyUIManager: Target Camera reference is missing.");
+                valid = false;
+            }
+
+            return valid;
+        }
+
+        private void SetupWorldToUIFollow(EnemyUIController ui)
+        {
+            if (ui == null)
+                return;
+
+            AssignFollow(ui.HpFollow);
+            AssignFollow(ui.IntentFollow);
+            AssignFollow(ui.BuffFollow);
+        }
+
+        private void AssignFollow(WorldToUIFollow follow)
+        {
+            if (follow == null)
+                return;
+
+            follow.SetParentCanvas(parentCanvas);
+            follow.SetTargetCamera(targetCamera);
+        }
+    }
+}
+
+========================================
+FILE: EnemyBuffUI.cs
+PATH: Assets/Scripts/CardBattle/UI/Enemy/EnemyBuffUI.cs
+========================================
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    public class EnemyBuffUI : MonoBehaviour
+    {
+        private EnemyBattleUnit target;
+
+        public void SetTarget(EnemyBattleUnit enemy)
+        {
+            target = enemy;
+        }
+
+        public void Refresh()
+        {
+            // TODO: ทำจริงทีหลัง
+        }
+    }
+}
+
+========================================
+FILE: EnemyIntentUI.cs
+PATH: Assets/Scripts/CardBattle/UI/Enemy/EnemyIntentUI.cs
+========================================
+using TMPro;
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    public class EnemyIntentUI : MonoBehaviour
+    {
+        [SerializeField] private EnemyBattleUnit target;
+
+        [Header("UI")]
+        [SerializeField] private GameObject intentRoot;
+        [SerializeField] private GameObject countdownRoot;
+        [SerializeField] private TextMeshProUGUI attackValueText;
+        [SerializeField] private TextMeshProUGUI countdownValueText;
+
+        public void SetTarget(EnemyBattleUnit enemy)
+        {
+            target = enemy;
+            Refresh();
+        }
+
+        public void Refresh()
+        {
+            if (target == null || !target.IsAlive)
+            {
+                intentRoot.SetActive(false);
+                return;
+            }
+
+            intentRoot.SetActive(true);
+
+            // Attack Value
+            int damage = target.Data != null ? target.Data.AttackDamage : 0;
+            attackValueText.text = damage.ToString();
+
+            // Countdown
+            if (target.Behavior == EnemyBehaviorType.CountdownAttacker)
+            {
+                countdownValueText.gameObject.SetActive(true);
+                countdownValueText.text = target.CurrentCountdown.ToString();
+            }
+            else
+            {
+                countdownValueText.gameObject.SetActive(false);
+            }
+        }
+    }
+}
+
+========================================
+FILE: EnemyUIController.cs
+PATH: Assets/Scripts/CardBattle/UI/Enemy/EnemyUIController.cs
+========================================
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    public class EnemyUIController : MonoBehaviour
+    {
+        [Header("Target")]
+        [SerializeField] private EnemyBattleUnit target;
+
+        [Header("UI Parts")]
+        [SerializeField] private EnemyStatusUI hpUI;
+        [SerializeField] private EnemyIntentUI intentUI;
+        [SerializeField] private EnemyBuffUI buffUI; // optional
+
+        [Header("Follow Components")]
+        [SerializeField] private WorldToUIFollow hpFollow;
+        [SerializeField] private WorldToUIFollow intentFollow;
+        [SerializeField] private WorldToUIFollow buffFollow;
+
+        private bool isBound = false;
+
+        public EnemyBattleUnit Target => target;
+        public WorldToUIFollow HpFollow => hpFollow;
+        public WorldToUIFollow IntentFollow => intentFollow;
+        public WorldToUIFollow BuffFollow => buffFollow;
+
+        private void Start()
+        {
+            if (target != null)
+            {
+                BindAll();
+            }
+        }
+
+        private void Update()
+        {
+            if (!isBound || target == null)
+                return;
+
+            if (!target.IsAlive)
+            {
+                HideAll();
+                return;
+            }
+
+            ShowAll();
+
+            // fallback update (phase นี้ยังใช้ได้)
+            hpUI?.Refresh();
+            intentUI?.Refresh();
+            buffUI?.Refresh();
+        }
+
+        // =========================
+        // PUBLIC
+        // =========================
+
+        public void SetTarget(EnemyBattleUnit enemy)
+        {
+            target = enemy;
+            BindAll();
+        }
+
+        // =========================
+        // BINDING
+        // =========================
+
+        private void BindAll()
+        {
+            if (target == null)
+                return;
+
+            // bind UI data
+            if (hpUI != null)
+                hpUI.SetTarget(target);
+
+            if (intentUI != null)
+                intentUI.SetTarget(target);
+
+            if (buffUI != null)
+                buffUI.SetTarget(target);
+
+            // bind follow anchors
+            BindFollow();
+
+            isBound = true;
+        }
+
+        private void BindFollow()
+        {
+            if (target == null)
+            {
+                Debug.LogWarning("[EnemyUIController] Target is null.");
+                return;
+            }
+
+            Debug.Log($"[EnemyUIController] Binding follow for {target.name}");
+
+            if (hpFollow != null && target.UIAnchorHP != null)
+            {
+                hpFollow.SetTarget(target.UIAnchorHP);
+                Debug.Log($"HP Follow -> {target.UIAnchorHP.name}");
+            }
+            else
+            {
+                Debug.LogWarning($"HP Follow missing | hpFollow={(hpFollow != null)} | anchor={(target.UIAnchorHP != null)}");
+            }
+
+            if (intentFollow != null && target.UIAnchorIntent != null)
+            {
+                intentFollow.SetTarget(target.UIAnchorIntent);
+                Debug.Log($"Intent Follow -> {target.UIAnchorIntent.name}");
+            }
+            else
+            {
+                Debug.LogWarning($"Intent Follow missing | intentFollow={(intentFollow != null)} | anchor={(target.UIAnchorIntent != null)}");
+            }
+
+            if (buffFollow != null && target.UIAnchorBuff != null)
+            {
+                buffFollow.SetTarget(target.UIAnchorBuff);
+                Debug.Log($"Buff Follow -> {target.UIAnchorBuff.name}");
+            }
+            else
+            {
+                Debug.LogWarning($"Buff Follow missing | buffFollow={(buffFollow != null)} | anchor={(target.UIAnchorBuff != null)}");
+            }
+        }
+
+        // =========================
+        // VISIBILITY
+        // =========================
+
+        private void HideAll()
+        {
+            if (hpUI != null)
+                hpUI.gameObject.SetActive(false);
+
+            if (intentUI != null)
+                intentUI.gameObject.SetActive(false);
+
+            if (buffUI != null)
+                buffUI.gameObject.SetActive(false);
+        }
+
+        private void ShowAll()
+        {
+            if (hpUI != null && !hpUI.gameObject.activeSelf)
+                hpUI.gameObject.SetActive(true);
+
+            if (intentUI != null && !intentUI.gameObject.activeSelf)
+                intentUI.gameObject.SetActive(true);
+
+            if (buffUI != null && !buffUI.gameObject.activeSelf)
+                buffUI.gameObject.SetActive(true);
+        }
+
+        // =========================
+        // DEBUG
+        // =========================
+
+#if UNITY_EDITOR
+        [ContextMenu("Debug Refresh UI")]
+        private void DebugRefresh()
+        {
+            if (target == null)
+            {
+                Debug.LogWarning("EnemyUIController: No target assigned.");
+                return;
+            }
+
+            hpUI?.Refresh();
+            intentUI?.Refresh();
+            buffUI?.Refresh();
+
+            Debug.Log($"[EnemyUIController] Refreshed UI for {target.name}");
+        }
+#endif
+    }
+}
+
