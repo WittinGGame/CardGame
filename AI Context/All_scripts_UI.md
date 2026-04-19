@@ -317,3 +317,244 @@ namespace CardBattle.Core
         }
     }
 }
+
+================================================================================
+FILE: FloatingTextUI.cs
+PATH: Assets/Scripts/CardBattle/UI/Floating/FloatingTextUI.cs
+================================================================================
+using TMPro;
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    /// <summary>
+    /// Simple floating TMP line: rises in canvas space, fades out, then self-destroys.
+    /// </summary>
+    [RequireComponent(typeof(RectTransform))]
+    public class FloatingTextUI : MonoBehaviour
+    {
+        [SerializeField] private TextMeshProUGUI label;
+        [SerializeField] private CanvasGroup canvasGroup;
+        [SerializeField] private float lifetime = 1.2f;
+        [SerializeField] private float riseSpeedPixelsPerSecond = 72f;
+
+        private RectTransform _rect;
+        private float _elapsed;
+
+        private void Awake()
+        {
+            _rect = GetComponent<RectTransform>();
+            if (canvasGroup == null)
+                canvasGroup = GetComponent<CanvasGroup>();
+            if (canvasGroup == null)
+                canvasGroup = gameObject.AddComponent<CanvasGroup>();
+        }
+
+        /// <summary>Configure display and reset motion state. Call right after instantiate.</summary>
+        public void Play(string text, Color color)
+        {
+            if (label != null)
+            {
+                label.text = text;
+                label.color = color;
+            }
+
+            _elapsed = 0f;
+            if (canvasGroup != null)
+                canvasGroup.alpha = 1f;
+        }
+
+        private void Update()
+        {
+            if (_rect != null)
+                _rect.anchoredPosition += Vector2.up * (riseSpeedPixelsPerSecond * Time.deltaTime);
+
+            _elapsed += Time.deltaTime;
+            float t = lifetime > 0f ? Mathf.Clamp01(_elapsed / lifetime) : 1f;
+
+            if (canvasGroup != null)
+                canvasGroup.alpha = 1f - t;
+
+            if (_elapsed >= lifetime)
+                Destroy(gameObject);
+        }
+    }
+}
+
+
+================================================================================
+FILE: BattleFloatingTextSpawner.cs
+PATH: Assets/Scripts/CardBattle/UI/Floating/BattleFloatingTextSpawner.cs
+================================================================================
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    /// <summary>
+    /// Listens for damage/heal on the player and registered enemies; spawns floating text at a world anchor.
+    /// </summary>
+    public class BattleFloatingTextSpawner : MonoBehaviour
+    {
+        [Header("References")]
+        [SerializeField] private Canvas canvas;
+        [SerializeField] private RectTransform container;
+        [SerializeField] private FloatingTextUI floatingTextPrefab;
+        [SerializeField] private PlayerBattleUnit player;
+        [SerializeField] private EnemyActionSystem enemyActionSystem;
+
+        [Header("Spawn anchors")]
+        [SerializeField] private Transform playerAnchor;
+        [SerializeField] private Vector3 defaultWorldOffset = new Vector3(0f, 0.5f, 0f);
+
+        [Header("World cameras")]
+        [Tooltip("Used for WorldToScreenPoint from world-space units. Falls back to Camera.main.")]
+        [SerializeField] private Camera worldCamera;
+
+        [Header("Presentation")]
+        [SerializeField] private Color damageColor = new Color(1f, 0.35f, 0.35f, 1f);
+        [SerializeField] private Color healColor = new Color(0.45f, 1f, 0.55f, 1f);
+
+        private void Awake()
+        {
+            if (worldCamera == null)
+                worldCamera = Camera.main;
+        }
+
+        private void OnEnable()
+        {
+            SubscribePlayer();
+            SubscribeEnemies();
+        }
+
+        private void OnDisable()
+        {
+            UnsubscribePlayer();
+            UnsubscribeEnemies();
+        }
+
+        /// <summary>Call after registering new enemies at runtime so they receive floating text.</summary>
+        public void RefreshEnemySubscriptions()
+        {
+            UnsubscribeEnemies();
+            SubscribeEnemies();
+        }
+
+        private void SubscribePlayer()
+        {
+            if (player == null)
+                return;
+
+            player.OnDamageTakenEvent += HandleUnitDamageTaken;
+            player.OnHealedEvent += HandleUnitHealed;
+        }
+
+        private void UnsubscribePlayer()
+        {
+            if (player == null)
+                return;
+
+            player.OnDamageTakenEvent -= HandleUnitDamageTaken;
+            player.OnHealedEvent -= HandleUnitHealed;
+        }
+
+        private void SubscribeEnemies()
+        {
+            if (enemyActionSystem == null)
+                return;
+
+            var list = enemyActionSystem.Enemies;
+            for (int i = 0; i < list.Count; i++)
+            {
+                var enemy = list[i];
+                if (enemy == null)
+                    continue;
+
+                enemy.OnDamageTakenEvent += HandleUnitDamageTaken;
+                enemy.OnHealedEvent += HandleUnitHealed;
+            }
+        }
+
+        private void UnsubscribeEnemies()
+        {
+            if (enemyActionSystem == null)
+                return;
+
+            var list = enemyActionSystem.Enemies;
+            for (int i = 0; i < list.Count; i++)
+            {
+                var enemy = list[i];
+                if (enemy == null)
+                    continue;
+
+                enemy.OnDamageTakenEvent -= HandleUnitDamageTaken;
+                enemy.OnHealedEvent -= HandleUnitHealed;
+            }
+        }
+
+        private void HandleUnitDamageTaken(BattleUnit unit, int amount)
+        {
+            SpawnAtUnit(unit, amount, false);
+        }
+
+        private void HandleUnitHealed(BattleUnit unit, int amount)
+        {
+            SpawnAtUnit(unit, amount, true);
+        }
+
+        private void SpawnAtUnit(BattleUnit unit, int amount, bool isHeal)
+        {
+            if (unit == null || floatingTextPrefab == null || container == null)
+                return;
+
+            Vector3 worldPos = GetSpawnWorldPosition(unit);
+            if (!TryWorldToContainerLocal(worldPos, out Vector2 localPoint))
+                return;
+
+            string text = isHeal ? $"+{amount}" : $"-{amount}";
+            Color color = isHeal ? healColor : damageColor;
+
+            var instance = Instantiate(floatingTextPrefab, container);
+            var rt = instance.GetComponent<RectTransform>();
+            if (rt != null)
+                rt.anchoredPosition = localPoint;
+
+            instance.Play(text, color);
+        }
+
+        private Vector3 GetSpawnWorldPosition(BattleUnit unit)
+        {
+            if (unit is EnemyBattleUnit enemy)
+            {
+                if (enemy.UIAnchorDamage != null)
+                    return enemy.UIAnchorDamage.position;
+
+                if (enemy.UIAnchorHP != null)
+                    return enemy.UIAnchorHP.position;
+            }
+
+            if (player != null && unit == player && playerAnchor != null)
+                return playerAnchor.position;
+
+            return unit.transform.position + defaultWorldOffset;
+        }
+
+        private bool TryWorldToContainerLocal(Vector3 worldPosition, out Vector2 localPoint)
+        {
+            localPoint = default;
+
+            if (canvas == null)
+                canvas = container.GetComponentInParent<Canvas>();
+            if (canvas == null)
+                return false;
+
+            Camera cam = worldCamera != null ? worldCamera : Camera.main;
+            if (cam == null)
+                return false;
+
+            Vector2 screenPoint = RectTransformUtility.WorldToScreenPoint(cam, worldPosition);
+            Camera eventCamera = canvas.renderMode == RenderMode.ScreenSpaceOverlay ? null : canvas.worldCamera != null ? canvas.worldCamera : cam;
+
+            return RectTransformUtility.ScreenPointToLocalPointInRectangle(container, screenPoint, eventCamera, out localPoint);
+        }
+    }
+}

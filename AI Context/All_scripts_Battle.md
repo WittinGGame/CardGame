@@ -785,6 +785,9 @@ namespace CardBattle.Core
 
         public event Action<int, int> OnHpChangedEvent;
 
+        public event Action<BattleUnit, int> OnDamageTakenEvent;
+        public event Action<BattleUnit, int> OnHealedEvent;
+
         protected virtual void Awake()
         {
             if (currentHp <= 0)
@@ -801,6 +804,7 @@ namespace CardBattle.Core
             currentHp = Mathf.Max(0, currentHp - amount);
             OnHpChanged();
             NotifyHpChanged();
+            OnDamageTakenEvent?.Invoke(this, amount);
 
             if (currentHp == 0)
                 OnDefeated();
@@ -814,6 +818,7 @@ namespace CardBattle.Core
             currentHp = Mathf.Min(maxHp, currentHp + amount);
             OnHpChanged();
             NotifyHpChanged();
+            OnHealedEvent?.Invoke(this, amount);
         }
 
         public virtual void SetMaxHp(int value, bool refillToMax = false)
