@@ -41,9 +41,16 @@ namespace CardBattle.Core
 
         [SerializeField] private float scaleLerpSpeed = 12f;
         [SerializeField] private float moveLerpSpeed = 12f;
+        [SerializeField] private float layoutLerpSpeed = 12f;
+        [SerializeField] private float rotationLerpSpeed = 14f;
 
         private CardInstance boundCard;
         private CardVisualState currentState = CardVisualState.Normal;
+
+        private RectTransform _rectTransform;
+        private Vector2 targetLayoutAnchoredPos;
+        private float _layoutRotationZ;
+        private float targetRotationZ;
 
         private Vector3 baseScale = Vector3.one;
         private Vector3 targetScale = Vector3.one;
@@ -57,6 +64,9 @@ namespace CardBattle.Core
         public CardInstance BoundCard => boundCard;
         public bool IsSelected => isSelected;
         public bool IsInteractable => isInteractable;
+
+        public event System.Action<CardViewUI> OnHoverStarted;
+        public event System.Action<CardViewUI> OnHoverEnded;
 
         private void Awake()
         {
@@ -76,11 +86,52 @@ namespace CardBattle.Core
 
                 baseLocalPosition = visualRoot.localPosition;
                 targetLocalPosition = baseLocalPosition;
+
+                targetRotationZ = visualRoot.localEulerAngles.z;
+                _layoutRotationZ = targetRotationZ;
             }
+
+            _rectTransform = GetComponent<RectTransform>();
+            if (_rectTransform != null)
+                targetLayoutAnchoredPos = _rectTransform.anchoredPosition;
+        }
+
+        /// <summary>Tuning from <see cref="HandUIController"/> so hand and card share one layout motion speed.</summary>
+        public void SetLayoutLerpSpeed(float speed)
+        {
+            layoutLerpSpeed = Mathf.Max(0f, speed);
+        }
+
+        /// <summary>Targets root layout position and idle fan rotation; motion is smoothed in <see cref="Update"/>.</summary>
+        public void SetLayoutPose(Vector2 anchoredPos, float rotationZ)
+        {
+            targetLayoutAnchoredPos = anchoredPos;
+            _layoutRotationZ = rotationZ;
+            SyncRotationTargetToState();
+        }
+
+        private void SyncRotationTargetToState()
+        {
+            if (currentState == CardVisualState.Hovered || currentState == CardVisualState.Selected)
+                targetRotationZ = 0f;
+            else
+                targetRotationZ = _layoutRotationZ;
         }
 
         private void Update()
         {
+            if (_rectTransform == null)
+                _rectTransform = GetComponent<RectTransform>();
+
+            if (_rectTransform != null)
+            {
+                _rectTransform.anchoredPosition = Vector2.Lerp(
+                    _rectTransform.anchoredPosition,
+                    targetLayoutAnchoredPos,
+                    Time.deltaTime * layoutLerpSpeed
+                );
+            }
+
             if (visualRoot == null)
                 return;
 
@@ -95,6 +146,10 @@ namespace CardBattle.Core
                 targetLocalPosition,
                 Time.deltaTime * moveLerpSpeed
             );
+
+            float currentZ = visualRoot.localEulerAngles.z;
+            float newZ = Mathf.LerpAngle(currentZ, targetRotationZ, Time.deltaTime * rotationLerpSpeed);
+            visualRoot.localEulerAngles = new Vector3(0f, 0f, newZ);
         }
 
         public void Bind(CardInstance card)
@@ -166,6 +221,9 @@ namespace CardBattle.Core
             if (!isInteractable)
                 return;
 
+            if (currentState == CardVisualState.Hovered)
+                OnHoverEnded?.Invoke(this);
+
             isSelected = true;
             currentState = CardVisualState.Selected;
             ApplyStateVisuals();
@@ -188,6 +246,8 @@ namespace CardBattle.Core
             if (!isInteractable || isSelected)
                 return;
 
+            OnHoverStarted?.Invoke(this);
+
             currentState = CardVisualState.Hovered;
             ApplyStateVisuals();
         }
@@ -201,6 +261,8 @@ namespace CardBattle.Core
             if (isSelected)
                 return;
 
+            OnHoverEnded?.Invoke(this);
+
             currentState = CardVisualState.Normal;
             ApplyStateVisuals();
         }
@@ -209,6 +271,8 @@ namespace CardBattle.Core
         {
             if (visualRoot == null)
                 return;
+
+            SyncRotationTargetToState();
 
             switch (currentState)
             {

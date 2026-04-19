@@ -448,9 +448,16 @@ namespace CardBattle.Core
 
         [SerializeField] private float scaleLerpSpeed = 12f;
         [SerializeField] private float moveLerpSpeed = 12f;
+        [SerializeField] private float layoutLerpSpeed = 12f;
+        [SerializeField] private float rotationLerpSpeed = 14f;
 
         private CardInstance boundCard;
         private CardVisualState currentState = CardVisualState.Normal;
+
+        private RectTransform _rectTransform;
+        private Vector2 targetLayoutAnchoredPos;
+        private float _layoutRotationZ;
+        private float targetRotationZ;
 
         private Vector3 baseScale = Vector3.one;
         private Vector3 targetScale = Vector3.one;
@@ -464,6 +471,9 @@ namespace CardBattle.Core
         public CardInstance BoundCard => boundCard;
         public bool IsSelected => isSelected;
         public bool IsInteractable => isInteractable;
+
+        public event System.Action<CardViewUI> OnHoverStarted;
+        public event System.Action<CardViewUI> OnHoverEnded;
 
         private void Awake()
         {
@@ -483,11 +493,52 @@ namespace CardBattle.Core
 
                 baseLocalPosition = visualRoot.localPosition;
                 targetLocalPosition = baseLocalPosition;
+
+                targetRotationZ = visualRoot.localEulerAngles.z;
+                _layoutRotationZ = targetRotationZ;
             }
+
+            _rectTransform = GetComponent<RectTransform>();
+            if (_rectTransform != null)
+                targetLayoutAnchoredPos = _rectTransform.anchoredPosition;
+        }
+
+        /// <summary>Tuning from <see cref="HandUIController"/> so hand and card share one layout motion speed.</summary>
+        public void SetLayoutLerpSpeed(float speed)
+        {
+            layoutLerpSpeed = Mathf.Max(0f, speed);
+        }
+
+        /// <summary>Targets root layout position and idle fan rotation; motion is smoothed in <see cref="Update"/>.</summary>
+        public void SetLayoutPose(Vector2 anchoredPos, float rotationZ)
+        {
+            targetLayoutAnchoredPos = anchoredPos;
+            _layoutRotationZ = rotationZ;
+            SyncRotationTargetToState();
+        }
+
+        private void SyncRotationTargetToState()
+        {
+            if (currentState == CardVisualState.Hovered || currentState == CardVisualState.Selected)
+                targetRotationZ = 0f;
+            else
+                targetRotationZ = _layoutRotationZ;
         }
 
         private void Update()
         {
+            if (_rectTransform == null)
+                _rectTransform = GetComponent<RectTransform>();
+
+            if (_rectTransform != null)
+            {
+                _rectTransform.anchoredPosition = Vector2.Lerp(
+                    _rectTransform.anchoredPosition,
+                    targetLayoutAnchoredPos,
+                    Time.deltaTime * layoutLerpSpeed
+                );
+            }
+
             if (visualRoot == null)
                 return;
 
@@ -502,6 +553,10 @@ namespace CardBattle.Core
                 targetLocalPosition,
                 Time.deltaTime * moveLerpSpeed
             );
+
+            float currentZ = visualRoot.localEulerAngles.z;
+            float newZ = Mathf.LerpAngle(currentZ, targetRotationZ, Time.deltaTime * rotationLerpSpeed);
+            visualRoot.localEulerAngles = new Vector3(0f, 0f, newZ);
         }
 
         public void Bind(CardInstance card)
@@ -573,6 +628,9 @@ namespace CardBattle.Core
             if (!isInteractable)
                 return;
 
+            if (currentState == CardVisualState.Hovered)
+                OnHoverEnded?.Invoke(this);
+
             isSelected = true;
             currentState = CardVisualState.Selected;
             ApplyStateVisuals();
@@ -595,6 +653,8 @@ namespace CardBattle.Core
             if (!isInteractable || isSelected)
                 return;
 
+            OnHoverStarted?.Invoke(this);
+
             currentState = CardVisualState.Hovered;
             ApplyStateVisuals();
         }
@@ -608,6 +668,8 @@ namespace CardBattle.Core
             if (isSelected)
                 return;
 
+            OnHoverEnded?.Invoke(this);
+
             currentState = CardVisualState.Normal;
             ApplyStateVisuals();
         }
@@ -616,6 +678,8 @@ namespace CardBattle.Core
         {
             if (visualRoot == null)
                 return;
+
+            SyncRotationTargetToState();
 
             switch (currentState)
             {
@@ -697,13 +761,21 @@ namespace CardBattle.Core
         [SerializeField] private bool disableUnplayableCards = true;
         [SerializeField] private bool verboseLogs = false;
 
+        [Header("Fan layout")]
+        [SerializeField] private float spacing = 135f;
+        [SerializeField] private float curveHeight = 14f;
+        [SerializeField] private float rotationStep = 6f;
+        [SerializeField] private float hoverGap = 90f;
+        [SerializeField] private float layoutLerpSpeed = 12f;
+
         private readonly List<CardViewUI> spawnedCards = new List<CardViewUI>();
         private CardViewUI selectedView;
+        private CardViewUI hoveredCardView;
 
         private void OnEnable()
         {
             if (deckController != null)
-                deckController.OnPilesChanged += RefreshHandUI;
+                deckController.OnPilesChanged += SyncHandViews;
 
             if (player != null)
             {
@@ -718,7 +790,7 @@ namespace CardBattle.Core
         private void OnDisable()
         {
             if (deckController != null)
-                deckController.OnPilesChanged -= RefreshHandUI;
+                deckController.OnPilesChanged -= SyncHandViews;
 
             if (player != null)
             {
@@ -744,6 +816,7 @@ namespace CardBattle.Core
 
             ClearSpawnedCards();
             selectedView = null;
+            hoveredCardView = null;
 
             var hand = deckController.Hand;
             for (int i = 0; i < hand.Count; i++)
@@ -752,14 +825,117 @@ namespace CardBattle.Core
                 if (card?.Data == null)
                     continue;
 
-                var view = Instantiate(cardViewPrefab, handContainer);
-                spawnedCards.Add(view);
-
-                view.Bind(card);
-                SetupCardView(view, card);
+                spawnedCards.Add(CreateCardView(card));
             }
 
             RefreshCardInteractivity();
+            LayoutCards();
+        }
+
+        /// <summary>Syncs list of card views with the deck hand without rebuilding views for cards that are still in hand.</summary>
+        private void SyncHandViews()
+        {
+            if (!ValidateReferences())
+                return;
+
+            for (int i = spawnedCards.Count - 1; i >= 0; i--)
+            {
+                var view = spawnedCards[i];
+                if (view == null)
+                {
+                    spawnedCards.RemoveAt(i);
+                    continue;
+                }
+
+                var bound = view.BoundCard;
+                if (bound == null || bound.Data == null || !deckController.IsInHand(bound))
+                    RemoveView(view);
+            }
+
+            var hand = deckController.Hand;
+            var used = new HashSet<CardViewUI>();
+            var newOrder = new List<CardViewUI>(hand.Count);
+
+            for (int i = 0; i < hand.Count; i++)
+            {
+                var card = hand[i];
+                if (card?.Data == null)
+                    continue;
+
+                CardViewUI view = null;
+                for (int j = 0; j < spawnedCards.Count; j++)
+                {
+                    var candidate = spawnedCards[j];
+                    if (candidate != null && !used.Contains(candidate) && candidate.BoundCard == card)
+                    {
+                        view = candidate;
+                        break;
+                    }
+                }
+
+                if (view != null)
+                    used.Add(view);
+                else
+                    view = CreateCardView(card);
+
+                newOrder.Add(view);
+            }
+
+            spawnedCards.Clear();
+            spawnedCards.AddRange(newOrder);
+
+            RefreshCardInteractivity();
+            LayoutCards();
+        }
+
+        private bool HasViewForCard(CardInstance card)
+        {
+            if (card == null)
+                return false;
+
+            for (int i = 0; i < spawnedCards.Count; i++)
+            {
+                var v = spawnedCards[i];
+                if (v != null && v.BoundCard == card)
+                    return true;
+            }
+
+            return false;
+        }
+
+        private CardViewUI CreateCardView(CardInstance card)
+        {
+            var view = Instantiate(cardViewPrefab, handContainer);
+
+            view.Bind(card);
+            view.SetLayoutLerpSpeed(layoutLerpSpeed);
+            SetupCardView(view, card);
+
+            view.OnHoverStarted += HandleCardHoverStarted;
+            view.OnHoverEnded += HandleCardHoverEnded;
+
+            return view;
+        }
+
+        private void RemoveView(CardViewUI view)
+        {
+            if (view == null)
+                return;
+
+            view.OnHoverStarted -= HandleCardHoverStarted;
+            view.OnHoverEnded -= HandleCardHoverEnded;
+
+            if (hoveredCardView == view)
+                hoveredCardView = null;
+
+            if (selectedView == view)
+            {
+                selectedView = null;
+                view.Deselect();
+            }
+
+            spawnedCards.Remove(view);
+            Destroy(view.gameObject);
         }
 
         private void SetupCardView(CardViewUI view, CardInstance card)
@@ -775,6 +951,57 @@ namespace CardBattle.Core
                 SelectView(view);
                 TryPlayCardFromView(card);
             });
+        }
+
+        private void HandleCardHoverStarted(CardViewUI view)
+        {
+            hoveredCardView = view;
+            LayoutCards();
+        }
+
+        private void HandleCardHoverEnded(CardViewUI view)
+        {
+            if (hoveredCardView == view)
+                hoveredCardView = null;
+
+            LayoutCards();
+        }
+
+        /// <summary>Places cards in a fan; on hover, opens a gap at the hovered index so that card keeps its base X.</summary>
+        private void LayoutCards()
+        {
+            var container = handContainer as RectTransform;
+            if (container == null || spawnedCards.Count == 0)
+                return;
+
+            int count = spawnedCards.Count;
+            float centerIndex = count > 1 ? (count - 1) * 0.5f : 0f;
+
+            int hoveredIndex = hoveredCardView != null ? spawnedCards.IndexOf(hoveredCardView) : -1;
+
+            for (int i = 0; i < count; i++)
+            {
+                var view = spawnedCards[i];
+                if (view == null)
+                    continue;
+
+                float relative = i - centerIndex;
+
+                float x = relative * spacing;
+                float y = -curveHeight * relative * relative;
+
+                if (hoveredIndex >= 0)
+                {
+                    if (i < hoveredIndex)
+                        x -= hoverGap * 0.5f;
+                    else if (i > hoveredIndex)
+                        x += hoverGap * 0.5f;
+                }
+
+                float rotZ = -relative * rotationStep;
+
+                view.SetLayoutPose(new Vector2(x, y), rotZ);
+            }
         }
 
         private void SelectView(CardViewUI view)
@@ -891,10 +1118,17 @@ namespace CardBattle.Core
 
         private void ClearSpawnedCards()
         {
+            hoveredCardView = null;
+
             for (int i = 0; i < spawnedCards.Count; i++)
             {
-                if (spawnedCards[i] != null)
-                    Destroy(spawnedCards[i].gameObject);
+                var v = spawnedCards[i];
+                if (v != null)
+                {
+                    v.OnHoverStarted -= HandleCardHoverStarted;
+                    v.OnHoverEnded -= HandleCardHoverEnded;
+                    Destroy(v.gameObject);
+                }
             }
 
             spawnedCards.Clear();

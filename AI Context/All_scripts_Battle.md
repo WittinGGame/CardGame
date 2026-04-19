@@ -746,9 +746,6 @@ namespace CardBattle.Core
 
             battleActionRunner.TryPlayCard(_pendingCard, target);
             _pendingCard = null;
-
-            if (handUIController != null)
-                handUIController.RefreshHandUI();
         }
 
         private void SetHighlight(bool value)
