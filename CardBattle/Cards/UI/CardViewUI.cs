@@ -60,10 +60,12 @@ namespace CardBattle.Core
 
         private bool isInteractable = true;
         private bool isSelected = false;
+        private bool isPointerOver;
 
         public CardInstance BoundCard => boundCard;
         public bool IsSelected => isSelected;
         public bool IsInteractable => isInteractable;
+        public bool IsPointerOver => isPointerOver;
 
         public event System.Action<CardViewUI> OnHoverStarted;
         public event System.Action<CardViewUI> OnHoverEnded;
@@ -193,7 +195,9 @@ namespace CardBattle.Core
             }
             else
             {
-                currentState = CardVisualState.Normal;
+                currentState = isSelected
+                    ? CardVisualState.Selected
+                    : (isPointerOver ? CardVisualState.Hovered : CardVisualState.Normal);
             }
 
             ApplyStateVisuals();
@@ -221,9 +225,6 @@ namespace CardBattle.Core
             if (!isInteractable)
                 return;
 
-            if (currentState == CardVisualState.Hovered)
-                OnHoverEnded?.Invoke(this);
-
             isSelected = true;
             currentState = CardVisualState.Selected;
             ApplyStateVisuals();
@@ -235,6 +236,11 @@ namespace CardBattle.Core
 
             if (!isInteractable)
                 currentState = CardVisualState.Disabled;
+            else if (isPointerOver)
+            {
+                currentState = CardVisualState.Hovered;
+                OnHoverStarted?.Invoke(this);
+            }
             else
                 currentState = CardVisualState.Normal;
 
@@ -243,6 +249,8 @@ namespace CardBattle.Core
 
         public void OnPointerEnter(PointerEventData eventData)
         {
+            isPointerOver = true;
+
             if (!isInteractable || isSelected)
                 return;
 
@@ -254,10 +262,11 @@ namespace CardBattle.Core
 
         public void OnPointerExit(PointerEventData eventData)
         {
+            isPointerOver = false;
+
             if (!isInteractable)
                 return;
 
-            // ถ้า selected อยู่ ต้องค้าง state เดิม
             if (isSelected)
                 return;
 

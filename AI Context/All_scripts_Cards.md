@@ -467,10 +467,12 @@ namespace CardBattle.Core
 
         private bool isInteractable = true;
         private bool isSelected = false;
+        private bool isPointerOver;
 
         public CardInstance BoundCard => boundCard;
         public bool IsSelected => isSelected;
         public bool IsInteractable => isInteractable;
+        public bool IsPointerOver => isPointerOver;
 
         public event System.Action<CardViewUI> OnHoverStarted;
         public event System.Action<CardViewUI> OnHoverEnded;
@@ -600,7 +602,9 @@ namespace CardBattle.Core
             }
             else
             {
-                currentState = CardVisualState.Normal;
+                currentState = isSelected
+                    ? CardVisualState.Selected
+                    : (isPointerOver ? CardVisualState.Hovered : CardVisualState.Normal);
             }
 
             ApplyStateVisuals();
@@ -628,9 +632,6 @@ namespace CardBattle.Core
             if (!isInteractable)
                 return;
 
-            if (currentState == CardVisualState.Hovered)
-                OnHoverEnded?.Invoke(this);
-
             isSelected = true;
             currentState = CardVisualState.Selected;
             ApplyStateVisuals();
@@ -642,6 +643,11 @@ namespace CardBattle.Core
 
             if (!isInteractable)
                 currentState = CardVisualState.Disabled;
+            else if (isPointerOver)
+            {
+                currentState = CardVisualState.Hovered;
+                OnHoverStarted?.Invoke(this);
+            }
             else
                 currentState = CardVisualState.Normal;
 
@@ -650,6 +656,8 @@ namespace CardBattle.Core
 
         public void OnPointerEnter(PointerEventData eventData)
         {
+            isPointerOver = true;
+
             if (!isInteractable || isSelected)
                 return;
 
@@ -661,10 +669,11 @@ namespace CardBattle.Core
 
         public void OnPointerExit(PointerEventData eventData)
         {
+            isPointerOver = false;
+
             if (!isInteractable)
                 return;
 
-            // ถ้า selected อยู่ ต้องค้าง state เดิม
             if (isSelected)
                 return;
 
@@ -967,7 +976,28 @@ namespace CardBattle.Core
             LayoutCards();
         }
 
-        /// <summary>Places cards in a fan; on hover, opens a gap at the hovered index so that card keeps its base X.</summary>
+        private CardViewUI GetFocusedCardView()
+        {
+            if (hoveredCardView != null &&
+                spawnedCards.Contains(hoveredCardView) &&
+                hoveredCardView.IsPointerOver)
+            {
+                return hoveredCardView;
+            }
+
+            if (selectedView != null && spawnedCards.Contains(selectedView))
+                return selectedView;
+
+            return null;
+        }
+
+        private int GetFocusedCardIndex()
+        {
+            var focused = GetFocusedCardView();
+            return focused != null ? spawnedCards.IndexOf(focused) : -1;
+        }
+
+        /// <summary>Places cards in a fan; opens a gap at the focused card (hover takes priority over selection).</summary>
         private void LayoutCards()
         {
             var container = handContainer as RectTransform;
@@ -977,7 +1007,7 @@ namespace CardBattle.Core
             int count = spawnedCards.Count;
             float centerIndex = count > 1 ? (count - 1) * 0.5f : 0f;
 
-            int hoveredIndex = hoveredCardView != null ? spawnedCards.IndexOf(hoveredCardView) : -1;
+            int focusedIndex = GetFocusedCardIndex();
 
             for (int i = 0; i < count; i++)
             {
@@ -990,11 +1020,11 @@ namespace CardBattle.Core
                 float x = relative * spacing;
                 float y = -curveHeight * relative * relative;
 
-                if (hoveredIndex >= 0)
+                if (focusedIndex >= 0)
                 {
-                    if (i < hoveredIndex)
+                    if (i < focusedIndex)
                         x -= hoverGap * 0.5f;
-                    else if (i > hoveredIndex)
+                    else if (i > focusedIndex)
                         x += hoverGap * 0.5f;
                 }
 
@@ -1014,15 +1044,22 @@ namespace CardBattle.Core
 
             selectedView = view;
             selectedView.Select();
+            LayoutCards();
         }
 
         public void DeselectCurrentCard()
         {
             if (selectedView != null)
             {
-                selectedView.Deselect();
+                var previouslySelected = selectedView;
+                previouslySelected.Deselect();
                 selectedView = null;
+
+                if (hoveredCardView == previouslySelected && !previouslySelected.IsPointerOver)
+                    hoveredCardView = null;
             }
+
+            LayoutCards();
         }
 
         private void TryPlayCardFromView(CardInstance card)
