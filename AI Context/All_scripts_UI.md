@@ -18,6 +18,8 @@ namespace CardBattle.Core
         [Header("UI References")]
         [SerializeField] private TextMeshProUGUI playerApText;
         [SerializeField] private TextMeshProUGUI playerHpText;
+        [SerializeField] private GameObject playerBlockRoot;
+        [SerializeField] private TextMeshProUGUI playerBlockText;
         [SerializeField] private Button endTurnButton;
         [SerializeField] private HpBarUI playerHpBar;
         [SerializeField] private TargetSelectionSystem targetSelectionSystem;
@@ -35,6 +37,7 @@ namespace CardBattle.Core
             {
                 HandlePlayerHpChanged(player.CurrentHp, player.MaxHp);
                 HandlePlayerApChanged(player.CurrentAp, player.ApPerRound);
+                HandlePlayerBlockChanged(player.CurrentBlock);
             }
             RefreshUIExternal();
         }
@@ -46,6 +49,7 @@ namespace CardBattle.Core
                 player.OnHpChangedEvent += HandlePlayerHpChanged;
                 player.OnApChangedEvent += HandlePlayerApChanged;
                 player.OnTurnStateChanged += HandleTurnStateChanged;
+                player.OnBlockChangedEvent += HandlePlayerBlockChanged;
             }
 
             if (battleActionRunner != null)
@@ -59,6 +63,7 @@ namespace CardBattle.Core
                 player.OnHpChangedEvent -= HandlePlayerHpChanged;
                 player.OnApChangedEvent -= HandlePlayerApChanged;
                 player.OnTurnStateChanged -= HandleTurnStateChanged;
+                player.OnBlockChangedEvent -= HandlePlayerBlockChanged;
             }
 
             if (battleActionRunner != null)
@@ -102,6 +107,15 @@ namespace CardBattle.Core
         {
             if (playerApText != null)
                 playerApText.text = $"{currentAp}";
+        }
+
+        private void HandlePlayerBlockChanged(int currentBlock)
+        {
+            if (playerBlockText != null)
+                playerBlockText.text = currentBlock.ToString();
+
+            if (playerBlockRoot != null)
+                playerBlockRoot.SetActive(currentBlock > 0);
         }
 
         private void HandleTurnStateChanged(bool canAct)
