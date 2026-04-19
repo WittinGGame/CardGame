@@ -18,10 +18,9 @@ namespace CardBattle.Core
         [Header("UI References")]
         [SerializeField] private TextMeshProUGUI playerApText;
         [SerializeField] private TextMeshProUGUI playerHpText;
-        [SerializeField] private EnemyStatusUI enemyStatusUI1;
-        [SerializeField] private EnemyStatusUI enemyStatusUI2;
         [SerializeField] private Button endTurnButton;
         [SerializeField] private HpBarUI playerHpBar;
+        [SerializeField] private TargetSelectionSystem targetSelectionSystem;
 
         private void Start()
         {
@@ -71,13 +70,14 @@ namespace CardBattle.Core
             if (battleActionRunner == null)
                 return;
 
+            if (targetSelectionSystem != null && targetSelectionSystem.IsSelectingTarget)
+                targetSelectionSystem.CancelTargetSelection();
+
             battleActionRunner.TryEndTurn();
         }
 
         public void RefreshUIExternal()
         {
-            enemyStatusUI1?.Refresh();
-            enemyStatusUI2?.Refresh();
             RefreshEndTurnButtonState();
         }
 
@@ -87,22 +87,6 @@ namespace CardBattle.Core
                 return;
 
             var enemies = enemyActionSystem.Enemies;
-
-            if (enemyStatusUI1 != null)
-            {
-                if (enemies.Count > 0 && enemies[0] != null)
-                    enemyStatusUI1.SetTarget(enemies[0]);
-                else
-                    enemyStatusUI1.SetTarget(null);
-            }
-
-            if (enemyStatusUI2 != null)
-            {
-                if (enemies.Count > 1 && enemies[1] != null)
-                    enemyStatusUI2.SetTarget(enemies[1]);
-                else
-                    enemyStatusUI2.SetTarget(null);
-            }
         }
 
         private void HandlePlayerHpChanged(int currentHp, int maxHp)
