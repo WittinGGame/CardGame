@@ -25,6 +25,9 @@ namespace CardBattle.Core
         [Tooltip("Generic potency for buffs (e.g. extra damage on next attack, block, etc.). Wired in CardResolver / player hooks.")]
         [SerializeField] private int buffPotency = 1;
 
+        [Header("Defend")]
+        [SerializeField] private int blockAmount = 5;
+
         [Header("Visuals")]
         [SerializeField] private Sprite artwork;
 
@@ -35,6 +38,7 @@ namespace CardBattle.Core
         public int AttackDamage => Mathf.Max(0, attackDamage);
         public int HealAmount => Mathf.Max(0, healAmount);
         public int BuffPotency => buffPotency;
+        public int BlockAmount => Mathf.Max(0, blockAmount);
         public Sprite Artwork => artwork;
     }
 }

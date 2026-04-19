@@ -254,6 +254,8 @@ namespace CardBattle.Core
                     return $"Heal {data.HealAmount}";
                 case CardType.Buff:
                     return $"Gain +{data.BuffPotency}";
+                case CardType.Defend:
+                    return $"Gain {data.BlockAmount} Block";
                 default:
                     return "";
             }

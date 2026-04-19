@@ -778,12 +778,15 @@ namespace CardBattle.Core
     {
         [SerializeField] protected int maxHp = 10;
         [SerializeField] protected int currentHp;
+        protected int currentBlock;
 
         public int MaxHp => maxHp;
         public int CurrentHp => currentHp;
+        public int CurrentBlock => currentBlock;
         public bool IsAlive => currentHp > 0;
 
         public event Action<int, int> OnHpChangedEvent;
+        public event Action<int> OnBlockChangedEvent;
 
         public event Action<BattleUnit, int> OnDamageTakenEvent;
         public event Action<BattleUnit, int> OnHealedEvent;
@@ -796,18 +799,60 @@ namespace CardBattle.Core
             NotifyHpChanged();
         }
 
-        public virtual void TakeDamage(int amount)
+        /// <returns>Damage applied to HP after block (not raw incoming amount).</returns>
+        public virtual int TakeDamage(int amount)
+        {
+            if (amount <= 0 || !IsAlive)
+                return 0;
+
+            int remaining = amount;
+
+            if (currentBlock > 0)
+            {
+                int absorbed = Mathf.Min(currentBlock, remaining);
+                currentBlock -= absorbed;
+                remaining -= absorbed;
+                NotifyBlockChanged();
+            }
+
+            int hpDamage = 0;
+            if (remaining > 0)
+            {
+                hpDamage = remaining;
+                currentHp = Mathf.Max(0, currentHp - hpDamage);
+                OnHpChanged();
+                NotifyHpChanged();
+            }
+
+            OnDamageTakenEvent?.Invoke(this, hpDamage);
+
+            if (currentHp == 0)
+                OnDefeated();
+
+            return hpDamage;
+        }
+
+        public virtual void AddBlock(int amount)
         {
             if (amount <= 0 || !IsAlive)
                 return;
 
-            currentHp = Mathf.Max(0, currentHp - amount);
-            OnHpChanged();
-            NotifyHpChanged();
-            OnDamageTakenEvent?.Invoke(this, amount);
+            currentBlock += amount;
+            NotifyBlockChanged();
+        }
 
-            if (currentHp == 0)
-                OnDefeated();
+        public virtual void ClearBlock()
+        {
+            if (currentBlock == 0)
+                return;
+
+            currentBlock = 0;
+            NotifyBlockChanged();
+        }
+
+        private void NotifyBlockChanged()
+        {
+            OnBlockChangedEvent?.Invoke(currentBlock);
         }
 
         public virtual void Heal(int amount)
@@ -865,11 +910,13 @@ namespace CardBattle.Core
         [SerializeField] private Transform uiAnchorHP;
         [SerializeField] private Transform uiAnchorIntent;
         [SerializeField] private Transform uiAnchorBuff;
+        [SerializeField] private Transform uiAnchorDamage;
 
         public BattleUnitView View => battleUnitView;
         public Transform UIAnchorHP => uiAnchorHP;
         public Transform UIAnchorIntent => uiAnchorIntent;
         public Transform UIAnchorBuff => uiAnchorBuff;
+        public Transform UIAnchorDamage => uiAnchorDamage;
 
         private int _countdown;
         private bool _hasAttackedThisPlayerRound;
@@ -1088,14 +1135,14 @@ namespace CardBattle.Core
             var damage = enemyData != null ? enemyData.AttackDamage : 0;
             bool wasAliveBeforeHit = pendingTarget.IsAlive;
 
-            pendingTarget.TakeDamage(damage);
+            int hpDamage = pendingTarget.TakeDamage(damage);
 
             if (wasAliveBeforeHit)
             {
-                if (pendingTarget.IsAlive)
-                    pendingTarget.View?.PlayHurt();
-                else
+                if (!pendingTarget.IsAlive)
                     pendingTarget.View?.PlayDead();
+                else if (hpDamage > 0)
+                    pendingTarget.View?.PlayHurt();
             }
 
             _hasAttackedThisPlayerRound = true;
@@ -1155,6 +1202,7 @@ namespace CardBattle.Core
             _turnCommitted = false;
             CurrentAp = Mathf.Max(0, apPerRound);
             _pendingAttackBonus = 0;
+            ClearBlock();
             NotifyApChanged();
             NotifyTurnStateChanged();
         }

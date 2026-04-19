@@ -5,6 +5,7 @@ namespace CardBattle.Core
     {
         Attack,
         Buff,
-        Heal
+        Heal,
+        Defend
     }
 }

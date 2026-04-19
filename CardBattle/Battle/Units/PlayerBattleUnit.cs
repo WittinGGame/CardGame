@@ -41,6 +41,7 @@ namespace CardBattle.Core
             _turnCommitted = false;
             CurrentAp = Mathf.Max(0, apPerRound);
             _pendingAttackBonus = 0;
+            ClearBlock();
             NotifyApChanged();
             NotifyTurnStateChanged();
         }

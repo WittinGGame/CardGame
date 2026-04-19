@@ -240,14 +240,14 @@ namespace CardBattle.Core
             var damage = enemyData != null ? enemyData.AttackDamage : 0;
             bool wasAliveBeforeHit = pendingTarget.IsAlive;
 
-            pendingTarget.TakeDamage(damage);
+            int hpDamage = pendingTarget.TakeDamage(damage);
 
             if (wasAliveBeforeHit)
             {
-                if (pendingTarget.IsAlive)
-                    pendingTarget.View?.PlayHurt();
-                else
+                if (!pendingTarget.IsAlive)
                     pendingTarget.View?.PlayDead();
+                else if (hpDamage > 0)
+                    pendingTarget.View?.PlayHurt();
             }
 
             _hasAttackedThisPlayerRound = true;

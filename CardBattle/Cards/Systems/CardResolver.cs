@@ -45,6 +45,9 @@ namespace CardBattle.Core
                 case CardType.Buff:
                     context.Player.ApplyBuffFromCard(data);
                     break;
+                case CardType.Defend:
+                    context.Player.AddBlock(data.BlockAmount);
+                    break;
                 default:
                     Debug.LogWarning($"Unhandled card type {data.CardType}.");
                     break;
@@ -61,14 +64,14 @@ namespace CardBattle.Core
             var total = data.AttackDamage + bonus;
             bool wasAliveBeforeHit = target.IsAlive;
 
-            target.TakeDamage(total);
+            int hpDamage = target.TakeDamage(total);
 
             if (wasAliveBeforeHit)
             {
-                if (target.IsAlive)
-                    target.View?.PlayHurt();
-                else
+                if (!target.IsAlive)
                     target.View?.PlayDead();
+                else if (hpDamage > 0)
+                    target.View?.PlayHurt();
             }
         }
 

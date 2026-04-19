@@ -29,6 +29,9 @@ namespace CardBattle.Core
         [Tooltip("Generic potency for buffs (e.g. extra damage on next attack, block, etc.). Wired in CardResolver / player hooks.")]
         [SerializeField] private int buffPotency = 1;
 
+        [Header("Defend")]
+        [SerializeField] private int blockAmount = 5;
+
         [Header("Visuals")]
         [SerializeField] private Sprite artwork;
 
@@ -39,9 +42,11 @@ namespace CardBattle.Core
         public int AttackDamage => Mathf.Max(0, attackDamage);
         public int HealAmount => Mathf.Max(0, healAmount);
         public int BuffPotency => buffPotency;
+        public int BlockAmount => Mathf.Max(0, blockAmount);
         public Sprite Artwork => artwork;
     }
 }
+
 
 ================================================================================
 FILE: CardType.cs
@@ -54,7 +59,8 @@ namespace CardBattle.Core
     {
         Attack,
         Buff,
-        Heal
+        Heal,
+        Defend
     }
 }
 
@@ -197,6 +203,9 @@ namespace CardBattle.Core
                 case CardType.Buff:
                     context.Player.ApplyBuffFromCard(data);
                     break;
+                case CardType.Defend:
+                    context.Player.AddBlock(data.BlockAmount);
+                    break;
                 default:
                     Debug.LogWarning($"Unhandled card type {data.CardType}.");
                     break;
@@ -213,14 +222,14 @@ namespace CardBattle.Core
             var total = data.AttackDamage + bonus;
             bool wasAliveBeforeHit = target.IsAlive;
 
-            target.TakeDamage(total);
+            int hpDamage = target.TakeDamage(total);
 
             if (wasAliveBeforeHit)
             {
-                if (target.IsAlive)
-                    target.View?.PlayHurt();
-                else
+                if (!target.IsAlive)
                     target.View?.PlayDead();
+                else if (hpDamage > 0)
+                    target.View?.PlayHurt();
             }
         }
 
@@ -652,6 +661,8 @@ namespace CardBattle.Core
                     return $"Heal {data.HealAmount}";
                 case CardType.Buff:
                     return $"Gain +{data.BuffPotency}";
+                case CardType.Defend:
+                    return $"Gain {data.BlockAmount} Block";
                 default:
                     return "";
             }
