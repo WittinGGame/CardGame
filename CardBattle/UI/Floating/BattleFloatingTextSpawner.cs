@@ -18,6 +18,10 @@ namespace CardBattle.Core
         [SerializeField] private Transform playerAnchor;
         [SerializeField] private Vector3 defaultWorldOffset = new Vector3(0f, 0.5f, 0f);
 
+        [Header("Screen space offsets")]
+        [SerializeField] private Vector2 playerScreenOffset = Vector2.zero;
+        [SerializeField] private Vector2 enemyScreenOffset = Vector2.zero;
+
         [Header("World cameras")]
         [Tooltip("Used for WorldToScreenPoint from world-space units. Falls back to Camera.main.")]
         [SerializeField] private Camera worldCamera;
@@ -128,9 +132,23 @@ namespace CardBattle.Core
             var instance = Instantiate(floatingTextPrefab, container);
             var rt = instance.GetComponent<RectTransform>();
             if (rt != null)
-                rt.anchoredPosition = localPoint;
+                rt.anchoredPosition = localPoint + GetScreenOffset(unit);
 
             instance.Play(text, color);
+        }
+
+        private Vector2 GetScreenOffset(BattleUnit unit)
+        {
+            if (unit == null)
+                return Vector2.zero;
+
+            if (player != null && unit == player)
+                return playerScreenOffset;
+
+            if (unit is EnemyBattleUnit)
+                return enemyScreenOffset;
+
+            return Vector2.zero;
         }
 
         private Vector3 GetSpawnWorldPosition(BattleUnit unit)
