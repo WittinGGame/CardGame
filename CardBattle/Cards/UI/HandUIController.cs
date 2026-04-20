@@ -163,6 +163,36 @@ namespace CardBattle.Core
             return false;
         }
 
+        /// <summary>Returns the visible hand view for a card, if any (for presentation VFX before pile sync removes it).</summary>
+        public CardViewUI GetViewForCard(CardInstance card)
+        {
+            if (card == null)
+                return null;
+
+            for (int i = 0; i < spawnedCards.Count; i++)
+            {
+                var v = spawnedCards[i];
+                if (v != null && v.BoundCard == card)
+                    return v;
+            }
+
+            return null;
+        }
+
+        /// <summary>Copy of current hand views for batch graveyard VFX (call before discard removes them).</summary>
+        public List<CardViewUI> GetCurrentHandViewsSnapshot()
+        {
+            var list = new List<CardViewUI>(spawnedCards.Count);
+            for (int i = 0; i < spawnedCards.Count; i++)
+            {
+                var v = spawnedCards[i];
+                if (v != null)
+                    list.Add(v);
+            }
+
+            return list;
+        }
+
         private CardViewUI CreateCardView(CardInstance card)
         {
             var view = Instantiate(cardViewPrefab, handContainer);

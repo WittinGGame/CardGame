@@ -63,6 +63,8 @@ namespace CardBattle.Core
         private bool isPointerOver;
 
         public CardInstance BoundCard => boundCard;
+        /// <summary>Root layout rect (anchored fan position). Used by presentation VFX.</summary>
+        public RectTransform LayoutRect => _rectTransform;
         public bool IsSelected => isSelected;
         public bool IsInteractable => isInteractable;
         public bool IsPointerOver => isPointerOver;
@@ -179,6 +181,12 @@ namespace CardBattle.Core
                 descriptionText.text = GetDescription(data);
 
             ApplyStateVisuals();
+        }
+
+        /// <summary>Artwork sprite for flying ghost VFX (presentation only).</summary>
+        public Sprite GetArtworkSnapshotForVfx()
+        {
+            return artworkImage != null ? artworkImage.sprite : null;
         }
 
         public void SetInteractable(bool value)

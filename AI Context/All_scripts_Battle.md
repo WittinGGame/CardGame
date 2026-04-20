@@ -281,6 +281,8 @@ namespace CardBattle.Core
         [SerializeField] private EnemyActionSystem enemyActionSystem;
         [SerializeField] private HandUIController handUIController;
         [SerializeField] private BattleHUDController battleHUDController;
+        [SerializeField] private CardToGraveyardVFXController graveyardVfx;
+        [SerializeField] private PileCounterUI pileCounterUI;
 
         [Header("Fallback / Non-Attack Timing")]
         [SerializeField] private float nonAttackResolvePause = 0.05f;
@@ -323,7 +325,16 @@ namespace CardBattle.Core
 
             int cost = card.Data.ApCost;
             player.SpendApFromRunner(cost);
+
+            CardViewUI handViewForVfx =
+                handUIController != null ? handUIController.GetViewForCard(card) : null;
+            if (graveyardVfx != null)
+                graveyardVfx.PlaySingleCardToGraveyard(handViewForVfx);
+
             deckController.PlayCardFromHand(card);
+
+            if (graveyardVfx == null)
+                pileCounterUI?.ForceSyncDisplayedToReal();
 
             bool isAttack = card.Data.CardType == CardType.Attack;
             pendingPrimaryTarget = primaryTarget;
@@ -377,7 +388,13 @@ namespace CardBattle.Core
             SetBusy(true);
             RefreshExternalUI();
 
+            if (graveyardVfx != null && handUIController != null)
+                graveyardVfx.PlayBatchCardsToGraveyard(handUIController.GetCurrentHandViewsSnapshot());
+
             player.CommitEndTurnFromRunner();
+
+            if (graveyardVfx == null)
+                pileCounterUI?.ForceSyncDisplayedToReal();
             yield return new WaitForSeconds(endTurnPause);
 
             enemyActionSystem.ResolveEndTurnAttacks();

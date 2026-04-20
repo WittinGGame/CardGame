@@ -248,13 +248,14 @@ namespace CardBattle.Core
 FILE: PileCounterUI.cs
 PATH: Assets/Scripts/CardBattle/UI/HUD/PileCounterUI.cs
 ================================================================================
+using System.Collections;
 using TMPro;
 using UnityEngine;
 
 namespace CardBattle.Core
 {
     /// <summary>
-    /// Displays deck / hand / graveyard counts; listens to DeckController.OnPilesChanged.
+    /// Displays deck / graveyard counts; graveyard display can lag real counts until VFX arrival.
     /// </summary>
     public class PileCounterUI : MonoBehaviour
     {
@@ -264,35 +265,445 @@ namespace CardBattle.Core
         [Header("UI References")]
         [SerializeField] private TextMeshProUGUI deckCountText;
         [SerializeField] private TextMeshProUGUI graveyardCountText;
+        [SerializeField] private RectTransform graveyardAnchor;
+
+        [Header("Display")]
+        [SerializeField] private bool initializeDisplayFromRealOnStart = true;
+        [SerializeField] private bool punchGraveyardLabelOnGhostArrival = true;
+        [SerializeField] private float punchScale = 1.12f;
+        [SerializeField] private float punchDuration = 0.12f;
+
+        private int realGraveyardCount;
+        private int displayedGraveyardCount;
+        private Vector3 graveyardLabelBaseScale = Vector3.one;
+        private Coroutine punchRoutine;
+
+        public RectTransform GraveyardAnchor => graveyardAnchor;
 
         private void Start()
         {
-            RefreshUI();
+            if (graveyardCountText != null)
+                graveyardLabelBaseScale = graveyardCountText.rectTransform.localScale;
+
+            SyncFromDeckControllerInitialize();
         }
 
         private void OnEnable()
         {
             if (deckController != null)
-                deckController.OnPilesChanged += RefreshUI;
+                deckController.OnPilesChanged += OnPilesChanged;
         }
 
         private void OnDisable()
         {
             if (deckController != null)
-                deckController.OnPilesChanged -= RefreshUI;
+                deckController.OnPilesChanged -= OnPilesChanged;
+        }
+
+        private void SyncFromDeckControllerInitialize()
+        {
+            if (deckController == null)
+                return;
+
+            realGraveyardCount = deckController.Graveyard.Count;
+            displayedGraveyardCount = initializeDisplayFromRealOnStart
+                ? realGraveyardCount
+                : 0;
+
+            RefreshDeckText();
+            RefreshGraveyardText();
+        }
+
+        private void OnPilesChanged()
+        {
+            if (deckController == null)
+                return;
+
+            realGraveyardCount = deckController.Graveyard.Count;
+            if (displayedGraveyardCount > realGraveyardCount)
+                displayedGraveyardCount = realGraveyardCount;
+
+            RefreshDeckText();
+            RefreshGraveyardText();
         }
 
         [ContextMenu("Refresh UI")]
         public void RefreshUI()
         {
-            if (deckController == null)
+            OnPilesChanged();
+        }
+
+        /// <summary>After a single ghost reaches the graveyard anchor, bumps display by 1 (clamped to real).</summary>
+        public void OnSingleGhostArrived()
+        {
+            displayedGraveyardCount = Mathf.Min(displayedGraveyardCount + 1, realGraveyardCount);
+            RefreshGraveyardText();
+            TriggerGraveyardPunch();
+        }
+
+        /// <summary>After a discard batch finishes flying, bumps display by the whole batch (clamped).</summary>
+        public void OnBatchGhostArrived(int amount)
+        {
+            if (amount <= 0)
                 return;
 
-            if (deckCountText != null)
-                deckCountText.text = deckController.Deck.Count.ToString();
+            displayedGraveyardCount = Mathf.Min(displayedGraveyardCount + amount, realGraveyardCount);
+            RefreshGraveyardText();
+            TriggerGraveyardPunch();
+        }
 
+        public void ForceSyncDisplayedToReal()
+        {
+            if (deckController != null)
+                realGraveyardCount = deckController.Graveyard.Count;
+            displayedGraveyardCount = realGraveyardCount;
+            RefreshGraveyardText();
+        }
+
+        private void RefreshDeckText()
+        {
+            if (deckCountText != null && deckController != null)
+                deckCountText.text = deckController.Deck.Count.ToString();
+        }
+
+        private void RefreshGraveyardText()
+        {
             if (graveyardCountText != null)
-                graveyardCountText.text = deckController.Graveyard.Count.ToString();
+                graveyardCountText.text = displayedGraveyardCount.ToString();
+        }
+
+        private void TriggerGraveyardPunch()
+        {
+            if (!punchGraveyardLabelOnGhostArrival || graveyardCountText == null)
+                return;
+
+            if (punchRoutine != null)
+                StopCoroutine(punchRoutine);
+            punchRoutine = StartCoroutine(CoPunchGraveyardLabel());
+        }
+
+        private IEnumerator CoPunchGraveyardLabel()
+        {
+            var rt = graveyardCountText.rectTransform;
+            float half = punchDuration * 0.5f;
+            float t = 0f;
+            while (t < half)
+            {
+                t += Time.unscaledDeltaTime;
+                float u = Mathf.Clamp01(t / half);
+                float s = Mathf.Lerp(1f, punchScale, u);
+                rt.localScale = graveyardLabelBaseScale * s;
+                yield return null;
+            }
+
+            t = 0f;
+            while (t < half)
+            {
+                t += Time.unscaledDeltaTime;
+                float u = Mathf.Clamp01(t / half);
+                float s = Mathf.Lerp(punchScale, 1f, u);
+                rt.localScale = graveyardLabelBaseScale * s;
+                yield return null;
+            }
+
+            rt.localScale = graveyardLabelBaseScale;
+            punchRoutine = null;
+        }
+    }
+}
+
+================================================================================
+FILE: CardToGraveyardVFXController.cs
+PATH: Assets/Scripts/CardBattle/UI/HUD/CardToGraveyardVFXController.cs
+================================================================================
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    /// <summary>
+    /// Spawns flying ghost cards for presentation only. Notifies <see cref="PileCounterUI"/> when visuals arrive.
+    /// </summary>
+    public class CardToGraveyardVFXController : MonoBehaviour
+    {
+        [Header("References")]
+        [SerializeField] private Canvas rootCanvas;
+        [SerializeField] private RectTransform vfxContainer;
+        [SerializeField] private FlyingCardGhostUI ghostPrefab;
+        [SerializeField] private PileCounterUI pileCounterUI;
+
+        [Header("Batch")]
+        [SerializeField] private float batchStartStaggerMax = 0.02f;
+
+        private Canvas ResolvedCanvas =>
+            rootCanvas != null
+                ? rootCanvas
+                : pileCounterUI != null
+                    ? pileCounterUI.GetComponentInParent<Canvas>()
+                    : GetComponentInParent<Canvas>();
+
+        private static Camera GetCanvasEventCamera(Canvas canvas)
+        {
+            if (canvas == null)
+                return null;
+            return canvas.renderMode == RenderMode.ScreenSpaceOverlay ? null : canvas.worldCamera;
+        }
+
+        /// <summary>Spawn one ghost from a hand card view. Call before <see cref="DeckController.PlayCardFromHand"/> so the source still exists.</summary>
+        public void PlaySingleCardToGraveyard(CardViewUI sourceView)
+        {
+            if (pileCounterUI == null)
+                return;
+
+            if (vfxContainer == null || ghostPrefab == null)
+            {
+                pileCounterUI.OnSingleGhostArrived();
+                return;
+            }
+
+            var canvas = ResolvedCanvas;
+            Sprite sprite = sourceView != null ? sourceView.GetArtworkSnapshotForVfx() : null;
+            RectTransform sourceRt = sourceView != null ? sourceView.LayoutRect : null;
+
+            if (!TryGetEndpoints(sourceRt, canvas, out var startLocal, out var endLocal))
+            {
+                pileCounterUI.OnSingleGhostArrived();
+                return;
+            }
+
+            var ghost = Instantiate(ghostPrefab, vfxContainer);
+            ghost.BeginFlight(sprite, startLocal, endLocal, pileCounterUI.OnSingleGhostArrived);
+        }
+
+        /// <summary>Spawn parallel ghosts for all sources. Call before discard so hand views still exist.</summary>
+        public void PlayBatchCardsToGraveyard(IReadOnlyList<CardViewUI> sourceViews)
+        {
+            if (pileCounterUI == null)
+                return;
+
+            if (sourceViews == null || sourceViews.Count == 0)
+                return;
+
+            if (vfxContainer == null || ghostPrefab == null)
+            {
+                pileCounterUI.OnBatchGhostArrived(sourceViews.Count);
+                return;
+            }
+
+            var canvas = ResolvedCanvas;
+            var graveyardRt = ResolveGraveyardRect();
+            if (canvas == null || graveyardRt == null)
+            {
+                pileCounterUI.OnBatchGhostArrived(sourceViews.Count);
+                return;
+            }
+
+            if (!TryWorldToContainerLocal(vfxContainer, canvas, GetWorldCenter(graveyardRt), out var endLocal))
+            {
+                pileCounterUI.OnBatchGhostArrived(sourceViews.Count);
+                return;
+            }
+
+            int total = sourceViews.Count;
+            int arrived = 0;
+
+            for (int i = 0; i < total; i++)
+            {
+                var view = sourceViews[i];
+                Sprite sprite = view != null ? view.GetArtworkSnapshotForVfx() : null;
+                RectTransform sourceRt = view != null ? view.LayoutRect : null;
+
+                if (!TryGetEndpoints(sourceRt, canvas, out var startLocal, out var _))
+                {
+                    startLocal = endLocal;
+                }
+
+                float stagger = 0f;
+                if (batchStartStaggerMax > 0f && total > 1)
+                    stagger = (i / (float)(total - 1)) * batchStartStaggerMax;
+
+                StartCoroutine(CoSpawnGhostAfterDelay(sprite, startLocal, endLocal, stagger, () =>
+                {
+                    arrived++;
+                    if (arrived >= total)
+                        pileCounterUI.OnBatchGhostArrived(total);
+                }));
+            }
+        }
+
+        private IEnumerator CoSpawnGhostAfterDelay(
+            Sprite sprite,
+            Vector2 startLocal,
+            Vector2 endLocal,
+            float delay,
+            System.Action onThisArrived)
+        {
+            if (delay > 0f)
+                yield return new WaitForSecondsRealtime(delay);
+
+            var ghost = Instantiate(ghostPrefab, vfxContainer);
+            ghost.BeginFlight(sprite, startLocal, endLocal, onThisArrived);
+        }
+
+        private RectTransform ResolveGraveyardRect()
+        {
+            if (pileCounterUI == null)
+                return null;
+            var anchor = pileCounterUI.GraveyardAnchor;
+            if (anchor != null)
+                return anchor;
+            return pileCounterUI.transform as RectTransform;
+        }
+
+        private bool TryGetEndpoints(RectTransform sourceRt, Canvas canvas, out Vector2 startLocal, out Vector2 endLocal)
+        {
+            startLocal = default;
+            endLocal = default;
+
+            var graveyardRt = ResolveGraveyardRect();
+            if (canvas == null || vfxContainer == null || graveyardRt == null)
+                return false;
+
+            if (sourceRt != null &&
+                TryWorldToContainerLocal(vfxContainer, canvas, GetWorldCenter(sourceRt), out startLocal) &&
+                TryWorldToContainerLocal(vfxContainer, canvas, GetWorldCenter(graveyardRt), out endLocal))
+            {
+                return true;
+            }
+
+            if (TryWorldToContainerLocal(vfxContainer, canvas, GetWorldCenter(graveyardRt), out endLocal))
+            {
+                startLocal = endLocal;
+                return true;
+            }
+
+            return false;
+        }
+
+        private static Vector3 GetWorldCenter(RectTransform rt)
+        {
+            if (rt == null)
+                return Vector3.zero;
+            return rt.TransformPoint(rt.rect.center);
+        }
+
+        private static bool TryWorldToContainerLocal(
+            RectTransform container,
+            Canvas canvas,
+            Vector3 worldPos,
+            out Vector2 local)
+        {
+            local = default;
+            if (container == null || canvas == null)
+                return false;
+
+            var cam = GetCanvasEventCamera(canvas);
+            var screen = RectTransformUtility.WorldToScreenPoint(cam, worldPos);
+            return RectTransformUtility.ScreenPointToLocalPointInRectangle(container, screen, cam, out local);
+        }
+    }
+}
+
+================================================================================
+FILE: FlyingCardGhostUI.cs
+PATH: Assets/Scripts/CardBattle/UI/HUD/FlyingCardGhostUI.cs
+================================================================================
+using System.Collections;
+using UnityEngine;
+using UnityEngine.UI;
+
+namespace CardBattle.Core
+{
+    /// <summary>
+    /// Presentation-only ghost card that lerps toward a graveyard anchor and self-destructs on arrival.
+    /// </summary>
+    public class FlyingCardGhostUI : MonoBehaviour
+    {
+        [SerializeField] private RectTransform rectTransform;
+        [SerializeField] private Image artworkImage;
+        [SerializeField] private CanvasGroup canvasGroup;
+
+        [Header("Motion")]
+        [SerializeField] private float flyDuration = 0.42f;
+        [SerializeField] private AnimationCurve motionCurve = AnimationCurve.EaseInOut(0f, 0f, 1f, 1f);
+        [SerializeField] private float endScaleMultiplier = 0.72f;
+        [SerializeField] private float endAlphaMultiplier = 0.78f;
+
+        private void Awake()
+        {
+            if (rectTransform == null)
+                rectTransform = GetComponent<RectTransform>();
+            if (canvasGroup == null)
+                canvasGroup = GetComponent<CanvasGroup>();
+            if (artworkImage == null)
+                artworkImage = GetComponentInChildren<Image>(true);
+        }
+
+        public void BeginFlight(
+            Sprite artwork,
+            Vector2 startAnchoredPosition,
+            Vector2 endAnchoredPosition,
+            System.Action onArrived)
+        {
+            if (artworkImage != null)
+            {
+                artworkImage.sprite = artwork;
+                artworkImage.enabled = artwork != null;
+            }
+
+            if (rectTransform != null)
+            {
+                rectTransform.anchoredPosition = startAnchoredPosition;
+                rectTransform.localScale = Vector3.one;
+            }
+
+            if (canvasGroup != null)
+                canvasGroup.alpha = 1f;
+
+            StartCoroutine(
+                CoFly(startAnchoredPosition, endAnchoredPosition, onArrived));
+        }
+
+        private IEnumerator CoFly(
+            Vector2 start,
+            Vector2 end,
+            System.Action onArrived)
+        {
+            float dur = Mathf.Max(0.01f, flyDuration);
+            float t = 0f;
+            float startAlpha = canvasGroup != null ? canvasGroup.alpha : 1f;
+            float endAlpha = startAlpha * endAlphaMultiplier;
+
+            while (t < dur)
+            {
+                t += Time.unscaledDeltaTime;
+                float u = motionCurve.Evaluate(Mathf.Clamp01(t / dur));
+
+                if (rectTransform != null)
+                {
+                    rectTransform.anchoredPosition = Vector2.LerpUnclamped(start, end, u);
+                    float s = Mathf.Lerp(1f, endScaleMultiplier, u);
+                    rectTransform.localScale = new Vector3(s, s, 1f);
+                }
+
+                if (canvasGroup != null)
+                    canvasGroup.alpha = Mathf.Lerp(startAlpha, endAlpha, u);
+
+                yield return null;
+            }
+
+            if (rectTransform != null)
+            {
+                rectTransform.anchoredPosition = end;
+                rectTransform.localScale = new Vector3(endScaleMultiplier, endScaleMultiplier, 1f);
+            }
+
+            if (canvasGroup != null)
+                canvasGroup.alpha = endAlpha;
+
+            onArrived?.Invoke();
+            Destroy(gameObject);
         }
     }
 }
