@@ -15,6 +15,7 @@ namespace CardBattle.Core
         [Header("UI References")]
         [SerializeField] private TextMeshProUGUI deckCountText;
         [SerializeField] private TextMeshProUGUI graveyardCountText;
+        [SerializeField] private RectTransform deckAnchor;
         [SerializeField] private RectTransform graveyardAnchor;
 
         [Header("Display")]
@@ -23,11 +24,15 @@ namespace CardBattle.Core
         [SerializeField] private float punchScale = 1.12f;
         [SerializeField] private float punchDuration = 0.12f;
 
+        private int realDeckCount;
+        private int displayedDeckCount;
         private int realGraveyardCount;
         private int displayedGraveyardCount;
+        private bool reshufflePresentationActive;
         private Vector3 graveyardLabelBaseScale = Vector3.one;
         private Coroutine punchRoutine;
 
+        public RectTransform DeckAnchor => deckAnchor;
         public RectTransform GraveyardAnchor => graveyardAnchor;
 
         private void Start()
@@ -55,7 +60,9 @@ namespace CardBattle.Core
             if (deckController == null)
                 return;
 
+            realDeckCount = deckController.Deck.Count;
             realGraveyardCount = deckController.Graveyard.Count;
+            displayedDeckCount = realDeckCount;
             displayedGraveyardCount = initializeDisplayFromRealOnStart
                 ? realGraveyardCount
                 : 0;
@@ -69,9 +76,14 @@ namespace CardBattle.Core
             if (deckController == null)
                 return;
 
+            realDeckCount = deckController.Deck.Count;
             realGraveyardCount = deckController.Graveyard.Count;
-            if (displayedGraveyardCount > realGraveyardCount)
-                displayedGraveyardCount = realGraveyardCount;
+            if (!reshufflePresentationActive)
+            {
+                displayedDeckCount = realDeckCount;
+                if (displayedGraveyardCount > realGraveyardCount)
+                    displayedGraveyardCount = realGraveyardCount;
+            }
 
             RefreshDeckText();
             RefreshGraveyardText();
@@ -105,21 +117,67 @@ namespace CardBattle.Core
         public void ForceSyncDisplayedToReal()
         {
             if (deckController != null)
+            {
+                realDeckCount = deckController.Deck.Count;
                 realGraveyardCount = deckController.Graveyard.Count;
+            }
+            displayedDeckCount = realDeckCount;
             displayedGraveyardCount = realGraveyardCount;
+            reshufflePresentationActive = false;
             RefreshGraveyardText();
+            RefreshDeckText();
         }
 
         private void RefreshDeckText()
         {
-            if (deckCountText != null && deckController != null)
-                deckCountText.text = deckController.Deck.Count.ToString();
+            if (deckCountText != null)
+                deckCountText.text = displayedDeckCount.ToString();
         }
 
         private void RefreshGraveyardText()
         {
             if (graveyardCountText != null)
                 graveyardCountText.text = displayedGraveyardCount.ToString();
+        }
+
+        /// <summary>Locks deck/graveyard display into reshuffle presentation mode.</summary>
+        public void BeginReshufflePresentation(int transferCount)
+        {
+            if (transferCount <= 0)
+                return;
+
+            if (deckController != null)
+            {
+                realDeckCount = deckController.Deck.Count;
+                realGraveyardCount = deckController.Graveyard.Count;
+            }
+
+            displayedDeckCount = realDeckCount;
+            displayedGraveyardCount = Mathf.Min(displayedGraveyardCount, realGraveyardCount);
+            reshufflePresentationActive = true;
+            RefreshDeckText();
+            RefreshGraveyardText();
+        }
+
+        /// <summary>Advances display counts as reshuffle ghosts arrive at the deck.</summary>
+        public void OnReshuffleGhostArrived(int amount)
+        {
+            if (amount <= 0)
+                return;
+
+            if (!reshufflePresentationActive)
+                BeginReshufflePresentation(amount);
+
+            displayedDeckCount += amount;
+            displayedGraveyardCount = Mathf.Max(0, displayedGraveyardCount - amount);
+            RefreshDeckText();
+            RefreshGraveyardText();
+        }
+
+        /// <summary>Ends reshuffle presentation mode and snaps display to real piles.</summary>
+        public void CompleteReshufflePresentation()
+        {
+            reshufflePresentationActive = false;
         }
 
         private void TriggerGraveyardPunch()

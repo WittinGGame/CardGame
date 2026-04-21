@@ -146,7 +146,7 @@ namespace CardBattle.Core
             }
 
             if (player != null && player.IsAlive && HasAliveEnemy())
-                enemyActionSystem.StartPlayerRound();
+                yield return enemyActionSystem.StartPlayerRoundRoutine();
 
             RefreshExternalUI();
             SetBusy(false);

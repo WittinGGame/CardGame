@@ -315,6 +315,16 @@ namespace CardBattle.Core
 
         public bool IsInHand(CardInstance card) => card != null && _hand.Contains(card);
 
+        public int GetDeckCount()
+        {
+            return _deck.Count;
+        }
+
+        public int GetGraveyardCount()
+        {
+            return _graveyard.Count;
+        }
+
         /// <summary>Draw up to <paramref name="count"/> cards into the hand, reshuffling graveyard into deck as needed.</summary>
         public void DrawCards(int count)
         {
@@ -325,6 +335,45 @@ namespace CardBattle.Core
             }
 
             NotifyChanged();
+        }
+
+        /// <summary>
+        /// Draws directly from deck to hand without auto-reshuffle.
+        /// Use this for presentation-driven two-phase draws.
+        /// </summary>
+        public List<CardInstance> DrawCardsImmediate(int count)
+        {
+            var result = new List<CardInstance>();
+            int drawCount = Mathf.Max(0, count);
+
+            for (int i = 0; i < drawCount; i++)
+            {
+                if (_deck.Count == 0)
+                    break;
+
+                int index = _deck.Count - 1;
+                var card = _deck[index];
+                _deck.RemoveAt(index);
+                _hand.Add(card);
+                result.Add(card);
+            }
+
+            NotifyChanged();
+            return result;
+        }
+
+        /// <summary>Moves all graveyard cards into deck and shuffles. Returns moved card count.</summary>
+        public int ReshuffleGraveyardIntoDeckImmediate()
+        {
+            int moved = _graveyard.Count;
+            if (moved <= 0)
+                return 0;
+
+            _deck.AddRange(_graveyard);
+            _graveyard.Clear();
+            ShuffleListInPlace(_deck);
+            NotifyChanged();
+            return moved;
         }
 
         /// <summary>Move every card from hand to graveyard (end of player turn).</summary>
@@ -484,6 +533,7 @@ namespace CardBattle.Core
         public bool IsSelected => isSelected;
         public bool IsInteractable => isInteractable;
         public bool IsPointerOver => isPointerOver;
+        public bool IsDealPresentationPending => layoutMovementBlocked || pendingDealFadeIn || dealFadeRoutine != null;
 
         public event System.Action<CardViewUI> OnHoverStarted;
         public event System.Action<CardViewUI> OnHoverEnded;
@@ -572,6 +622,24 @@ namespace CardBattle.Core
 
             if (wasBlocked && pendingDealFadeIn)
                 StartDealFadeIn();
+        }
+
+        public void ForceCompleteDealPresentation()
+        {
+            layoutMovementBlocked = false;
+            pendingDealFadeIn = false;
+
+            StopDealFadeRoutine();
+
+            if (canvasGroup != null)
+                canvasGroup.alpha = ResolveTargetAlphaForCurrentState();
+
+            if (visualRoot != null)
+            {
+                visualRoot.localScale = targetScale;
+                visualRoot.localPosition = targetLocalPosition;
+                visualRoot.localEulerAngles = new Vector3(0f, 0f, targetRotationZ);
+            }
         }
 
         private void SyncRotationTargetToState()
@@ -1412,7 +1480,12 @@ namespace CardBattle.Core
             {
                 var view = spawnedCards[i];
                 if (view != null)
-                    view.SetLayoutMovementBlocked(false);
+                {
+                    if (view.IsDealPresentationPending)
+                        view.ForceCompleteDealPresentation();
+                    else
+                        view.SetLayoutMovementBlocked(false);
+                }
             }
         }
 

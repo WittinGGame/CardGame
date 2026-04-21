@@ -548,7 +548,12 @@ namespace CardBattle.Core
             {
                 var view = spawnedCards[i];
                 if (view != null)
-                    view.SetLayoutMovementBlocked(false);
+                {
+                    if (view.IsDealPresentationPending)
+                        view.ForceCompleteDealPresentation();
+                    else
+                        view.SetLayoutMovementBlocked(false);
+                }
             }
         }
 

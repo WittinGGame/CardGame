@@ -77,6 +77,7 @@ namespace CardBattle.Core
         public bool IsSelected => isSelected;
         public bool IsInteractable => isInteractable;
         public bool IsPointerOver => isPointerOver;
+        public bool IsDealPresentationPending => layoutMovementBlocked || pendingDealFadeIn || dealFadeRoutine != null;
 
         public event System.Action<CardViewUI> OnHoverStarted;
         public event System.Action<CardViewUI> OnHoverEnded;
@@ -165,6 +166,24 @@ namespace CardBattle.Core
 
             if (wasBlocked && pendingDealFadeIn)
                 StartDealFadeIn();
+        }
+
+        public void ForceCompleteDealPresentation()
+        {
+            layoutMovementBlocked = false;
+            pendingDealFadeIn = false;
+
+            StopDealFadeRoutine();
+
+            if (canvasGroup != null)
+                canvasGroup.alpha = ResolveTargetAlphaForCurrentState();
+
+            if (visualRoot != null)
+            {
+                visualRoot.localScale = targetScale;
+                visualRoot.localPosition = targetLocalPosition;
+                visualRoot.localEulerAngles = new Vector3(0f, 0f, targetRotationZ);
+            }
         }
 
         private void SyncRotationTargetToState()
