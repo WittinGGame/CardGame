@@ -14,6 +14,7 @@ namespace CardBattle.Core
         [SerializeField] private PlayerBattleUnit player;
         [SerializeField] private List<EnemyBattleUnit> enemies = new List<EnemyBattleUnit>();
         [SerializeField] private GraveyardToDeckVFXController graveyardToDeckVfx;
+        [SerializeField] private float postReshuffleDrawDelay = 0.08f;
         private Coroutine runningEnemyActions;
 
         public PlayerBattleUnit Player => player;
@@ -51,9 +52,11 @@ namespace CardBattle.Core
                 yield break;
             }
 
+            // Reset enemy flags
             foreach (var enemy in enemies)
                 enemy?.ResetRoundCombatFlags();
 
+            // Player round start state
             player.BeginRoundState();
 
             if (player.DeckController == null)
@@ -63,6 +66,10 @@ namespace CardBattle.Core
             }
 
             int requestedDraw = Mathf.Max(0, player.DrawPerRound);
+
+            // ==============================
+            // STEP A — DRAW FROM DECK FIRST
+            // ==============================
             int availableDeck = player.DeckController.GetDeckCount();
             int firstDraw = Mathf.Min(requestedDraw, availableDeck);
 
@@ -73,6 +80,9 @@ namespace CardBattle.Core
             if (remaining <= 0)
                 yield break;
 
+            // ==============================
+            // STEP B — RESHUFFLE PRESENTATION
+            // ==============================
             int graveCount = player.DeckController.GetGraveyardCount();
             if (graveCount <= 0)
                 yield break;
@@ -80,8 +90,22 @@ namespace CardBattle.Core
             if (graveyardToDeckVfx != null)
                 yield return graveyardToDeckVfx.PlayReshuffleVfx(graveCount);
 
+            // ==============================
+            // STEP C — APPLY REAL RESHUFFLE
+            // ==============================
             player.DeckController.ReshuffleGraveyardIntoDeckImmediate();
+
+            // ==============================
+            // STEP D — SMALL DELAY (POLISH)
+            // ==============================
+            if (postReshuffleDrawDelay > 0f)
+                yield return new WaitForSeconds(postReshuffleDrawDelay);
+
+            // ==============================
+            // STEP E — DRAW REMAINING CARDS
+            // ==============================
             int secondDraw = Mathf.Min(remaining, player.DeckController.GetDeckCount());
+
             if (secondDraw > 0)
                 player.DeckController.DrawCardsImmediate(secondDraw);
         }
