@@ -17,6 +17,11 @@ namespace CardBattle.Core
 
         [Header("Batch")]
         [SerializeField] private float batchStartStaggerMax = 0.02f;
+        [SerializeField] private float batchHorizontalSpread = 220f;
+        [SerializeField] private float batchBaseArcHeight = 120f;
+        [SerializeField] private float batchEdgeArcBonus = 70f;
+        [SerializeField] private float batchSideArcBias = 30f;
+        [SerializeField] private float batchArcRandomRange = 12f;
 
         private Canvas ResolvedCanvas =>
             rootCanvas != null
@@ -55,6 +60,7 @@ namespace CardBattle.Core
             }
 
             var ghost = Instantiate(ghostPrefab, vfxContainer);
+            ghost.SetUseDynamicArc(true);
             ghost.BeginFlight(sprite, startLocal, endLocal, pileCounterUI.OnSingleGhostArrived);
         }
 
@@ -105,7 +111,29 @@ namespace CardBattle.Core
                 if (batchStartStaggerMax > 0f && total > 1)
                     stagger = (i / (float)(total - 1)) * batchStartStaggerMax;
 
-                StartCoroutine(CoSpawnGhostAfterDelay(sprite, startLocal, endLocal, stagger, () =>
+                float t = total > 1 ? (i / (float)(total - 1)) : 0.5f;
+                float centered = t - 0.5f;
+                float side = centered * 2f; // [-1, 1]
+                float edgeWeight = Mathf.Abs(side); // center=0, edges=1
+
+                // Non-linear spread keeps center cards closer while pushing outer cards wider.
+                float spreadWeight = Mathf.Pow(edgeWeight, 0.75f);
+                float horizontalOffset = Mathf.Sign(side) * spreadWeight * batchHorizontalSpread;
+
+                // Deterministic shape drives readability; random is only a small secondary wobble.
+                float edgeArcOffset = edgeWeight * batchEdgeArcBonus;
+                float sideArcOffset = side * batchSideArcBias;
+                float randomArcOffset = Random.Range(-batchArcRandomRange, batchArcRandomRange);
+                float finalArc = batchBaseArcHeight + edgeArcOffset + sideArcOffset + randomArcOffset;
+
+                StartCoroutine(CoSpawnGhostAfterDelay(
+                    sprite,
+                    startLocal,
+                    endLocal,
+                    stagger,
+                    finalArc,
+                    horizontalOffset,
+                    () =>
                 {
                     arrived++;
                     if (arrived >= total)
@@ -119,12 +147,17 @@ namespace CardBattle.Core
             Vector2 startLocal,
             Vector2 endLocal,
             float delay,
+            float arcHeight,
+            float horizontalOffset,
             System.Action onThisArrived)
         {
             if (delay > 0f)
                 yield return new WaitForSecondsRealtime(delay);
 
             var ghost = Instantiate(ghostPrefab, vfxContainer);
+            ghost.SetUseDynamicArc(false);
+            ghost.SetArcHeight(arcHeight);
+            ghost.SetHorizontalOffset(horizontalOffset);
             ghost.BeginFlight(sprite, startLocal, endLocal, onThisArrived);
         }
 

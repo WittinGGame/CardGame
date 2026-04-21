@@ -65,6 +65,21 @@ namespace CardBattle.Core
             StartCoroutine(CoFly(startAnchoredPosition, endAnchoredPosition, onArrived));
         }
 
+        public void SetArcHeight(float value)
+        {
+            arcHeight = value;
+        }
+
+        public void SetHorizontalOffset(float value)
+        {
+            horizontalControlOffset = value;
+        }
+
+        public void SetUseDynamicArc(bool value)
+        {
+            useDynamicArcHeight = value;
+        }
+
         private IEnumerator CoFly(
             Vector2 start,
             Vector2 end,
