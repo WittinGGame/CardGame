@@ -1,3 +1,4 @@
+using System.Collections;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -44,6 +45,11 @@ namespace CardBattle.Core
         [SerializeField] private float layoutLerpSpeed = 12f;
         [SerializeField] private float rotationLerpSpeed = 14f;
 
+        [Header("Deal-In Presentation")]
+        [SerializeField] private bool useDealFadeIn = true;
+        [SerializeField] private float dealSpawnAlpha = 0f;
+        [SerializeField] private float dealFadeDuration = 0.12f;
+
         private CardInstance boundCard;
         private CardVisualState currentState = CardVisualState.Normal;
 
@@ -61,6 +67,9 @@ namespace CardBattle.Core
         private bool isInteractable = true;
         private bool isSelected = false;
         private bool isPointerOver;
+        private bool layoutMovementBlocked;
+        private bool pendingDealFadeIn;
+        private Coroutine dealFadeRoutine;
 
         public CardInstance BoundCard => boundCard;
         /// <summary>Root layout rect (anchored fan position). Used by presentation VFX.</summary>
@@ -100,6 +109,11 @@ namespace CardBattle.Core
                 targetLayoutAnchoredPos = _rectTransform.anchoredPosition;
         }
 
+        private void OnDisable()
+        {
+            StopDealFadeRoutine();
+        }
+
         /// <summary>Tuning from <see cref="HandUIController"/> so hand and card share one layout motion speed.</summary>
         public void SetLayoutLerpSpeed(float speed)
         {
@@ -112,6 +126,45 @@ namespace CardBattle.Core
             targetLayoutAnchoredPos = anchoredPos;
             _layoutRotationZ = rotationZ;
             SyncRotationTargetToState();
+        }
+
+        /// <summary>
+        /// Sets an immediate spawn pose before the normal layout lerp pulls this card toward its target slot.
+        /// </summary>
+        public void PrepareForDealIn(Vector2 startAnchoredPos, float startRotationZ, float startScale)
+        {
+            if (_rectTransform == null)
+                _rectTransform = GetComponent<RectTransform>();
+
+            if (_rectTransform != null)
+                _rectTransform.anchoredPosition = startAnchoredPos;
+
+            if (visualRoot != null)
+            {
+                float clampedScale = Mathf.Max(0.01f, startScale);
+                visualRoot.localScale = baseScale * clampedScale;
+                visualRoot.localEulerAngles = new Vector3(0f, 0f, startRotationZ);
+            }
+
+            StopDealFadeRoutine();
+            pendingDealFadeIn = useDealFadeIn && canvasGroup != null;
+            if (pendingDealFadeIn && canvasGroup != null)
+                canvasGroup.alpha = Mathf.Clamp01(dealSpawnAlpha);
+        }
+
+        public void SetLayoutMovementBlocked(bool value)
+        {
+            bool wasBlocked = layoutMovementBlocked;
+            layoutMovementBlocked = value;
+
+            if (layoutMovementBlocked)
+            {
+                StopDealFadeRoutine();
+                return;
+            }
+
+            if (wasBlocked && pendingDealFadeIn)
+                StartDealFadeIn();
         }
 
         private void SyncRotationTargetToState()
@@ -129,11 +182,14 @@ namespace CardBattle.Core
 
             if (_rectTransform != null)
             {
-                _rectTransform.anchoredPosition = Vector2.Lerp(
-                    _rectTransform.anchoredPosition,
-                    targetLayoutAnchoredPos,
-                    Time.deltaTime * layoutLerpSpeed
-                );
+                if (!layoutMovementBlocked)
+                {
+                    _rectTransform.anchoredPosition = Vector2.Lerp(
+                        _rectTransform.anchoredPosition,
+                        targetLayoutAnchoredPos,
+                        Time.deltaTime * layoutLerpSpeed
+                    );
+                }
             }
 
             if (visualRoot == null)
@@ -322,7 +378,58 @@ namespace CardBattle.Core
         private void SetAlpha(float value)
         {
             if (canvasGroup != null)
-                canvasGroup.alpha = value;
+            {
+                if (layoutMovementBlocked && pendingDealFadeIn)
+                    canvasGroup.alpha = Mathf.Min(Mathf.Clamp01(value), Mathf.Clamp01(dealSpawnAlpha));
+                else
+                    canvasGroup.alpha = value;
+            }
+        }
+
+        private void StartDealFadeIn()
+        {
+            if (canvasGroup == null)
+            {
+                pendingDealFadeIn = false;
+                return;
+            }
+
+            StopDealFadeRoutine();
+            dealFadeRoutine = StartCoroutine(CoDealFadeIn(ResolveTargetAlphaForCurrentState()));
+        }
+
+        private IEnumerator CoDealFadeIn(float targetAlpha)
+        {
+            float duration = Mathf.Max(0.01f, dealFadeDuration);
+            float elapsed = 0f;
+            float startAlpha = canvasGroup.alpha;
+            float endAlpha = Mathf.Clamp01(targetAlpha);
+
+            while (elapsed < duration)
+            {
+                elapsed += Time.deltaTime;
+                float t = Mathf.Clamp01(elapsed / duration);
+                canvasGroup.alpha = Mathf.Lerp(startAlpha, endAlpha, t);
+                yield return null;
+            }
+
+            canvasGroup.alpha = endAlpha;
+            pendingDealFadeIn = false;
+            dealFadeRoutine = null;
+        }
+
+        private float ResolveTargetAlphaForCurrentState()
+        {
+            return currentState == CardVisualState.Disabled ? disabledAlpha : normalAlpha;
+        }
+
+        private void StopDealFadeRoutine()
+        {
+            if (dealFadeRoutine != null)
+            {
+                StopCoroutine(dealFadeRoutine);
+                dealFadeRoutine = null;
+            }
         }
 
         private string GetDescription(CardData data)

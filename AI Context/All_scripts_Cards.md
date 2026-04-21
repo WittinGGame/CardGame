@@ -405,6 +405,7 @@ namespace CardBattle.Core
 FILE: CardViewUI.cs
 PATH: Assets/Scripts/CardBattle/Cards/UI/CardViewUI.cs
 ================================================================================
+using System.Collections;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -451,6 +452,11 @@ namespace CardBattle.Core
         [SerializeField] private float layoutLerpSpeed = 12f;
         [SerializeField] private float rotationLerpSpeed = 14f;
 
+        [Header("Deal-In Presentation")]
+        [SerializeField] private bool useDealFadeIn = true;
+        [SerializeField] private float dealSpawnAlpha = 0f;
+        [SerializeField] private float dealFadeDuration = 0.12f;
+
         private CardInstance boundCard;
         private CardVisualState currentState = CardVisualState.Normal;
 
@@ -468,6 +474,9 @@ namespace CardBattle.Core
         private bool isInteractable = true;
         private bool isSelected = false;
         private bool isPointerOver;
+        private bool layoutMovementBlocked;
+        private bool pendingDealFadeIn;
+        private Coroutine dealFadeRoutine;
 
         public CardInstance BoundCard => boundCard;
         /// <summary>Root layout rect (anchored fan position). Used by presentation VFX.</summary>
@@ -507,6 +516,11 @@ namespace CardBattle.Core
                 targetLayoutAnchoredPos = _rectTransform.anchoredPosition;
         }
 
+        private void OnDisable()
+        {
+            StopDealFadeRoutine();
+        }
+
         /// <summary>Tuning from <see cref="HandUIController"/> so hand and card share one layout motion speed.</summary>
         public void SetLayoutLerpSpeed(float speed)
         {
@@ -519,6 +533,45 @@ namespace CardBattle.Core
             targetLayoutAnchoredPos = anchoredPos;
             _layoutRotationZ = rotationZ;
             SyncRotationTargetToState();
+        }
+
+        /// <summary>
+        /// Sets an immediate spawn pose before the normal layout lerp pulls this card toward its target slot.
+        /// </summary>
+        public void PrepareForDealIn(Vector2 startAnchoredPos, float startRotationZ, float startScale)
+        {
+            if (_rectTransform == null)
+                _rectTransform = GetComponent<RectTransform>();
+
+            if (_rectTransform != null)
+                _rectTransform.anchoredPosition = startAnchoredPos;
+
+            if (visualRoot != null)
+            {
+                float clampedScale = Mathf.Max(0.01f, startScale);
+                visualRoot.localScale = baseScale * clampedScale;
+                visualRoot.localEulerAngles = new Vector3(0f, 0f, startRotationZ);
+            }
+
+            StopDealFadeRoutine();
+            pendingDealFadeIn = useDealFadeIn && canvasGroup != null;
+            if (pendingDealFadeIn && canvasGroup != null)
+                canvasGroup.alpha = Mathf.Clamp01(dealSpawnAlpha);
+        }
+
+        public void SetLayoutMovementBlocked(bool value)
+        {
+            bool wasBlocked = layoutMovementBlocked;
+            layoutMovementBlocked = value;
+
+            if (layoutMovementBlocked)
+            {
+                StopDealFadeRoutine();
+                return;
+            }
+
+            if (wasBlocked && pendingDealFadeIn)
+                StartDealFadeIn();
         }
 
         private void SyncRotationTargetToState()
@@ -536,11 +589,14 @@ namespace CardBattle.Core
 
             if (_rectTransform != null)
             {
-                _rectTransform.anchoredPosition = Vector2.Lerp(
-                    _rectTransform.anchoredPosition,
-                    targetLayoutAnchoredPos,
-                    Time.deltaTime * layoutLerpSpeed
-                );
+                if (!layoutMovementBlocked)
+                {
+                    _rectTransform.anchoredPosition = Vector2.Lerp(
+                        _rectTransform.anchoredPosition,
+                        targetLayoutAnchoredPos,
+                        Time.deltaTime * layoutLerpSpeed
+                    );
+                }
             }
 
             if (visualRoot == null)
@@ -729,7 +785,58 @@ namespace CardBattle.Core
         private void SetAlpha(float value)
         {
             if (canvasGroup != null)
-                canvasGroup.alpha = value;
+            {
+                if (layoutMovementBlocked && pendingDealFadeIn)
+                    canvasGroup.alpha = Mathf.Min(Mathf.Clamp01(value), Mathf.Clamp01(dealSpawnAlpha));
+                else
+                    canvasGroup.alpha = value;
+            }
+        }
+
+        private void StartDealFadeIn()
+        {
+            if (canvasGroup == null)
+            {
+                pendingDealFadeIn = false;
+                return;
+            }
+
+            StopDealFadeRoutine();
+            dealFadeRoutine = StartCoroutine(CoDealFadeIn(ResolveTargetAlphaForCurrentState()));
+        }
+
+        private IEnumerator CoDealFadeIn(float targetAlpha)
+        {
+            float duration = Mathf.Max(0.01f, dealFadeDuration);
+            float elapsed = 0f;
+            float startAlpha = canvasGroup.alpha;
+            float endAlpha = Mathf.Clamp01(targetAlpha);
+
+            while (elapsed < duration)
+            {
+                elapsed += Time.deltaTime;
+                float t = Mathf.Clamp01(elapsed / duration);
+                canvasGroup.alpha = Mathf.Lerp(startAlpha, endAlpha, t);
+                yield return null;
+            }
+
+            canvasGroup.alpha = endAlpha;
+            pendingDealFadeIn = false;
+            dealFadeRoutine = null;
+        }
+
+        private float ResolveTargetAlphaForCurrentState()
+        {
+            return currentState == CardVisualState.Disabled ? disabledAlpha : normalAlpha;
+        }
+
+        private void StopDealFadeRoutine()
+        {
+            if (dealFadeRoutine != null)
+            {
+                StopCoroutine(dealFadeRoutine);
+                dealFadeRoutine = null;
+            }
         }
 
         private string GetDescription(CardData data)
@@ -755,6 +862,7 @@ namespace CardBattle.Core
 FILE: HandUIController.cs
 PATH: Assets/Scripts/CardBattle/Cards/UI/HandUIController.cs
 ================================================================================
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -772,11 +880,17 @@ namespace CardBattle.Core
         [Header("UI References")]
         [SerializeField] private Transform handContainer;
         [SerializeField] private CardViewUI cardViewPrefab;
+        [SerializeField] private RectTransform drawSpawnAnchor;
 
         [Header("Options")]
         [SerializeField] private bool autoRefreshOnStart = true;
         [SerializeField] private bool disableUnplayableCards = true;
         [SerializeField] private bool verboseLogs = false;
+        [SerializeField] private bool useDealPresentation = true;
+        [SerializeField] private bool dealLeftToRight = true;
+        [SerializeField] private float dealStagger = 0.05f;
+        [SerializeField] private float newCardSpawnRotationZ = 0f;
+        [SerializeField] private float newCardSpawnScale = 0.92f;
 
         [Header("Fan layout")]
         [SerializeField] private float spacing = 135f;
@@ -788,6 +902,7 @@ namespace CardBattle.Core
         private readonly List<CardViewUI> spawnedCards = new List<CardViewUI>();
         private CardViewUI selectedView;
         private CardViewUI hoveredCardView;
+        private Coroutine dealRoutine;
 
         private void OnEnable()
         {
@@ -817,6 +932,9 @@ namespace CardBattle.Core
 
             if (battleActionRunner != null)
                 battleActionRunner.OnBusyStateChanged -= HandleBusyStateChanged;
+
+            if (dealRoutine != null)
+                StopDealRoutineAndReleaseLocks();
         }
 
         private void Start()
@@ -836,17 +954,27 @@ namespace CardBattle.Core
             hoveredCardView = null;
 
             var hand = deckController.Hand;
+            var newlyCreatedViews = new List<CardViewUI>(hand.Count);
             for (int i = 0; i < hand.Count; i++)
             {
                 var card = hand[i];
                 if (card?.Data == null)
                     continue;
 
-                spawnedCards.Add(CreateCardView(card));
+                var view = CreateCardView(card);
+                spawnedCards.Add(view);
+                newlyCreatedViews.Add(view);
             }
+
+            bool shouldPlayDeal = useDealPresentation && newlyCreatedViews.Count > 0;
+            if (shouldPlayDeal)
+                PrepareNewCardsForDeal(newlyCreatedViews);
 
             RefreshCardInteractivity();
             LayoutCards();
+
+            if (shouldPlayDeal)
+                dealRoutine = StartCoroutine(CoDealInNewCards(newlyCreatedViews));
         }
 
         /// <summary>Syncs list of card views with the deck hand without rebuilding views for cards that are still in hand.</summary>
@@ -854,6 +982,8 @@ namespace CardBattle.Core
         {
             if (!ValidateReferences())
                 return;
+
+            StopDealRoutineAndReleaseLocks();
 
             for (int i = spawnedCards.Count - 1; i >= 0; i--)
             {
@@ -872,6 +1002,7 @@ namespace CardBattle.Core
             var hand = deckController.Hand;
             var used = new HashSet<CardViewUI>();
             var newOrder = new List<CardViewUI>(hand.Count);
+            var newlyCreatedViews = new List<CardViewUI>();
 
             for (int i = 0; i < hand.Count; i++)
             {
@@ -893,7 +1024,10 @@ namespace CardBattle.Core
                 if (view != null)
                     used.Add(view);
                 else
+                {
                     view = CreateCardView(card);
+                    newlyCreatedViews.Add(view);
+                }
 
                 newOrder.Add(view);
             }
@@ -901,8 +1035,15 @@ namespace CardBattle.Core
             spawnedCards.Clear();
             spawnedCards.AddRange(newOrder);
 
+            bool shouldPlayDeal = useDealPresentation && newlyCreatedViews.Count > 0;
+            if (shouldPlayDeal)
+                PrepareNewCardsForDeal(newlyCreatedViews);
+
             RefreshCardInteractivity();
             LayoutCards();
+
+            if (shouldPlayDeal)
+                dealRoutine = StartCoroutine(CoDealInNewCards(newlyCreatedViews));
         }
 
         private bool HasViewForCard(CardInstance card)
@@ -1195,6 +1336,9 @@ namespace CardBattle.Core
         {
             hoveredCardView = null;
 
+            if (dealRoutine != null)
+                StopDealRoutineAndReleaseLocks();
+
             for (int i = 0; i < spawnedCards.Count; i++)
             {
                 var v = spawnedCards[i];
@@ -1207,6 +1351,90 @@ namespace CardBattle.Core
             }
 
             spawnedCards.Clear();
+        }
+
+        private IEnumerator CoDealInNewCards(List<CardViewUI> newViews)
+        {
+            if (newViews == null || newViews.Count == 0)
+            {
+                dealRoutine = null;
+                yield break;
+            }
+
+            newViews.Sort((a, b) =>
+            {
+                int ia = spawnedCards.IndexOf(a);
+                int ib = spawnedCards.IndexOf(b);
+                return ia.CompareTo(ib);
+            });
+
+            if (!dealLeftToRight)
+                newViews.Reverse();
+
+            float stagger = Mathf.Max(0f, dealStagger);
+
+            for (int i = 0; i < newViews.Count; i++)
+            {
+                var view = newViews[i];
+                if (view != null)
+                    view.SetLayoutMovementBlocked(false);
+
+                if (stagger > 0f && i < newViews.Count - 1)
+                    yield return new WaitForSeconds(stagger);
+            }
+
+            dealRoutine = null;
+        }
+
+        private void PrepareNewCardsForDeal(List<CardViewUI> newViews)
+        {
+            Vector2 spawnPos = GetDealSpawnAnchoredPosition();
+            for (int i = 0; i < newViews.Count; i++)
+            {
+                var view = newViews[i];
+                if (view == null)
+                    continue;
+
+                view.SetLayoutMovementBlocked(true);
+                view.PrepareForDealIn(spawnPos, newCardSpawnRotationZ, newCardSpawnScale);
+            }
+        }
+
+        private void StopDealRoutineAndReleaseLocks()
+        {
+            if (dealRoutine != null)
+            {
+                StopCoroutine(dealRoutine);
+                dealRoutine = null;
+            }
+
+            for (int i = 0; i < spawnedCards.Count; i++)
+            {
+                var view = spawnedCards[i];
+                if (view != null)
+                    view.SetLayoutMovementBlocked(false);
+            }
+        }
+
+        private Vector2 GetDealSpawnAnchoredPosition()
+        {
+            var containerRect = handContainer as RectTransform;
+            if (containerRect == null)
+                return Vector2.zero;
+
+            if (drawSpawnAnchor == null)
+                return containerRect.rect.center;
+
+            Canvas canvas = containerRect.GetComponentInParent<Canvas>();
+            Camera cam = null;
+            if (canvas != null && canvas.renderMode != RenderMode.ScreenSpaceOverlay)
+                cam = canvas.worldCamera;
+
+            Vector2 screenPoint = RectTransformUtility.WorldToScreenPoint(cam, drawSpawnAnchor.position);
+            if (RectTransformUtility.ScreenPointToLocalPointInRectangle(containerRect, screenPoint, cam, out var local))
+                return local;
+
+            return containerRect.rect.center;
         }
 
         private bool ValidateReferences()

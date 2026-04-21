@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -15,11 +16,17 @@ namespace CardBattle.Core
         [Header("UI References")]
         [SerializeField] private Transform handContainer;
         [SerializeField] private CardViewUI cardViewPrefab;
+        [SerializeField] private RectTransform drawSpawnAnchor;
 
         [Header("Options")]
         [SerializeField] private bool autoRefreshOnStart = true;
         [SerializeField] private bool disableUnplayableCards = true;
         [SerializeField] private bool verboseLogs = false;
+        [SerializeField] private bool useDealPresentation = true;
+        [SerializeField] private bool dealLeftToRight = true;
+        [SerializeField] private float dealStagger = 0.05f;
+        [SerializeField] private float newCardSpawnRotationZ = 0f;
+        [SerializeField] private float newCardSpawnScale = 0.92f;
 
         [Header("Fan layout")]
         [SerializeField] private float spacing = 135f;
@@ -31,6 +38,7 @@ namespace CardBattle.Core
         private readonly List<CardViewUI> spawnedCards = new List<CardViewUI>();
         private CardViewUI selectedView;
         private CardViewUI hoveredCardView;
+        private Coroutine dealRoutine;
 
         private void OnEnable()
         {
@@ -60,6 +68,9 @@ namespace CardBattle.Core
 
             if (battleActionRunner != null)
                 battleActionRunner.OnBusyStateChanged -= HandleBusyStateChanged;
+
+            if (dealRoutine != null)
+                StopDealRoutineAndReleaseLocks();
         }
 
         private void Start()
@@ -79,17 +90,27 @@ namespace CardBattle.Core
             hoveredCardView = null;
 
             var hand = deckController.Hand;
+            var newlyCreatedViews = new List<CardViewUI>(hand.Count);
             for (int i = 0; i < hand.Count; i++)
             {
                 var card = hand[i];
                 if (card?.Data == null)
                     continue;
 
-                spawnedCards.Add(CreateCardView(card));
+                var view = CreateCardView(card);
+                spawnedCards.Add(view);
+                newlyCreatedViews.Add(view);
             }
+
+            bool shouldPlayDeal = useDealPresentation && newlyCreatedViews.Count > 0;
+            if (shouldPlayDeal)
+                PrepareNewCardsForDeal(newlyCreatedViews);
 
             RefreshCardInteractivity();
             LayoutCards();
+
+            if (shouldPlayDeal)
+                dealRoutine = StartCoroutine(CoDealInNewCards(newlyCreatedViews));
         }
 
         /// <summary>Syncs list of card views with the deck hand without rebuilding views for cards that are still in hand.</summary>
@@ -97,6 +118,8 @@ namespace CardBattle.Core
         {
             if (!ValidateReferences())
                 return;
+
+            StopDealRoutineAndReleaseLocks();
 
             for (int i = spawnedCards.Count - 1; i >= 0; i--)
             {
@@ -115,6 +138,7 @@ namespace CardBattle.Core
             var hand = deckController.Hand;
             var used = new HashSet<CardViewUI>();
             var newOrder = new List<CardViewUI>(hand.Count);
+            var newlyCreatedViews = new List<CardViewUI>();
 
             for (int i = 0; i < hand.Count; i++)
             {
@@ -136,7 +160,10 @@ namespace CardBattle.Core
                 if (view != null)
                     used.Add(view);
                 else
+                {
                     view = CreateCardView(card);
+                    newlyCreatedViews.Add(view);
+                }
 
                 newOrder.Add(view);
             }
@@ -144,8 +171,15 @@ namespace CardBattle.Core
             spawnedCards.Clear();
             spawnedCards.AddRange(newOrder);
 
+            bool shouldPlayDeal = useDealPresentation && newlyCreatedViews.Count > 0;
+            if (shouldPlayDeal)
+                PrepareNewCardsForDeal(newlyCreatedViews);
+
             RefreshCardInteractivity();
             LayoutCards();
+
+            if (shouldPlayDeal)
+                dealRoutine = StartCoroutine(CoDealInNewCards(newlyCreatedViews));
         }
 
         private bool HasViewForCard(CardInstance card)
@@ -438,6 +472,9 @@ namespace CardBattle.Core
         {
             hoveredCardView = null;
 
+            if (dealRoutine != null)
+                StopDealRoutineAndReleaseLocks();
+
             for (int i = 0; i < spawnedCards.Count; i++)
             {
                 var v = spawnedCards[i];
@@ -450,6 +487,90 @@ namespace CardBattle.Core
             }
 
             spawnedCards.Clear();
+        }
+
+        private IEnumerator CoDealInNewCards(List<CardViewUI> newViews)
+        {
+            if (newViews == null || newViews.Count == 0)
+            {
+                dealRoutine = null;
+                yield break;
+            }
+
+            newViews.Sort((a, b) =>
+            {
+                int ia = spawnedCards.IndexOf(a);
+                int ib = spawnedCards.IndexOf(b);
+                return ia.CompareTo(ib);
+            });
+
+            if (!dealLeftToRight)
+                newViews.Reverse();
+
+            float stagger = Mathf.Max(0f, dealStagger);
+
+            for (int i = 0; i < newViews.Count; i++)
+            {
+                var view = newViews[i];
+                if (view != null)
+                    view.SetLayoutMovementBlocked(false);
+
+                if (stagger > 0f && i < newViews.Count - 1)
+                    yield return new WaitForSeconds(stagger);
+            }
+
+            dealRoutine = null;
+        }
+
+        private void PrepareNewCardsForDeal(List<CardViewUI> newViews)
+        {
+            Vector2 spawnPos = GetDealSpawnAnchoredPosition();
+            for (int i = 0; i < newViews.Count; i++)
+            {
+                var view = newViews[i];
+                if (view == null)
+                    continue;
+
+                view.SetLayoutMovementBlocked(true);
+                view.PrepareForDealIn(spawnPos, newCardSpawnRotationZ, newCardSpawnScale);
+            }
+        }
+
+        private void StopDealRoutineAndReleaseLocks()
+        {
+            if (dealRoutine != null)
+            {
+                StopCoroutine(dealRoutine);
+                dealRoutine = null;
+            }
+
+            for (int i = 0; i < spawnedCards.Count; i++)
+            {
+                var view = spawnedCards[i];
+                if (view != null)
+                    view.SetLayoutMovementBlocked(false);
+            }
+        }
+
+        private Vector2 GetDealSpawnAnchoredPosition()
+        {
+            var containerRect = handContainer as RectTransform;
+            if (containerRect == null)
+                return Vector2.zero;
+
+            if (drawSpawnAnchor == null)
+                return containerRect.rect.center;
+
+            Canvas canvas = containerRect.GetComponentInParent<Canvas>();
+            Camera cam = null;
+            if (canvas != null && canvas.renderMode != RenderMode.ScreenSpaceOverlay)
+                cam = canvas.worldCamera;
+
+            Vector2 screenPoint = RectTransformUtility.WorldToScreenPoint(cam, drawSpawnAnchor.position);
+            if (RectTransformUtility.ScreenPointToLocalPointInRectangle(containerRect, screenPoint, cam, out var local))
+                return local;
+
+            return containerRect.rect.center;
         }
 
         private bool ValidateReferences()
