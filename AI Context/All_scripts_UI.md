@@ -616,7 +616,8 @@ using UnityEngine.UI;
 namespace CardBattle.Core
 {
     /// <summary>
-    /// Presentation-only ghost card that lerps toward a graveyard anchor and self-destructs on arrival.
+    /// Presentation-only ghost card that flies toward a graveyard anchor and self-destructs on arrival.
+    /// Supports a curved path for smoother motion.
     /// </summary>
     public class FlyingCardGhostUI : MonoBehaviour
     {
@@ -630,12 +631,23 @@ namespace CardBattle.Core
         [SerializeField] private float endScaleMultiplier = 0.72f;
         [SerializeField] private float endAlphaMultiplier = 0.78f;
 
+        [Header("Curved Path")]
+        [SerializeField] private bool useCurvedPath = true;
+        [SerializeField] private bool useDynamicArcHeight = true;
+        [SerializeField] private float arcHeight = 140f;
+        [SerializeField] private float arcDistanceMultiplier = 0.18f;
+        [SerializeField] private float minArcHeight = 60f;
+        [SerializeField] private float maxArcHeight = 180f;
+        [SerializeField] private float horizontalControlOffset = 0f;
+
         private void Awake()
         {
             if (rectTransform == null)
                 rectTransform = GetComponent<RectTransform>();
+
             if (canvasGroup == null)
                 canvasGroup = GetComponent<CanvasGroup>();
+
             if (artworkImage == null)
                 artworkImage = GetComponentInChildren<Image>(true);
         }
@@ -661,8 +673,7 @@ namespace CardBattle.Core
             if (canvasGroup != null)
                 canvasGroup.alpha = 1f;
 
-            StartCoroutine(
-                CoFly(startAnchoredPosition, endAnchoredPosition, onArrived));
+            StartCoroutine(CoFly(startAnchoredPosition, endAnchoredPosition, onArrived));
         }
 
         private IEnumerator CoFly(
@@ -672,8 +683,20 @@ namespace CardBattle.Core
         {
             float dur = Mathf.Max(0.01f, flyDuration);
             float t = 0f;
+
             float startAlpha = canvasGroup != null ? canvasGroup.alpha : 1f;
             float endAlpha = startAlpha * endAlphaMultiplier;
+
+            float resolvedArcHeight = arcHeight;
+            if (useDynamicArcHeight)
+            {
+                float distance = Vector2.Distance(start, end);
+                resolvedArcHeight = Mathf.Clamp(distance * arcDistanceMultiplier, minArcHeight, maxArcHeight);
+            }
+
+            Vector2 control = (start + end) * 0.5f;
+            control += Vector2.up * resolvedArcHeight;
+            control += Vector2.right * horizontalControlOffset;
 
             while (t < dur)
             {
@@ -682,7 +705,12 @@ namespace CardBattle.Core
 
                 if (rectTransform != null)
                 {
-                    rectTransform.anchoredPosition = Vector2.LerpUnclamped(start, end, u);
+                    Vector2 pos = useCurvedPath
+                        ? EvaluateQuadraticBezier(start, control, end, u)
+                        : Vector2.LerpUnclamped(start, end, u);
+
+                    rectTransform.anchoredPosition = pos;
+
                     float s = Mathf.Lerp(1f, endScaleMultiplier, u);
                     rectTransform.localScale = new Vector3(s, s, 1f);
                 }
@@ -704,6 +732,12 @@ namespace CardBattle.Core
 
             onArrived?.Invoke();
             Destroy(gameObject);
+        }
+
+        private static Vector2 EvaluateQuadraticBezier(Vector2 a, Vector2 b, Vector2 c, float t)
+        {
+            float omt = 1f - t;
+            return omt * omt * a + 2f * omt * t * b + t * t * c;
         }
     }
 }
