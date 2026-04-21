@@ -520,6 +520,7 @@ namespace CardBattle.Core
             }
 
             dealRoutine = null;
+            RefreshCardInteractivity();
         }
 
         private void PrepareNewCardsForDeal(List<CardViewUI> newViews)

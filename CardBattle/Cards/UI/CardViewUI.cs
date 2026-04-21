@@ -414,7 +414,7 @@ namespace CardBattle.Core
             }
 
             StopDealFadeRoutine();
-            dealFadeRoutine = StartCoroutine(CoDealFadeIn(ResolveTargetAlphaForCurrentState()));
+            dealFadeRoutine = StartCoroutine(CoDealFadeIn(ResolveDealFadeTargetAlpha()));
         }
 
         private IEnumerator CoDealFadeIn(float targetAlpha)
@@ -440,6 +440,11 @@ namespace CardBattle.Core
         private float ResolveTargetAlphaForCurrentState()
         {
             return currentState == CardVisualState.Disabled ? disabledAlpha : normalAlpha;
+        }
+
+        private float ResolveDealFadeTargetAlpha()
+        {
+            return normalAlpha;
         }
 
         private void StopDealFadeRoutine()
