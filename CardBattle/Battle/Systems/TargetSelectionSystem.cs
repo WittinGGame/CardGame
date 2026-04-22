@@ -5,6 +5,14 @@ namespace CardBattle.Core
 {
     public class TargetSelectionSystem : MonoBehaviour
     {
+        public enum GuideStartSource
+        {
+            Card,
+            Player
+        }
+
+        [SerializeField] private GuideStartSource guideStartSource = GuideStartSource.Card;
+        [SerializeField] private PlayerBattleUnit player;
         [SerializeField] private HandUIController handUIController;
         [SerializeField] private BattleActionRunner battleActionRunner;
         [SerializeField] private EnemyTargetHighlight[] enemyHighlights;
@@ -52,17 +60,38 @@ namespace CardBattle.Core
 
             SetHighlight(true);
 
-            if (handUIController != null && guideLine != null)
-            {
-                var view = handUIController.GetViewForCard(card);
-                if (view != null)
-                {
-                    var startAnchor = view.GuideStartAnchor != null
-                        ? view.GuideStartAnchor
-                        : view.LayoutRect;
+            RectTransform cardRect = null;
+            Transform worldStart = null;
 
-                    guideLine.ShowFromCard(startAnchor);
+            if (guideStartSource == GuideStartSource.Card)
+            {
+                if (handUIController != null)
+                {
+                    var view = handUIController.GetViewForCard(card);
+                    if (view != null)
+                    {
+                        cardRect = view.GuideStartAnchor != null
+                            ? view.GuideStartAnchor
+                            : view.LayoutRect;
+                    }
                 }
+            }
+            else
+            {
+                if (player != null)
+                {
+                    worldStart = player.UIAnchorTargetGuide != null
+                        ? player.UIAnchorTargetGuide
+                        : player.transform;
+                }
+            }
+
+            if (guideLine != null)
+            {
+                if (cardRect != null)
+                    guideLine.ShowFromCard(cardRect);
+                else if (worldStart != null)
+                    guideLine.ShowFromWorld(worldStart);
             }
 
             Debug.Log($"Selecting target for card: {card.Data.DisplayName}");

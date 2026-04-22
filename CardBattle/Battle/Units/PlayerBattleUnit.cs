@@ -17,6 +17,7 @@ namespace CardBattle.Core
         [SerializeField] private CardResolver cardResolver;
         [SerializeField] private EnemyActionSystem enemyActionSystem;
         [SerializeField] private BattleUnitView battleUnitView;
+        [SerializeField] private Transform uiAnchorTargetGuide;
         public BattleUnitView View => battleUnitView;
 
         private int _pendingAttackBonus;
@@ -31,6 +32,7 @@ namespace CardBattle.Core
         public bool CanAct => !_turnCommitted && IsAlive;
 
         public DeckController DeckController => deckController;
+        public Transform UIAnchorTargetGuide => uiAnchorTargetGuide;
 
         /// <summary>True when the player may attempt to spend AP on a card.</summary>
         public bool CanSpendAp(int amount) => CanAct && CurrentAp >= amount;

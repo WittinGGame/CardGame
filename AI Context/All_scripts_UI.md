@@ -1092,6 +1092,7 @@ namespace CardBattle.Core
         private readonly List<RectTransform> segments = new List<RectTransform>();
 
         private RectTransform startRect;
+        private Transform worldStartTarget;
         private Vector2 currentEnd;
         private bool isVisible;
 
@@ -1103,12 +1104,29 @@ namespace CardBattle.Core
 
         private void Update()
         {
-            if (!isVisible || startRect == null)
+            if (!isVisible)
                 return;
 
-            Vector2 start = GetAnchoredPos(startRect);
+            Vector2 startPos;
 
-            DrawCurve(start, currentEnd);
+            if (worldStartTarget != null)
+            {
+                Camera cam = GetWorldCamera();
+                if (cam == null)
+                    return;
+
+                Vector2 screen = RectTransformUtility.WorldToScreenPoint(cam, worldStartTarget.position);
+                startPos = ScreenToLocal(screen);
+            }
+            else
+            {
+                if (startRect == null)
+                    return;
+
+                startPos = GetAnchoredPos(startRect);
+            }
+
+            DrawCurve(startPos, currentEnd);
         }
 
         // ========================
@@ -1120,9 +1138,21 @@ namespace CardBattle.Core
             if (cardRect == null)
                 return;
 
+            worldStartTarget = null;
             startRect = cardRect;
             isVisible = true;
 
+            SetSegmentsActive(true);
+        }
+
+        public void ShowFromWorld(Transform worldStart)
+        {
+            if (worldStart == null)
+                return;
+
+            startRect = null;
+            worldStartTarget = worldStart;
+            isVisible = true;
             SetSegmentsActive(true);
         }
 
@@ -1155,6 +1185,7 @@ namespace CardBattle.Core
         public void Hide()
         {
             isVisible = false;
+            worldStartTarget = null;
             startRect = null;
             SetSegmentsActive(false);
         }
