@@ -1088,12 +1088,14 @@ namespace CardBattle.Core
         [SerializeField] private Image segmentPrefab;
         [SerializeField] private int segmentCount = 16;
         [SerializeField] private float curveHeight = 120f;
+        [SerializeField] private float followSpeed = 15f;
 
         private readonly List<RectTransform> segments = new List<RectTransform>();
 
         private RectTransform startRect;
         private Transform worldStartTarget;
         private Vector2 currentEnd;
+        private Vector2 targetEnd;
         private bool isVisible;
 
         private void Awake()
@@ -1126,6 +1128,9 @@ namespace CardBattle.Core
                 startPos = GetAnchoredPos(startRect);
             }
 
+            float t = 1f - Mathf.Exp(-followSpeed * Time.deltaTime);
+            currentEnd = Vector2.Lerp(currentEnd, targetEnd, t);
+
             DrawCurve(startPos, currentEnd);
         }
 
@@ -1141,6 +1146,7 @@ namespace CardBattle.Core
             worldStartTarget = null;
             startRect = cardRect;
             isVisible = true;
+            targetEnd = currentEnd;
 
             SetSegmentsActive(true);
         }
@@ -1153,6 +1159,7 @@ namespace CardBattle.Core
             startRect = null;
             worldStartTarget = worldStart;
             isVisible = true;
+            targetEnd = currentEnd;
             SetSegmentsActive(true);
         }
 
@@ -1161,7 +1168,7 @@ namespace CardBattle.Core
             if (!isVisible)
                 return;
 
-            currentEnd = ScreenToLocal(screenPos);
+            targetEnd = ScreenToLocal(screenPos);
         }
 
         public void UpdateTowardWorld(Transform target)
@@ -1174,7 +1181,7 @@ namespace CardBattle.Core
                 return;
 
             Vector2 screen = RectTransformUtility.WorldToScreenPoint(cam, target.position);
-            currentEnd = ScreenToLocal(screen);
+            targetEnd = ScreenToLocal(screen);
         }
 
         public void UpdateTowardEnemy(Transform enemyAnchor)
