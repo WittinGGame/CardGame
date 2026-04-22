@@ -23,6 +23,8 @@ namespace CardBattle.Core
         [SerializeField] private Button endTurnButton;
         [SerializeField] private HpBarUI playerHpBar;
         [SerializeField] private TargetSelectionSystem targetSelectionSystem;
+        [SerializeField] private GameObject buffRoot;
+        [SerializeField] private TextMeshProUGUI buffText;
 
         private void Start()
         {
@@ -38,6 +40,7 @@ namespace CardBattle.Core
                 HandlePlayerHpChanged(player.CurrentHp, player.MaxHp);
                 HandlePlayerApChanged(player.CurrentAp, player.ApPerRound);
                 HandlePlayerBlockChanged(player.CurrentBlock);
+                UpdateBuffUI(player.DebugBuffCount);
             }
             RefreshUIExternal();
         }
@@ -50,6 +53,8 @@ namespace CardBattle.Core
                 player.OnApChangedEvent += HandlePlayerApChanged;
                 player.OnTurnStateChanged += HandleTurnStateChanged;
                 player.OnBlockChangedEvent += HandlePlayerBlockChanged;
+                player.OnDebugBuffChanged += UpdateBuffUI;
+                UpdateBuffUI(player.DebugBuffCount);
             }
 
             if (battleActionRunner != null)
@@ -64,6 +69,7 @@ namespace CardBattle.Core
                 player.OnApChangedEvent -= HandlePlayerApChanged;
                 player.OnTurnStateChanged -= HandleTurnStateChanged;
                 player.OnBlockChangedEvent -= HandlePlayerBlockChanged;
+                player.OnDebugBuffChanged -= UpdateBuffUI;
             }
 
             if (battleActionRunner != null)
@@ -116,6 +122,22 @@ namespace CardBattle.Core
 
             if (playerBlockRoot != null)
                 playerBlockRoot.SetActive(currentBlock > 0);
+        }
+
+        private void UpdateBuffUI(int value)
+        {
+            if (buffRoot == null || buffText == null)
+                return;
+
+            if (value > 0)
+            {
+                buffRoot.SetActive(true);
+                buffText.text = value.ToString();
+            }
+            else
+            {
+                buffRoot.SetActive(false);
+            }
         }
 
         private void HandleTurnStateChanged(bool canAct)

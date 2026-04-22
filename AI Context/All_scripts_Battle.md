@@ -1419,6 +1419,7 @@ namespace CardBattle.Core
         private bool _turnCommitted;
         public event System.Action<int, int> OnApChangedEvent;
         public event System.Action<bool> OnTurnStateChanged;
+        public event System.Action<int> OnDebugBuffChanged;
 
         public int CurrentAp { get; private set; }
         public int ApPerRound => apPerRound;
@@ -1428,6 +1429,8 @@ namespace CardBattle.Core
 
         public DeckController DeckController => deckController;
         public Transform UIAnchorTargetGuide => uiAnchorTargetGuide;
+        public int DebugBuffValue => _pendingAttackBonus;
+        public int DebugBuffCount => _pendingAttackBonus > 0 ? 1 : 0;
 
         /// <summary>True when the player may attempt to spend AP on a card.</summary>
         public bool CanSpendAp(int amount) => CanAct && CurrentAp >= amount;
@@ -1438,6 +1441,7 @@ namespace CardBattle.Core
             _turnCommitted = false;
             CurrentAp = Mathf.Max(0, apPerRound);
             _pendingAttackBonus = 0;
+            OnDebugBuffChanged?.Invoke(DebugBuffCount);
             ClearBlock();
             NotifyApChanged();
             NotifyTurnStateChanged();
@@ -1504,14 +1508,21 @@ namespace CardBattle.Core
                 return;
 
             _pendingAttackBonus += Mathf.Max(0, data.BuffPotency);
+            OnDebugBuffChanged?.Invoke(DebugBuffCount);
         }
 
         /// <summary>Called by <see cref="CardResolver"/> when applying attack damage.</summary>
         public int ConsumeDamageBonus()
         {
             var bonus = _pendingAttackBonus;
-            _pendingAttackBonus = 0;
+            ConsumeNextAttackBonus();
             return bonus;
+        }
+
+        public void ConsumeNextAttackBonus()
+        {
+            _pendingAttackBonus = 0;
+            OnDebugBuffChanged?.Invoke(DebugBuffCount);
         }
 
         public void SpendApFromRunner(int amount)
