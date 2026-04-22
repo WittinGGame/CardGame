@@ -481,6 +481,7 @@ namespace CardBattle.Core
 
         [Header("Core References")]
         [SerializeField] private RectTransform visualRoot;
+        [SerializeField] private RectTransform guideStartAnchor;
         [SerializeField] private CanvasGroup canvasGroup;
         [SerializeField] private Button button;
 
@@ -530,6 +531,7 @@ namespace CardBattle.Core
         public CardInstance BoundCard => boundCard;
         /// <summary>Root layout rect (anchored fan position). Used by presentation VFX.</summary>
         public RectTransform LayoutRect => _rectTransform;
+        public RectTransform GuideStartAnchor => guideStartAnchor;
         public bool IsSelected => isSelected;
         public bool IsInteractable => isInteractable;
         public bool IsPointerOver => isPointerOver;

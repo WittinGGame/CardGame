@@ -16,12 +16,14 @@ namespace CardBattle.Core
         [SerializeField] private Transform uiAnchorIntent;
         [SerializeField] private Transform uiAnchorBuff;
         [SerializeField] private Transform uiAnchorDamage;
+        [SerializeField] private Transform uiAnchorTargetGuide;
 
         public BattleUnitView View => battleUnitView;
         public Transform UIAnchorHP => uiAnchorHP;
         public Transform UIAnchorIntent => uiAnchorIntent;
         public Transform UIAnchorBuff => uiAnchorBuff;
         public Transform UIAnchorDamage => uiAnchorDamage;
+        public Transform UIAnchorTargetGuide => uiAnchorTargetGuide;
 
         private int _countdown;
         private bool _hasAttackedThisPlayerRound;
