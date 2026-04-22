@@ -765,10 +765,16 @@ namespace CardBattle.Core
         [SerializeField] private BattleActionRunner battleActionRunner;
         [SerializeField] private EnemyTargetHighlight[] enemyHighlights;
         [SerializeField] private TargetGuideLineUI guideLine;
+        [SerializeField] private RectTransform handContainer;
+        [SerializeField] private float handPaddingX = 30f;
+        [SerializeField] private float handPaddingY = 20f;
 
         public bool IsSelectingTarget => _pendingCard != null;
 
         private CardInstance _pendingCard;
+        private RectTransform _selectedCardRect;
+        private RectTransform _selectedCardGuideStartAnchor;
+        private bool _canShowGuideLine;
 
         private void Update()
         {
@@ -789,11 +795,26 @@ namespace CardBattle.Core
                 return;
             }
 
-            if (IsSelectingTarget && guideLine != null)
+            bool insideSelectedCard = IsPointerInsideHandArea();
+            if (insideSelectedCard)
+            {
+                _canShowGuideLine = false;
+                if (guideLine != null)
+                    guideLine.Hide();
+                return;
+            }
+
+            if (!_canShowGuideLine)
+            {
+                _canShowGuideLine = true;
+                ShowGuideLineFromCurrentStartSource();
+            }
+
+            if (_canShowGuideLine && guideLine != null)
             {
                 Transform hoveredEnemyAnchor = GetHoveredEnemyAnchor();
                 if (hoveredEnemyAnchor != null)
-                    guideLine.UpdateTowardWorld(hoveredEnemyAnchor);
+                    guideLine.UpdateTowardEnemy(hoveredEnemyAnchor);
                 else
                     guideLine.UpdateTowardScreen(Input.mousePosition);
             }
@@ -805,42 +826,26 @@ namespace CardBattle.Core
                 return;
 
             _pendingCard = card;
+            _canShowGuideLine = false;
+            _selectedCardRect = null;
+            _selectedCardGuideStartAnchor = null;
 
             SetHighlight(true);
 
-            RectTransform cardRect = null;
-            Transform worldStart = null;
-
-            if (guideStartSource == GuideStartSource.Card)
+            if (handUIController != null)
             {
-                if (handUIController != null)
+                var view = handUIController.GetViewForCard(card);
+                if (view != null)
                 {
-                    var view = handUIController.GetViewForCard(card);
-                    if (view != null)
-                    {
-                        cardRect = view.GuideStartAnchor != null
-                            ? view.GuideStartAnchor
-                            : view.LayoutRect;
-                    }
-                }
-            }
-            else
-            {
-                if (player != null)
-                {
-                    worldStart = player.UIAnchorTargetGuide != null
-                        ? player.UIAnchorTargetGuide
-                        : player.transform;
+                    _selectedCardRect = view.LayoutRect;
+                    _selectedCardGuideStartAnchor = view.GuideStartAnchor != null
+                        ? view.GuideStartAnchor
+                        : null;
                 }
             }
 
             if (guideLine != null)
-            {
-                if (cardRect != null)
-                    guideLine.ShowFromCard(cardRect);
-                else if (worldStart != null)
-                    guideLine.ShowFromWorld(worldStart);
-            }
+                guideLine.Hide();
 
             Debug.Log($"Selecting target for card: {card.Data.DisplayName}");
         }
@@ -861,6 +866,10 @@ namespace CardBattle.Core
 
             if (guideLine != null)
                 guideLine.Hide();
+
+            _selectedCardRect = null;
+            _selectedCardGuideStartAnchor = null;
+            _canShowGuideLine = false;
         }
 
         public void ConfirmTarget(EnemyBattleUnit target)
@@ -875,6 +884,10 @@ namespace CardBattle.Core
 
             if (guideLine != null)
                 guideLine.Hide();
+
+            _selectedCardRect = null;
+            _selectedCardGuideStartAnchor = null;
+            _canShowGuideLine = false;
         }
 
         private void SetHighlight(bool value)
@@ -926,6 +939,60 @@ namespace CardBattle.Core
 
             // TODO: Swap to a dedicated hover-tracking source if introduced later.
             return null;
+        }
+
+        private bool IsPointerInsideHandArea()
+        {
+            if (handContainer == null)
+                return false;
+
+            Canvas canvas = handContainer.GetComponentInParent<Canvas>();
+            Camera eventCamera = null;
+            if (canvas != null && canvas.renderMode != RenderMode.ScreenSpaceOverlay)
+                eventCamera = canvas.worldCamera;
+
+            Vector3[] corners = new Vector3[4];
+            handContainer.GetWorldCorners(corners);
+
+            Vector2 min = RectTransformUtility.WorldToScreenPoint(eventCamera, corners[0]);
+            Vector2 max = RectTransformUtility.WorldToScreenPoint(eventCamera, corners[2]);
+
+            min.x -= handPaddingX;
+            min.y -= handPaddingY;
+            max.x += handPaddingX;
+            max.y += handPaddingY;
+
+            Vector2 mouse = Input.mousePosition;
+            return mouse.x >= min.x && mouse.x <= max.x &&
+                   mouse.y >= min.y && mouse.y <= max.y;
+        }
+
+        private void ShowGuideLineFromCurrentStartSource()
+        {
+            if (guideLine == null)
+                return;
+
+            if (guideStartSource == GuideStartSource.Card)
+            {
+                RectTransform startAnchor = _selectedCardGuideStartAnchor != null
+                    ? _selectedCardGuideStartAnchor
+                    : _selectedCardRect;
+
+                if (startAnchor != null)
+                    guideLine.ShowFromCard(startAnchor);
+            }
+            else
+            {
+                if (player != null)
+                {
+                    Transform startWorld = player.UIAnchorTargetGuide != null
+                        ? player.UIAnchorTargetGuide
+                        : player.transform;
+
+                    if (startWorld != null)
+                        guideLine.ShowFromWorld(startWorld);
+                }
+            }
         }
     }
 }
