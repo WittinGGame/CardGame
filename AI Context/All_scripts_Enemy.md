@@ -326,38 +326,30 @@ namespace CardBattle.Core
         [SerializeField] private WorldToUIFollow intentFollow;
         [SerializeField] private WorldToUIFollow buffFollow;
 
-        private bool isBound = false;
-
         public EnemyBattleUnit Target => target;
         public WorldToUIFollow HpFollow => hpFollow;
         public WorldToUIFollow IntentFollow => intentFollow;
         public WorldToUIFollow BuffFollow => buffFollow;
 
+        private EnemyBattleUnit subscribedTarget;
+
         private void Start()
         {
             if (target != null)
-            {
                 BindAll();
-            }
+
+            RefreshAll();
         }
 
-        private void Update()
+        private void OnEnable()
         {
-            if (!isBound || target == null)
-                return;
+            SubscribeTargetEvents();
+            RefreshAll();
+        }
 
-            if (!target.IsAlive)
-            {
-                HideAll();
-                return;
-            }
-
-            ShowAll();
-
-            // fallback update (phase นี้ยังใช้ได้)
-            hpUI?.Refresh();
-            intentUI?.Refresh();
-            buffUI?.Refresh();
+        private void OnDisable()
+        {
+            UnsubscribeTargetEvents();
         }
 
         // =========================
@@ -366,8 +358,11 @@ namespace CardBattle.Core
 
         public void SetTarget(EnemyBattleUnit enemy)
         {
+            UnsubscribeTargetEvents();
             target = enemy;
             BindAll();
+            SubscribeTargetEvents();
+            RefreshAll();
         }
 
         // =========================
@@ -377,7 +372,10 @@ namespace CardBattle.Core
         private void BindAll()
         {
             if (target == null)
+            {
+                HideAll();
                 return;
+            }
 
             // bind UI data
             if (hpUI != null)
@@ -391,8 +389,6 @@ namespace CardBattle.Core
 
             // bind follow anchors
             BindFollow();
-
-            isBound = true;
         }
 
         private void BindFollow()
@@ -434,6 +430,70 @@ namespace CardBattle.Core
             {
                 Debug.LogWarning($"Buff Follow missing | buffFollow={(buffFollow != null)} | anchor={(target.UIAnchorBuff != null)}");
             }
+        }
+
+        private void SubscribeTargetEvents()
+        {
+            if (target == null || subscribedTarget == target)
+                return;
+
+            if (subscribedTarget != null)
+                UnsubscribeTargetEvents();
+
+            target.OnHpChangedEvent += HandleHpChanged;
+            target.OnBlockChangedEvent += HandleBlockChanged;
+            target.OnEnemyStateChanged += HandleEnemyStateChanged;
+            subscribedTarget = target;
+        }
+
+        private void UnsubscribeTargetEvents()
+        {
+            if (subscribedTarget == null)
+                return;
+
+            subscribedTarget.OnHpChangedEvent -= HandleHpChanged;
+            subscribedTarget.OnBlockChangedEvent -= HandleBlockChanged;
+            subscribedTarget.OnEnemyStateChanged -= HandleEnemyStateChanged;
+            subscribedTarget = null;
+        }
+
+        private void HandleHpChanged(int currentHp, int maxHp)
+        {
+            RefreshAll();
+        }
+
+        private void HandleBlockChanged(int currentBlock)
+        {
+            RefreshAll();
+        }
+
+        private void HandleEnemyStateChanged()
+        {
+            RefreshAll();
+        }
+
+        private void RefreshAll()
+        {
+            if (!RefreshVisibility())
+            {
+                return;
+            }
+
+            hpUI?.Refresh();
+            intentUI?.Refresh();
+            buffUI?.Refresh();
+        }
+
+        private bool RefreshVisibility()
+        {
+            if (target == null || !target.IsAlive)
+            {
+                HideAll();
+                return false;
+            }
+
+            ShowAll();
+            return true;
         }
 
         // =========================

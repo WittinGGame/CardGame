@@ -22,6 +22,8 @@ namespace CardBattle.Core
         public WorldToUIFollow IntentFollow => intentFollow;
         public WorldToUIFollow BuffFollow => buffFollow;
 
+        private EnemyBattleUnit subscribedTarget;
+
         private void Start()
         {
             if (target != null)
@@ -123,23 +125,35 @@ namespace CardBattle.Core
 
         private void SubscribeTargetEvents()
         {
-            if (target == null)
+            if (target == null || subscribedTarget == target)
                 return;
 
+            if (subscribedTarget != null)
+                UnsubscribeTargetEvents();
+
             target.OnHpChangedEvent += HandleHpChanged;
+            target.OnBlockChangedEvent += HandleBlockChanged;
             target.OnEnemyStateChanged += HandleEnemyStateChanged;
+            subscribedTarget = target;
         }
 
         private void UnsubscribeTargetEvents()
         {
-            if (target == null)
+            if (subscribedTarget == null)
                 return;
 
-            target.OnHpChangedEvent -= HandleHpChanged;
-            target.OnEnemyStateChanged -= HandleEnemyStateChanged;
+            subscribedTarget.OnHpChangedEvent -= HandleHpChanged;
+            subscribedTarget.OnBlockChangedEvent -= HandleBlockChanged;
+            subscribedTarget.OnEnemyStateChanged -= HandleEnemyStateChanged;
+            subscribedTarget = null;
         }
 
         private void HandleHpChanged(int currentHp, int maxHp)
+        {
+            RefreshAll();
+        }
+
+        private void HandleBlockChanged(int currentBlock)
         {
             RefreshAll();
         }
@@ -151,23 +165,26 @@ namespace CardBattle.Core
 
         private void RefreshAll()
         {
-            if (target == null)
+            if (!RefreshVisibility())
             {
-                HideAll();
                 return;
             }
-
-            if (!target.IsAlive)
-            {
-                HideAll();
-                return;
-            }
-
-            ShowAll();
 
             hpUI?.Refresh();
             intentUI?.Refresh();
             buffUI?.Refresh();
+        }
+
+        private bool RefreshVisibility()
+        {
+            if (target == null || !target.IsAlive)
+            {
+                HideAll();
+                return false;
+            }
+
+            ShowAll();
+            return true;
         }
 
         // =========================
