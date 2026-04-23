@@ -330,14 +330,51 @@ namespace CardBattle.Core
                     context.ApplyBaseCardLogic = false;
             }
 
+            bool usedEffectsPipeline = false;
             if (context.ApplyBaseCardLogic)
-                ApplyCoreCardLogic(context);
+            {
+                if (context.Card.Data.HasEffects)
+                {
+                    ApplyEffectCardLogic(context);
+                    usedEffectsPipeline = true;
+                }
+                else
+                {
+                    ApplyCoreCardLogic(context);
+                }
+            }
 
             foreach (var modifier in context.Card.Modifiers)
                 modifier?.PostResolve(context);
 
             if (logResolution)
-                Debug.Log($"Resolved {context.Card.Data.DisplayName} ({context.Card.Data.CardType}).");
+            {
+                string path = usedEffectsPipeline ? "Effects pipeline" : "Legacy CardType pipeline";
+                Debug.Log($"Resolved {context.Card.Data.DisplayName} via {path}.");
+            }
+        }
+
+        private static void ApplyEffectCardLogic(CardPlayContext context)
+        {
+            if (context?.Card?.Data == null)
+                return;
+
+            var data = context.Card.Data;
+            var enemyTargets = TargetResolver.ResolveEnemyTargets(context, data.TargetMode);
+            var executionContext = new CardEffectExecutionContext(enemyTargets);
+
+            var effects = data.Effects;
+            if (effects == null)
+                return;
+
+            for (int i = 0; i < effects.Count; i++)
+            {
+                var effect = effects[i];
+                if (effect == null)
+                    continue;
+
+                effect.Apply(context, executionContext);
+            }
         }
 
         private static void ApplyCoreCardLogic(CardPlayContext context)
