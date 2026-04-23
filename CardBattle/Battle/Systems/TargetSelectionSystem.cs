@@ -72,9 +72,24 @@ namespace CardBattle.Core
             }
         }
 
+        /// <summary>This flow only supports picking one enemy; gate entry by card rules.</summary>
+        private bool CanUseSingleEnemySelection(CardData data)
+        {
+            if (data == null)
+                return false;
+
+            if (data.HasEffects)
+                return data.TargetMode == CardTargetMode.SingleEnemy;
+
+            return data.CardType == CardType.Attack;
+        }
+
         public void BeginTargetSelection(CardInstance card)
         {
             if (card?.Data == null)
+                return;
+
+            if (!CanUseSingleEnemySelection(card.Data))
                 return;
 
             _pendingCard = card;

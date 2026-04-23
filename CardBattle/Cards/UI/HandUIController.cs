@@ -377,19 +377,46 @@ namespace CardBattle.Core
             LayoutCards();
         }
 
+        /// <summary>Whether this card needs the single-enemy target selection UI before play.</summary>
+        private bool RequiresManualEnemyTarget(CardData data)
+        {
+            if (data == null)
+                return false;
+
+            if (data.HasEffects)
+                return data.TargetMode == CardTargetMode.SingleEnemy;
+
+            return data.CardType == CardType.Attack;
+        }
+
+        /// <summary>Primary target for immediate <see cref="BattleActionRunner.TryPlayCard"/> when not entering target selection.</summary>
+        private EnemyBattleUnit ResolveImmediateDefaultTarget(CardData data)
+        {
+            if (data == null)
+                return null;
+
+            if (data.HasEffects)
+                return null;
+
+            if (data.CardType == CardType.Attack)
+                return GetDefaultAliveEnemy();
+
+            return null;
+        }
+
         private void TryPlayCardFromView(CardInstance card)
         {
             if (card?.Data == null || battleActionRunner == null)
                 return;
 
-            if (card.Data.CardType == CardType.Attack)
+            if (RequiresManualEnemyTarget(card.Data))
             {
                 if (targetSelectionSystem != null)
                 {
                     targetSelectionSystem.BeginTargetSelection(card);
 
                     if (verboseLogs)
-                        Debug.Log($"[HandUI] Waiting for target selection: {card.Data.DisplayName}");
+                        Debug.Log($"[HandUI] Waiting for target selection: {card.Data.DisplayName} | TargetMode: {card.Data.TargetMode}");
 
                     // สำคัญ: อย่า RefreshHandUI ตรงนี้
                     // เพื่อให้ selected state ค้างอยู่
@@ -397,13 +424,14 @@ namespace CardBattle.Core
                 }
             }
 
-            EnemyBattleUnit target = GetDefaultAliveEnemy();
+            EnemyBattleUnit target = ResolveImmediateDefaultTarget(card.Data);
             battleActionRunner.TryPlayCard(card, target);
 
             if (verboseLogs)
             {
                 string targetName = target != null ? target.name : "None";
-                Debug.Log($"[HandUI] Clicked {card.Data.DisplayName} | Target: {targetName}");
+                string modeNote = card.Data.HasEffects ? $"TargetMode: {card.Data.TargetMode}" : $"CardType: {card.Data.CardType}";
+                Debug.Log($"[HandUI] Clicked {card.Data.DisplayName} | Immediate resolve | {modeNote} | Target: {targetName}");
             }
         }
 
