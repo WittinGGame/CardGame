@@ -7,6 +7,12 @@ namespace CardBattle.Core
     {
         [SerializeField] private int healAmount = 2;
 
+        public override string GetDescriptionText()
+        {
+            int value = Mathf.Max(0, healAmount);
+            return $"Heal <color=#64D98B>{value}</color>";
+        }
+
         public override void Apply(CardPlayContext context, CardEffectExecutionContext executionContext)
         {
             if (context?.Player == null)

@@ -7,6 +7,12 @@ namespace CardBattle.Core
     {
         [SerializeField] private int damage = 3;
 
+        public override string GetDescriptionText()
+        {
+            int value = Mathf.Max(0, damage);
+            return $"Deal <color=#FF6B6B>{value} damage</color>";
+        }
+
         public override void Apply(CardPlayContext context, CardEffectExecutionContext executionContext)
         {
             if (context == null || executionContext == null)

@@ -99,6 +99,7 @@ namespace CardBattle.Core
     /// </summary>
     public abstract class CardEffectData : ScriptableObject
     {
+        public abstract string GetDescriptionText();
         public abstract void Apply(CardPlayContext context, CardEffectExecutionContext executionContext);
     }
 }
@@ -115,6 +116,12 @@ namespace CardBattle.Core
     public class AddBlockEffectData : CardEffectData
     {
         [SerializeField] private int blockAmount = 5;
+
+        public override string GetDescriptionText()
+        {
+            int value = Mathf.Max(0, blockAmount);
+            return $"Gain <color=#6BCBFF>{value} Block</color>";
+        }
 
         public override void Apply(CardPlayContext context, CardEffectExecutionContext executionContext)
         {
@@ -138,6 +145,12 @@ namespace CardBattle.Core
     public class DealDamageEffectData : CardEffectData
     {
         [SerializeField] private int damage = 3;
+
+        public override string GetDescriptionText()
+        {
+            int value = Mathf.Max(0, damage);
+            return $"Deal <color=#FF6B6B>{value} damage</color>";
+        }
 
         public override void Apply(CardPlayContext context, CardEffectExecutionContext executionContext)
         {
@@ -182,6 +195,12 @@ namespace CardBattle.Core
     public class HealEffectData : CardEffectData
     {
         [SerializeField] private int healAmount = 2;
+
+        public override string GetDescriptionText()
+        {
+            int value = Mathf.Max(0, healAmount);
+            return $"Heal <color=#64D98B>{value}</color>";
+        }
 
         public override void Apply(CardPlayContext context, CardEffectExecutionContext executionContext)
         {

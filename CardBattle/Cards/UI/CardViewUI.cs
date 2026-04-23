@@ -255,7 +255,7 @@ namespace CardBattle.Core
                 artworkImage.sprite = data.Artwork;
 
             if (descriptionText != null)
-                descriptionText.text = GetDescription(data);
+                descriptionText.text = CardDescriptionBuilder.Build(data);
 
             ApplyStateVisuals();
         }
@@ -458,21 +458,5 @@ namespace CardBattle.Core
             }
         }
 
-        private string GetDescription(CardData data)
-        {
-            switch (data.CardType)
-            {
-                case CardType.Attack:
-                    return $"Deal {data.AttackDamage} damage";
-                case CardType.Heal:
-                    return $"Heal {data.HealAmount}";
-                case CardType.Buff:
-                    return $"Gain +{data.BuffPotency}";
-                case CardType.Defend:
-                    return $"Gain {data.BlockAmount} Block";
-                default:
-                    return "";
-            }
-        }
     }
 }

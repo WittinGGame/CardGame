@@ -7,6 +7,7 @@ namespace CardBattle.Core
     /// </summary>
     public abstract class CardEffectData : ScriptableObject
     {
+        public abstract string GetDescriptionText();
         public abstract void Apply(CardPlayContext context, CardEffectExecutionContext executionContext);
     }
 }
