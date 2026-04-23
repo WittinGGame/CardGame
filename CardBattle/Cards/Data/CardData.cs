@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace CardBattle.Core
@@ -28,6 +29,10 @@ namespace CardBattle.Core
         [Header("Defend")]
         [SerializeField] private int blockAmount = 5;
 
+        [Header("Effect System (Phase 1)")]
+        [SerializeField] private CardTargetMode targetMode = CardTargetMode.None;
+        [SerializeField] private CardEffectData[] effects;
+
         [Header("Visuals")]
         [SerializeField] private Sprite artwork;
 
@@ -39,6 +44,9 @@ namespace CardBattle.Core
         public int HealAmount => Mathf.Max(0, healAmount);
         public int BuffPotency => buffPotency;
         public int BlockAmount => Mathf.Max(0, blockAmount);
+        public CardTargetMode TargetMode => targetMode;
+        public IReadOnlyList<CardEffectData> Effects => effects;
+        public bool HasEffects => effects != null && effects.Length > 0;
         public Sprite Artwork => artwork;
     }
 }

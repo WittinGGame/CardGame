@@ -2,6 +2,7 @@
 FILE: CardData.cs
 PATH: Assets/Scripts/CardBattle/Cards/Data/CardData.cs
 ================================================================================
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace CardBattle.Core
@@ -32,6 +33,10 @@ namespace CardBattle.Core
         [Header("Defend")]
         [SerializeField] private int blockAmount = 5;
 
+        [Header("Effect System (Phase 1)")]
+        [SerializeField] private CardTargetMode targetMode = CardTargetMode.None;
+        [SerializeField] private CardEffectData[] effects;
+
         [Header("Visuals")]
         [SerializeField] private Sprite artwork;
 
@@ -43,10 +48,27 @@ namespace CardBattle.Core
         public int HealAmount => Mathf.Max(0, healAmount);
         public int BuffPotency => buffPotency;
         public int BlockAmount => Mathf.Max(0, blockAmount);
+        public CardTargetMode TargetMode => targetMode;
+        public IReadOnlyList<CardEffectData> Effects => effects;
+        public bool HasEffects => effects != null && effects.Length > 0;
         public Sprite Artwork => artwork;
     }
 }
 
+================================================================================
+FILE: CardTargetMode.cs
+PATH: Assets/Scripts/CardBattle/Cards/Data/CardTargetMode.cs
+================================================================================
+namespace CardBattle.Core
+{
+    public enum CardTargetMode
+    {
+        None,
+        Self,
+        SingleEnemy,
+        AllEnemies
+    }
+}
 
 ================================================================================
 FILE: CardType.cs
@@ -61,6 +83,135 @@ namespace CardBattle.Core
         Buff,
         Heal,
         Defend
+    }
+}
+
+================================================================================
+FILE: CardEffectData.cs
+PATH: Assets/Scripts/CardBattle/Cards/Effects/CardEffectData.cs
+================================================================================
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    /// <summary>
+    /// Designer-facing base class for effect-driven card behavior.
+    /// </summary>
+    public abstract class CardEffectData : ScriptableObject
+    {
+        public abstract void Apply(CardPlayContext context, CardEffectExecutionContext executionContext);
+    }
+}
+
+================================================================================
+FILE: AddBlockEffectData.cs
+PATH: Assets/Scripts/CardBattle/Cards/Effects/AddBlockEffectData.cs
+================================================================================
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    [CreateAssetMenu(fileName = "AddBlockEffect", menuName = "Card Battle/Effects/Add Block")]
+    public class AddBlockEffectData : CardEffectData
+    {
+        [SerializeField] private int blockAmount = 5;
+
+        public override void Apply(CardPlayContext context, CardEffectExecutionContext executionContext)
+        {
+            if (context?.Player == null)
+                return;
+
+            context.Player.AddBlock(Mathf.Max(0, blockAmount));
+        }
+    }
+}
+
+================================================================================
+FILE: DealDamageEffectData.cs
+PATH: Assets/Scripts/CardBattle/Cards/Effects/DealDamageEffectData.cs
+================================================================================
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    [CreateAssetMenu(fileName = "DealDamageEffect", menuName = "Card Battle/Effects/Deal Damage")]
+    public class DealDamageEffectData : CardEffectData
+    {
+        [SerializeField] private int damage = 3;
+
+        public override void Apply(CardPlayContext context, CardEffectExecutionContext executionContext)
+        {
+            if (context == null || executionContext == null)
+                return;
+
+            int bonus = context.Player != null ? context.Player.ConsumeDamageBonus() : 0;
+            int totalDamage = Mathf.Max(0, damage + bonus);
+            if (totalDamage <= 0 || executionContext.EnemyTargets == null)
+                return;
+
+            for (int i = 0; i < executionContext.EnemyTargets.Count; i++)
+            {
+                var target = executionContext.EnemyTargets[i];
+                if (target == null || !target.IsAlive)
+                    continue;
+
+                bool wasAliveBeforeHit = target.IsAlive;
+                int hpDamage = target.TakeDamage(totalDamage);
+
+                if (wasAliveBeforeHit)
+                {
+                    if (!target.IsAlive)
+                        target.View?.PlayDead();
+                    else if (hpDamage > 0)
+                        target.View?.PlayHurt();
+                }
+            }
+        }
+    }
+}
+
+================================================================================
+FILE: HealEffectData.cs
+PATH: Assets/Scripts/CardBattle/Cards/Effects/HealEffectData.cs
+================================================================================
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    [CreateAssetMenu(fileName = "HealEffect", menuName = "Card Battle/Effects/Heal")]
+    public class HealEffectData : CardEffectData
+    {
+        [SerializeField] private int healAmount = 2;
+
+        public override void Apply(CardPlayContext context, CardEffectExecutionContext executionContext)
+        {
+            if (context?.Player == null)
+                return;
+
+            context.Player.Heal(Mathf.Max(0, healAmount));
+        }
+    }
+}
+
+================================================================================
+FILE: CardEffectExecutionContext.cs
+PATH: Assets/Scripts/CardBattle/Cards/Runtime/CardEffectExecutionContext.cs
+================================================================================
+using System.Collections.Generic;
+
+namespace CardBattle.Core
+{
+    /// <summary>
+    /// Runtime execution payload containing resolved targets for one effect application.
+    /// </summary>
+    public class CardEffectExecutionContext
+    {
+        public IReadOnlyList<EnemyBattleUnit> EnemyTargets { get; }
+
+        public CardEffectExecutionContext(IReadOnlyList<EnemyBattleUnit> enemyTargets)
+        {
+            EnemyTargets = enemyTargets;
+        }
     }
 }
 
