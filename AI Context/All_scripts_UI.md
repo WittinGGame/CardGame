@@ -277,7 +277,7 @@ using UnityEngine;
 namespace CardBattle.Core
 {
     /// <summary>
-    /// Displays deck / graveyard counts; graveyard display can lag real counts until VFX arrival.
+    /// Displays deck / graveyard counts with buffered presentation hooks for pile VFX.
     /// </summary>
     public class PileCounterUI : MonoBehaviour
     {
@@ -431,8 +431,21 @@ namespace CardBattle.Core
             RefreshGraveyardText();
         }
 
-        /// <summary>Advances display counts as reshuffle ghosts arrive at the deck.</summary>
-        public void OnReshuffleGhostArrived(int amount)
+        /// <summary>Presentation step: a reshuffle ghost leaves graveyard, so graveyard display drops immediately.</summary>
+        public void OnReshuffleGhostLaunched(int amount)
+        {
+            if (amount <= 0)
+                return;
+
+            if (!reshufflePresentationActive)
+                BeginReshufflePresentation(amount);
+
+            displayedGraveyardCount = Mathf.Max(0, displayedGraveyardCount - amount);
+            RefreshGraveyardText();
+        }
+
+        /// <summary>Presentation step: a reshuffle ghost reaches deck, so deck display increases on arrival.</summary>
+        public void OnReshuffleGhostArrivedAtDeck(int amount)
         {
             if (amount <= 0)
                 return;
@@ -441,9 +454,7 @@ namespace CardBattle.Core
                 BeginReshufflePresentation(amount);
 
             displayedDeckCount += amount;
-            displayedGraveyardCount = Mathf.Max(0, displayedGraveyardCount - amount);
             RefreshDeckText();
-            RefreshGraveyardText();
         }
 
         /// <summary>Ends reshuffle presentation mode and snaps display to real piles.</summary>
@@ -547,7 +558,8 @@ namespace CardBattle.Core
 
             if (!TryResolveEndpoints(out var start, out var end))
             {
-                pileCounterUI?.OnReshuffleGhostArrived(graveyardCardCount);
+                pileCounterUI?.OnReshuffleGhostLaunched(graveyardCardCount);
+                pileCounterUI?.OnReshuffleGhostArrivedAtDeck(graveyardCardCount);
                 yield return new WaitForSecondsRealtime(fallbackWait);
                 pileCounterUI?.CompleteReshufflePresentation();
                 yield break;
@@ -565,6 +577,8 @@ namespace CardBattle.Core
                 float sideArc = side * 32f;
                 int transferAmount = transferByGhost[i];
 
+                pileCounterUI?.OnReshuffleGhostLaunched(transferAmount);
+
                 StartCoroutine(CoFlyGhost(
                     start + startJitter,
                     end + endJitter,
@@ -572,7 +586,7 @@ namespace CardBattle.Core
                     () =>
                     {
                         arrived++;
-                        pileCounterUI?.OnReshuffleGhostArrived(transferAmount);
+                        pileCounterUI?.OnReshuffleGhostArrivedAtDeck(transferAmount);
                     }));
 
                 if (spawnInterval > 0f && i < visualCount - 1)

@@ -49,7 +49,8 @@ namespace CardBattle.Core
 
             if (!TryResolveEndpoints(out var start, out var end))
             {
-                pileCounterUI?.OnReshuffleGhostArrived(graveyardCardCount);
+                pileCounterUI?.OnReshuffleGhostLaunched(graveyardCardCount);
+                pileCounterUI?.OnReshuffleGhostArrivedAtDeck(graveyardCardCount);
                 yield return new WaitForSecondsRealtime(fallbackWait);
                 pileCounterUI?.CompleteReshufflePresentation();
                 yield break;
@@ -67,6 +68,8 @@ namespace CardBattle.Core
                 float sideArc = side * 32f;
                 int transferAmount = transferByGhost[i];
 
+                pileCounterUI?.OnReshuffleGhostLaunched(transferAmount);
+
                 StartCoroutine(CoFlyGhost(
                     start + startJitter,
                     end + endJitter,
@@ -74,7 +77,7 @@ namespace CardBattle.Core
                     () =>
                     {
                         arrived++;
-                        pileCounterUI?.OnReshuffleGhostArrived(transferAmount);
+                        pileCounterUI?.OnReshuffleGhostArrivedAtDeck(transferAmount);
                     }));
 
                 if (spawnInterval > 0f && i < visualCount - 1)
