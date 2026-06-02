@@ -46,13 +46,13 @@ namespace CardBattle.Core
             switch (data.CardType)
             {
                 case CardType.Attack:
-                    return $"Deal <color=#FF6B6B>{Mathf.Max(0, data.AttackDamage)} damage</color>";
+                    return $"Deal <color=#D4AB6B>{Mathf.Max(0, data.AttackDamage)} damage</color>";
                 case CardType.Heal:
-                    return $"Heal <color=#64D98B>{Mathf.Max(0, data.HealAmount)}</color>";
+                    return $"Heal <color=#D4AB6B>{Mathf.Max(0, data.HealAmount)}</color>";
                 case CardType.Buff:
-                    return $"Gain <color=#FFD166>+{data.BuffPotency}</color>";
+                    return $"Gain <color=#D4AB6B>+{data.BuffPotency}</color>";
                 case CardType.Defend:
-                    return $"Gain <color=#6BCBFF>{Mathf.Max(0, data.BlockAmount)} Block</color>";
+                    return $"Gain <color=#D4AB6B>{Mathf.Max(0, data.BlockAmount)} Block</color>";
                 default:
                     return string.Empty;
             }

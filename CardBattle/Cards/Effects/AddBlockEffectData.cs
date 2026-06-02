@@ -10,7 +10,7 @@ namespace CardBattle.Core
         public override string GetDescriptionText()
         {
             int value = Mathf.Max(0, blockAmount);
-            return $"Gain <color=#6BCBFF>{value} Block</color>";
+            return $"Gain <color=#B0966E>{value} Block</color>";
         }
 
         public override void Apply(CardPlayContext context, CardEffectExecutionContext executionContext)

@@ -10,7 +10,7 @@ namespace CardBattle.Core
         public override string GetDescriptionText()
         {
             int value = Mathf.Max(0, damage);
-            return $"Deal <color=#FF6B6B>{value} damage</color>";
+            return $"Deal <color=#B0966E>{value} damage</color>";
         }
 
         public override void Apply(CardPlayContext context, CardEffectExecutionContext executionContext)

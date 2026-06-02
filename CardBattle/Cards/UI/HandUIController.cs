@@ -28,6 +28,14 @@ namespace CardBattle.Core
         [SerializeField] private float newCardSpawnRotationZ = 0f;
         [SerializeField] private float newCardSpawnScale = 0.92f;
 
+        [Header("Responsive Card Size")]
+        [SerializeField] private Vector2 baseCardSize = new Vector2(200f, 300f);
+        [SerializeField] private float maxCardScale = 1.1f; // 200 -> 220
+        [SerializeField] private float minCardScale = 0.8f; // 200 -> 160
+        [SerializeField] private int maxScaleCardCount = 5;
+        [SerializeField] private int minScaleCardCount = 10;
+        [SerializeField] private bool scaleSpacingWithCard = true;
+
         [Header("Fan layout")]
         [SerializeField] private float spacing = 135f;
         [SerializeField] private float curveHeight = 14f;
@@ -77,6 +85,12 @@ namespace CardBattle.Core
         {
             if (autoRefreshOnStart)
                 RefreshHandUI();
+        }
+
+        private float GetResponsiveCardScale(int count)
+        {
+            float t = Mathf.InverseLerp(maxScaleCardCount, minScaleCardCount, count);
+            return Mathf.Lerp(maxCardScale, minCardScale, t);
         }
 
         [ContextMenu("Refresh Hand UI")]
@@ -320,8 +334,14 @@ namespace CardBattle.Core
                 return;
 
             int count = spawnedCards.Count;
-            float centerIndex = count > 1 ? (count - 1) * 0.5f : 0f;
 
+            float cardScale = GetResponsiveCardScale(count);
+
+            float resolvedSpacing = scaleSpacingWithCard ? spacing * cardScale : spacing;
+            float resolvedHoverGap = scaleSpacingWithCard ? hoverGap * cardScale : hoverGap;
+            float resolvedCurveHeight = scaleSpacingWithCard ? curveHeight * cardScale : curveHeight;
+
+            float centerIndex = count > 1 ? (count - 1) * 0.5f : 0f;
             int focusedIndex = GetFocusedCardIndex();
 
             for (int i = 0; i < count; i++)
@@ -330,17 +350,24 @@ namespace CardBattle.Core
                 if (view == null)
                     continue;
 
+                var rt = view.LayoutRect;
+                if (rt != null)
+                {
+                    rt.sizeDelta = baseCardSize;
+                    rt.localScale = Vector3.one * cardScale;
+                }
+
                 float relative = i - centerIndex;
 
-                float x = relative * spacing;
-                float y = -curveHeight * relative * relative;
+                float x = relative * resolvedSpacing;
+                float y = -resolvedCurveHeight * relative * relative;
 
                 if (focusedIndex >= 0)
                 {
                     if (i < focusedIndex)
-                        x -= hoverGap * 0.5f;
+                        x -= resolvedHoverGap * 0.5f;
                     else if (i > focusedIndex)
-                        x += hoverGap * 0.5f;
+                        x += resolvedHoverGap * 0.5f;
                 }
 
                 float rotZ = -relative * rotationStep;

@@ -20,7 +20,8 @@ namespace CardBattle.Core
         [SerializeField] private Image artworkImage;
         [SerializeField] private TextMeshProUGUI costText;
         [SerializeField] private TextMeshProUGUI nameText;
-        [SerializeField] private TextMeshProUGUI typeText;
+        [SerializeField] private Image typeBadgeImage;
+        [SerializeField] private CardTypeBadgeSet typeBadgeSet;
         [SerializeField] private TextMeshProUGUI descriptionText;
 
         [Header("Core References")]
@@ -248,8 +249,13 @@ namespace CardBattle.Core
             if (nameText != null)
                 nameText.text = data.DisplayName;
 
-            if (typeText != null)
-                typeText.text = data.CardType.ToString();
+            if (typeBadgeImage != null)
+            {
+                Sprite badge = typeBadgeSet != null ? typeBadgeSet.GetBadge(data.CardType) : null;
+
+                typeBadgeImage.sprite = badge;
+                typeBadgeImage.enabled = badge != null;
+            }
 
             if (artworkImage != null)
                 artworkImage.sprite = data.Artwork;

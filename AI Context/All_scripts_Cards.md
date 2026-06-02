@@ -1,16 +1,13 @@
-================================================================================
+# ================================================================================
 FILE: CardData.cs
 PATH: Assets/Scripts/CardBattle/Cards/Data/CardData.cs
-================================================================================
+
 using System.Collections.Generic;
 using UnityEngine;
 
 namespace CardBattle.Core
 {
-    /// <summary>
-    /// Designer-facing definition of a card. Runtime copies are <see cref="CardInstance"/>.
-    /// Keep numeric hooks here; layer modifiers via <see cref="ICardModifier"/> on instances later.
-    /// </summary>
+    /// /// Designer-facing definition of a card. Runtime copies are . /// Keep numeric hooks here; layer modifiers via on instances later. ///
     [CreateAssetMenu(fileName = "NewCard", menuName = "Card Battle/Card Data", order = 0)]
     public class CardData : ScriptableObject
     {
@@ -55,10 +52,10 @@ namespace CardBattle.Core
     }
 }
 
-================================================================================
+# ================================================================================
 FILE: CardTargetMode.cs
 PATH: Assets/Scripts/CardBattle/Cards/Data/CardTargetMode.cs
-================================================================================
+
 namespace CardBattle.Core
 {
     public enum CardTargetMode
@@ -70,13 +67,13 @@ namespace CardBattle.Core
     }
 }
 
-================================================================================
+# ================================================================================
 FILE: CardType.cs
 PATH: Assets/Scripts/CardBattle/Cards/Data/CardType.cs
-================================================================================
+
 namespace CardBattle.Core
 {
-    /// <summary>Primary card families; extend with new enum values or parallel systems as content grows.</summary>
+    /// Primary card families; extend with new enum values or parallel systems as content grows.
     public enum CardType
     {
         Attack,
@@ -86,17 +83,15 @@ namespace CardBattle.Core
     }
 }
 
-================================================================================
+# ================================================================================
 FILE: CardEffectData.cs
 PATH: Assets/Scripts/CardBattle/Cards/Effects/CardEffectData.cs
-================================================================================
+
 using UnityEngine;
 
 namespace CardBattle.Core
 {
-    /// <summary>
-    /// Designer-facing base class for effect-driven card behavior.
-    /// </summary>
+    /// /// Designer-facing base class for effect-driven card behavior. ///
     public abstract class CardEffectData : ScriptableObject
     {
         public abstract string GetDescriptionText();
@@ -104,10 +99,10 @@ namespace CardBattle.Core
     }
 }
 
-================================================================================
+# ================================================================================
 FILE: AddBlockEffectData.cs
 PATH: Assets/Scripts/CardBattle/Cards/Effects/AddBlockEffectData.cs
-================================================================================
+
 using UnityEngine;
 
 namespace CardBattle.Core
@@ -120,7 +115,7 @@ namespace CardBattle.Core
         public override string GetDescriptionText()
         {
             int value = Mathf.Max(0, blockAmount);
-            return $"Gain <color=#6BCBFF>{value} Block</color>";
+            return $"Gain <color=#B0966E>{value} Block</color>";
         }
 
         public override void Apply(CardPlayContext context, CardEffectExecutionContext executionContext)
@@ -133,10 +128,10 @@ namespace CardBattle.Core
     }
 }
 
-================================================================================
+# ================================================================================
 FILE: DealDamageEffectData.cs
 PATH: Assets/Scripts/CardBattle/Cards/Effects/DealDamageEffectData.cs
-================================================================================
+
 using UnityEngine;
 
 namespace CardBattle.Core
@@ -149,7 +144,7 @@ namespace CardBattle.Core
         public override string GetDescriptionText()
         {
             int value = Mathf.Max(0, damage);
-            return $"Deal <color=#FF6B6B>{value} damage</color>";
+            return $"Deal <color=#B0966E>{value} damage</color>";
         }
 
         public override void Apply(CardPlayContext context, CardEffectExecutionContext executionContext)
@@ -183,10 +178,10 @@ namespace CardBattle.Core
     }
 }
 
-================================================================================
+# ================================================================================
 FILE: HealEffectData.cs
 PATH: Assets/Scripts/CardBattle/Cards/Effects/HealEffectData.cs
-================================================================================
+
 using UnityEngine;
 
 namespace CardBattle.Core
@@ -199,7 +194,7 @@ namespace CardBattle.Core
         public override string GetDescriptionText()
         {
             int value = Mathf.Max(0, healAmount);
-            return $"Heal <color=#64D98B>{value}</color>";
+            return $"Heal <color=#B0966E>{value}</color>";
         }
 
         public override void Apply(CardPlayContext context, CardEffectExecutionContext executionContext)
@@ -212,10 +207,10 @@ namespace CardBattle.Core
     }
 }
 
-================================================================================
+# ================================================================================
 FILE: CardEffectExecutionContext.cs
 PATH: Assets/Scripts/CardBattle/Cards/Runtime/CardEffectExecutionContext.cs
-================================================================================
+
 using System.Collections.Generic;
 
 namespace CardBattle.Core
@@ -234,10 +229,10 @@ namespace CardBattle.Core
     }
 }
 
-================================================================================
+# ================================================================================
 FILE: CardInstance.cs
 PATH: Assets/Scripts/CardBattle/Cards/Runtime/CardInstance.cs
-================================================================================
+
 using System;
 using System.Collections.Generic;
 
@@ -272,10 +267,10 @@ namespace CardBattle.Core
     }
 }
 
-================================================================================
+# ================================================================================
 FILE: CardPlayContext.cs
 PATH: Assets/Scripts/CardBattle/Cards/Runtime/CardPlayContext.cs
-================================================================================
+
 using System.Collections.Generic;
 
 namespace CardBattle.Core
@@ -301,11 +296,10 @@ namespace CardBattle.Core
     }
 }
 
-
-================================================================================
+# ================================================================================
 FILE: ICardModifier.cs
 PATH: Assets/Scripts/CardBattle/Cards/Runtime/ICardModifier.cs
-================================================================================
+
 namespace CardBattle.Core
 {
     /// <summary>
@@ -322,10 +316,10 @@ namespace CardBattle.Core
     }
 }
 
-================================================================================
+# ================================================================================
 FILE: CardResolver.cs
 PATH: Assets/Scripts/CardBattle/Cards/Systems/CardResolver.cs
-================================================================================
+
 using UnityEngine;
 
 namespace CardBattle.Core
@@ -459,10 +453,10 @@ namespace CardBattle.Core
     }
 }
 
-================================================================================
+# ================================================================================
 FILE: DeckController.cs
 PATH: Assets/Scripts/CardBattle/Cards/Systems/DeckController.cs
-================================================================================
+
 using System;
 using System.Collections.Generic;
 using UnityEngine;
@@ -657,10 +651,83 @@ namespace CardBattle.Core
     }
 }
 
-================================================================================
+
+# ================================================================================
+FILE: CardDescriptionBuilder.cs
+PATH: Assets/Scripts/CardBattle/Cards/UI/CardDescriptionBuilder.cs
+
+using System.Collections.Generic;
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    public static class CardDescriptionBuilder
+    {
+        public static string Build(CardData data)
+        {
+            if (data == null)
+                return string.Empty;
+
+            if (data.HasEffects)
+            {
+                var lines = new List<string>();
+                var effects = data.Effects;
+
+                if (effects != null)
+                {
+                    for (int i = 0; i < effects.Count; i++)
+                    {
+                        var effect = effects[i];
+                        if (effect == null)
+                            continue;
+
+                        string line = effect.GetDescriptionText();
+                        if (string.IsNullOrWhiteSpace(line))
+                            continue;
+
+                        lines.Add(line);
+                    }
+                }
+
+                if (lines.Count > 0)
+                    return string.Join("\n", lines);
+            }
+
+            return BuildLegacy(data);
+        }
+
+        private static string BuildLegacy(CardData data)
+        {
+            if (data == null)
+                return string.Empty;
+
+            switch (data.CardType)
+            {
+                case CardType.Attack:
+                    return $"Deal <color=#D4AB6B>{Mathf.Max(0, data.AttackDamage)} damage</color>";
+                case CardType.Heal:
+                    return $"Heal <color=#D4AB6B>{Mathf.Max(0, data.HealAmount)}</color>";
+                case CardType.Buff:
+                    return $"Gain <color=#D4AB6B>+{data.BuffPotency}</color>";
+                case CardType.Defend:
+                    return $"Gain <color=#D4AB6B>{Mathf.Max(0, data.BlockAmount)} Block</color>";
+                default:
+                    return string.Empty;
+            }
+        }
+    }
+}
+
+# ================================================================================
 FILE: CardViewUI.cs
 PATH: Assets/Scripts/CardBattle/Cards/UI/CardViewUI.cs
-================================================================================
+
+using System.Collections;
+using TMPro;
+using UnityEngine;
+using UnityEngine.UI;
+using UnityEngine.EventSystems;
+
 using System.Collections;
 using TMPro;
 using UnityEngine;
@@ -683,7 +750,8 @@ namespace CardBattle.Core
         [SerializeField] private Image artworkImage;
         [SerializeField] private TextMeshProUGUI costText;
         [SerializeField] private TextMeshProUGUI nameText;
-        [SerializeField] private TextMeshProUGUI typeText;
+        [SerializeField] private Image typeBadgeImage;
+        [SerializeField] private CardTypeBadgeSet typeBadgeSet;
         [SerializeField] private TextMeshProUGUI descriptionText;
 
         [Header("Core References")]
@@ -911,14 +979,19 @@ namespace CardBattle.Core
             if (nameText != null)
                 nameText.text = data.DisplayName;
 
-            if (typeText != null)
-                typeText.text = data.CardType.ToString();
+            if (typeBadgeImage != null)
+            {
+                Sprite badge = typeBadgeSet != null ? typeBadgeSet.GetBadge(data.CardType) : null;
+
+                typeBadgeImage.sprite = badge;
+                typeBadgeImage.enabled = badge != null;
+            }
 
             if (artworkImage != null)
                 artworkImage.sprite = data.Artwork;
 
             if (descriptionText != null)
-                descriptionText.text = GetDescription(data);
+                descriptionText.text = CardDescriptionBuilder.Build(data);
 
             ApplyStateVisuals();
         }
@@ -1121,29 +1194,13 @@ namespace CardBattle.Core
             }
         }
 
-        private string GetDescription(CardData data)
-        {
-            switch (data.CardType)
-            {
-                case CardType.Attack:
-                    return $"Deal {data.AttackDamage} damage";
-                case CardType.Heal:
-                    return $"Heal {data.HealAmount}";
-                case CardType.Buff:
-                    return $"Gain +{data.BuffPotency}";
-                case CardType.Defend:
-                    return $"Gain {data.BlockAmount} Block";
-                default:
-                    return "";
-            }
-        }
     }
 }
 
-================================================================================
+# ================================================================================
 FILE: HandUIController.cs
 PATH: Assets/Scripts/CardBattle/Cards/UI/HandUIController.cs
-================================================================================
+
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
@@ -1173,6 +1230,14 @@ namespace CardBattle.Core
         [SerializeField] private float dealStagger = 0.05f;
         [SerializeField] private float newCardSpawnRotationZ = 0f;
         [SerializeField] private float newCardSpawnScale = 0.92f;
+
+        [Header("Responsive Card Size")]
+        [SerializeField] private Vector2 baseCardSize = new Vector2(200f, 300f);
+        [SerializeField] private float maxCardScale = 1.1f; // 200 -> 220
+        [SerializeField] private float minCardScale = 0.8f; // 200 -> 160
+        [SerializeField] private int maxScaleCardCount = 5;
+        [SerializeField] private int minScaleCardCount = 10;
+        [SerializeField] private bool scaleSpacingWithCard = true;
 
         [Header("Fan layout")]
         [SerializeField] private float spacing = 135f;
@@ -1223,6 +1288,12 @@ namespace CardBattle.Core
         {
             if (autoRefreshOnStart)
                 RefreshHandUI();
+        }
+
+        private float GetResponsiveCardScale(int count)
+        {
+            float t = Mathf.InverseLerp(maxScaleCardCount, minScaleCardCount, count);
+            return Mathf.Lerp(maxCardScale, minCardScale, t);
         }
 
         [ContextMenu("Refresh Hand UI")]
@@ -1466,8 +1537,14 @@ namespace CardBattle.Core
                 return;
 
             int count = spawnedCards.Count;
-            float centerIndex = count > 1 ? (count - 1) * 0.5f : 0f;
 
+            float cardScale = GetResponsiveCardScale(count);
+
+            float resolvedSpacing = scaleSpacingWithCard ? spacing * cardScale : spacing;
+            float resolvedHoverGap = scaleSpacingWithCard ? hoverGap * cardScale : hoverGap;
+            float resolvedCurveHeight = scaleSpacingWithCard ? curveHeight * cardScale : curveHeight;
+
+            float centerIndex = count > 1 ? (count - 1) * 0.5f : 0f;
             int focusedIndex = GetFocusedCardIndex();
 
             for (int i = 0; i < count; i++)
@@ -1476,17 +1553,24 @@ namespace CardBattle.Core
                 if (view == null)
                     continue;
 
+                var rt = view.LayoutRect;
+                if (rt != null)
+                {
+                    rt.sizeDelta = baseCardSize;
+                    rt.localScale = Vector3.one * cardScale;
+                }
+
                 float relative = i - centerIndex;
 
-                float x = relative * spacing;
-                float y = -curveHeight * relative * relative;
+                float x = relative * resolvedSpacing;
+                float y = -resolvedCurveHeight * relative * relative;
 
                 if (focusedIndex >= 0)
                 {
                     if (i < focusedIndex)
-                        x -= hoverGap * 0.5f;
+                        x -= resolvedHoverGap * 0.5f;
                     else if (i > focusedIndex)
-                        x += hoverGap * 0.5f;
+                        x += resolvedHoverGap * 0.5f;
                 }
 
                 float rotZ = -relative * rotationStep;
@@ -1523,19 +1607,46 @@ namespace CardBattle.Core
             LayoutCards();
         }
 
+        /// <summary>Whether this card needs the single-enemy target selection UI before play.</summary>
+        private bool RequiresManualEnemyTarget(CardData data)
+        {
+            if (data == null)
+                return false;
+
+            if (data.HasEffects)
+                return data.TargetMode == CardTargetMode.SingleEnemy;
+
+            return data.CardType == CardType.Attack;
+        }
+
+        /// <summary>Primary target for immediate <see cref="BattleActionRunner.TryPlayCard"/> when not entering target selection.</summary>
+        private EnemyBattleUnit ResolveImmediateDefaultTarget(CardData data)
+        {
+            if (data == null)
+                return null;
+
+            if (data.HasEffects)
+                return null;
+
+            if (data.CardType == CardType.Attack)
+                return GetDefaultAliveEnemy();
+
+            return null;
+        }
+
         private void TryPlayCardFromView(CardInstance card)
         {
             if (card?.Data == null || battleActionRunner == null)
                 return;
 
-            if (card.Data.CardType == CardType.Attack)
+            if (RequiresManualEnemyTarget(card.Data))
             {
                 if (targetSelectionSystem != null)
                 {
                     targetSelectionSystem.BeginTargetSelection(card);
 
                     if (verboseLogs)
-                        Debug.Log($"[HandUI] Waiting for target selection: {card.Data.DisplayName}");
+                        Debug.Log($"[HandUI] Waiting for target selection: {card.Data.DisplayName} | TargetMode: {card.Data.TargetMode}");
 
                     // สำคัญ: อย่า RefreshHandUI ตรงนี้
                     // เพื่อให้ selected state ค้างอยู่
@@ -1543,13 +1654,14 @@ namespace CardBattle.Core
                 }
             }
 
-            EnemyBattleUnit target = GetDefaultAliveEnemy();
+            EnemyBattleUnit target = ResolveImmediateDefaultTarget(card.Data);
             battleActionRunner.TryPlayCard(card, target);
 
             if (verboseLogs)
             {
                 string targetName = target != null ? target.name : "None";
-                Debug.Log($"[HandUI] Clicked {card.Data.DisplayName} | Target: {targetName}");
+                string modeNote = card.Data.HasEffects ? $"TargetMode: {card.Data.TargetMode}" : $"CardType: {card.Data.CardType}";
+                Debug.Log($"[HandUI] Clicked {card.Data.DisplayName} | Immediate resolve | {modeNote} | Target: {targetName}");
             }
         }
 
@@ -1760,6 +1872,46 @@ namespace CardBattle.Core
             }
 
             return valid;
+        }
+    }
+}
+
+# ================================================================================
+FILE: CardTypeBadgeSet.cs
+PATH: Assets/Scripts/CardBattle/Cards/UI/CardTypeBadgeSet.cs
+
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    [CreateAssetMenu(fileName = "CardTypeBadgeSet", menuName = "Card Battle/Visuals/Card Type Badge Set")]
+    public class CardTypeBadgeSet : ScriptableObject
+    {
+        [Header("Card Type Badges")]
+        [SerializeField] private Sprite attackBadge;
+        [SerializeField] private Sprite defendBadge;
+        [SerializeField] private Sprite healBadge;
+        [SerializeField] private Sprite buffBadge;
+
+        public Sprite GetBadge(CardType type)
+        {
+            switch (type)
+            {
+                case CardType.Attack:
+                    return attackBadge;
+
+                case CardType.Defend:
+                    return defendBadge;
+
+                case CardType.Heal:
+                    return healBadge;
+
+                case CardType.Buff:
+                    return buffBadge;
+
+                default:
+                    return null;
+            }
         }
     }
 }
