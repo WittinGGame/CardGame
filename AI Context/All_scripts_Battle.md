@@ -1347,6 +1347,7 @@ namespace CardBattle.Core
 
             UnsubscribeFromViewEvents();
             View.OnAttackHit += HandleAttackHit;
+            View.OnAttackPreHit += HandleAttackPreHit;
             View.OnActionFinished += HandleActionFinished;
         }
 
@@ -1356,6 +1357,7 @@ namespace CardBattle.Core
                 return;
 
             View.OnAttackHit -= HandleAttackHit;
+            View.OnAttackPreHit -= HandleAttackPreHit;
             View.OnActionFinished -= HandleActionFinished;
         }
 
@@ -1366,6 +1368,15 @@ namespace CardBattle.Core
 
             waitingForHit = false;
             ApplyDamageOnHit();
+        }
+
+        private void HandleAttackPreHit()
+        {
+            if (pendingTarget == null || !pendingTarget.IsAlive)
+                return;
+
+            if (pendingTarget.CurrentBlock > 0)
+                pendingTarget.View?.PlayDefense();
         }
 
         private void HandleActionFinished()
@@ -1383,8 +1394,10 @@ namespace CardBattle.Core
 
             var damage = enemyData != null ? enemyData.AttackDamage : 0;
             bool wasAliveBeforeHit = pendingTarget.IsAlive;
+            int blockBeforeHit = pendingTarget.CurrentBlock;
 
             int hpDamage = pendingTarget.TakeDamage(damage);
+            bool blockedAnyDamage = blockBeforeHit > pendingTarget.CurrentBlock;
 
             if (wasAliveBeforeHit)
             {
@@ -1392,6 +1405,8 @@ namespace CardBattle.Core
                     pendingTarget.View?.PlayDead();
                 else if (hpDamage > 0)
                     pendingTarget.View?.PlayHurt();
+                // else if (blockedAnyDamage)
+                //     pendingTarget.View?.PlayDefense();
             }
 
             _hasAttackedThisPlayerRound = true;
@@ -1594,9 +1609,11 @@ namespace CardBattle.Core
 
         private static readonly int AttackHash = Animator.StringToHash("Attack");
         private static readonly int HurtHash = Animator.StringToHash("Hurt");
+        private static readonly int DefenseHash = Animator.StringToHash("Defense");
         private static readonly int DeadHash = Animator.StringToHash("Dead");
 
         public event Action OnAttackHit;
+        public event Action OnAttackPreHit;
         public event Action OnActionFinished;
 
         public void PlayAttack()
@@ -1611,6 +1628,12 @@ namespace CardBattle.Core
             animator.SetTrigger(HurtHash);
         }
 
+        public void PlayDefense()
+        {
+            if (animator == null) return;
+            animator.SetTrigger(DefenseHash);
+        }
+
         public void PlayDead()
         {
             if (animator == null) return;
@@ -1621,6 +1644,11 @@ namespace CardBattle.Core
         public void AnimEvent_AttackHit()
         {
             OnAttackHit?.Invoke();
+        }
+        
+        public void AnimEvent_AttackPreHit()
+        {
+            OnAttackPreHit?.Invoke();
         }
 
         // Animation Event

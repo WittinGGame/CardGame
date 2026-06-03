@@ -205,6 +205,7 @@ namespace CardBattle.Core
 
             UnsubscribeFromViewEvents();
             View.OnAttackHit += HandleAttackHit;
+            View.OnAttackPreHit += HandleAttackPreHit;
             View.OnActionFinished += HandleActionFinished;
         }
 
@@ -214,6 +215,7 @@ namespace CardBattle.Core
                 return;
 
             View.OnAttackHit -= HandleAttackHit;
+            View.OnAttackPreHit -= HandleAttackPreHit;
             View.OnActionFinished -= HandleActionFinished;
         }
 
@@ -224,6 +226,15 @@ namespace CardBattle.Core
 
             waitingForHit = false;
             ApplyDamageOnHit();
+        }
+
+        private void HandleAttackPreHit()
+        {
+            if (pendingTarget == null || !pendingTarget.IsAlive)
+                return;
+
+            if (pendingTarget.CurrentBlock > 0)
+                pendingTarget.View?.PlayDefense();
         }
 
         private void HandleActionFinished()
@@ -241,8 +252,10 @@ namespace CardBattle.Core
 
             var damage = enemyData != null ? enemyData.AttackDamage : 0;
             bool wasAliveBeforeHit = pendingTarget.IsAlive;
+            int blockBeforeHit = pendingTarget.CurrentBlock;
 
             int hpDamage = pendingTarget.TakeDamage(damage);
+            bool blockedAnyDamage = blockBeforeHit > pendingTarget.CurrentBlock;
 
             if (wasAliveBeforeHit)
             {
@@ -250,6 +263,8 @@ namespace CardBattle.Core
                     pendingTarget.View?.PlayDead();
                 else if (hpDamage > 0)
                     pendingTarget.View?.PlayHurt();
+                // else if (blockedAnyDamage)
+                //     pendingTarget.View?.PlayDefense();
             }
 
             _hasAttackedThisPlayerRound = true;
