@@ -1,7 +1,8 @@
-================================================================================
-FILE: EnemyBehaviorType.cs
-PATH: Assets/Scripts/CardBattle/Enemy/Data/EnemyBehaviorType.cs
-================================================================================
+## FILE: EnemyBehaviorType.cs
+
+**Path:** `Assets/Scripts/CardBattle/Enemy/Data/EnemyBehaviorType.cs`
+
+```csharp
 namespace CardBattle.Core
 {
     public enum EnemyBehaviorType
@@ -13,11 +14,13 @@ namespace CardBattle.Core
         CountdownAttacker
     }
 }
+```
 
-================================================================================
-FILE: EnemyData.cs
-PATH: Assets/Scripts/CardBattle/Enemy/Data/EnemyData.cs
-================================================================================
+## FILE: EnemyData.cs
+
+**Path:** `Assets/Scripts/CardBattle/Enemy/Data/EnemyData.cs`
+
+```csharp
 using UnityEngine;
 
 namespace CardBattle.Core
@@ -50,11 +53,13 @@ namespace CardBattle.Core
         public bool AllowEndTurnAttackAfterCountdownAttackThisRound => allowEndTurnAttackAfterCountdownAttackThisRound;
     }
 }
+```
 
-================================================================================
-FILE: EnemyTargetHighlight.cs
-PATH: Assets/Scripts/CardBattle/Enemy/Interaction/EnemyTargetHighlight.cs
-================================================================================
+## FILE: EnemyTargetHighlight.cs
+
+**Path:** `Assets/Scripts/CardBattle/Enemy/Interaction/EnemyTargetHighlight.cs`
+
+```csharp
 using UnityEngine;
 using UnityEngine.EventSystems;
 using CardBattle.Core;
@@ -102,11 +107,13 @@ public class EnemyTargetHighlight : MonoBehaviour, IPointerEnterHandler, IPointe
         targetRing.transform.localScale = baseScale;
     }
 }
+```
 
-================================================================================
-FILE: TargetableEnemy.cs
-PATH: Assets/Scripts/CardBattle/Enemy/Interaction/TargetableEnemy.cs
-================================================================================
+## FILE: TargetableEnemy.cs
+
+**Path:** `Assets/Scripts/CardBattle/Enemy/Interaction/TargetableEnemy.cs`
+
+```csharp
 using UnityEngine;
 using UnityEngine.EventSystems;
 
@@ -129,11 +136,13 @@ namespace CardBattle.Core
         }
     }
 }
+```
 
-================================================================================
-FILE: EnemyBuffUI.cs
-PATH: Assets/Scripts/CardBattle/Enemy/UI/EnemyBuffUI.cs
-================================================================================
+## FILE: EnemyBuffUI.cs
+
+**Path:** `Assets/Scripts/CardBattle/Enemy/UI/EnemyBuffUI.cs`
+
+```csharp
 using UnityEngine;
 
 namespace CardBattle.Core
@@ -212,11 +221,13 @@ namespace CardBattle.Core
         }
     }
 }
+```
 
-================================================================================
-FILE: EnemyStatusUI.cs
-PATH: Assets/Scripts/CardBattle/Enemy/UI/EnemyStatusUI.cs
-================================================================================
+## FILE: EnemyStatusUI.cs
+
+**Path:** `Assets/Scripts/CardBattle/Enemy/UI/EnemyStatusUI.cs`
+
+```csharp
 using TMPro;
 using UnityEngine;
 
@@ -302,11 +313,13 @@ namespace CardBattle.Core
         }
     }
 }
+```
 
-================================================================================
-FILE: EnemyUIController.cs
-PATH: Assets/Scripts/CardBattle/Enemy/UI/EnemyUIController.cs
-================================================================================
+## FILE: EnemyUIController.cs
+
+**Path:** `Assets/Scripts/CardBattle/Enemy/UI/EnemyUIController.cs`
+
+```csharp
 using UnityEngine;
 
 namespace CardBattle.Core
@@ -547,11 +560,13 @@ namespace CardBattle.Core
 #endif
     }
 }
+```
 
-================================================================================
-FILE: EnemyUIManager.cs
-PATH: Assets/Scripts/CardBattle/Enemy/UI/EnemyUIManager.cs
-================================================================================
+## FILE: EnemyUIManager.cs
+
+**Path:** `Assets/Scripts/CardBattle/Enemy/UI/EnemyUIManager.cs`
+
+```csharp
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -696,3 +711,5 @@ namespace CardBattle.Core
         }
     }
 }
+```
+

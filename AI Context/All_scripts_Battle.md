@@ -1,7 +1,6 @@
-================================================================================
-FILE: BattleTestBootstrap.cs
-PATH: Assets/Scripts/CardBattle/Battle/Bootstrap/BattleTestBootstrap.cs
-================================================================================
+## FILE: BattleTestBootstrap.cs
+**Path:** `Assets/Scripts/CardBattle/Battle/Bootstrap/BattleTestBootstrap.cs`
+```csharp
 using System.Text;
 using UnityEngine;
 
@@ -256,11 +255,11 @@ namespace CardBattle.Core
         }
     }
 }
+```
 
-================================================================================
-FILE: BattleActionRunner.cs
-PATH: Assets/Scripts/CardBattle/Battle/Systems/BattleActionRunner.cs
-================================================================================
+## FILE: BattleActionRunner.cs
+**Path:** `Assets/Scripts/CardBattle/Battle/Systems/BattleActionRunner.cs`
+```csharp
 using System.Collections;
 using UnityEngine;
 
@@ -283,6 +282,9 @@ namespace CardBattle.Core
         [SerializeField] private BattleHUDController battleHUDController;
         [SerializeField] private CardToGraveyardVFXController graveyardVfx;
         [SerializeField] private PileCounterUI pileCounterUI;
+
+        [Header("Audio")]
+        [SerializeField] private CardSFXController cardSfx;
 
         [Header("Fallback / Non-Attack Timing")]
         [SerializeField] private float nonAttackResolvePause = 0.05f;
@@ -322,6 +324,7 @@ namespace CardBattle.Core
 
             SetBusy(true);
             RefreshExternalUI();
+            cardSfx?.PlayCardPlayed();
 
             int cost = card.Data.ApCost;
             player.SpendApFromRunner(cost);
@@ -534,11 +537,11 @@ namespace CardBattle.Core
         }
     }
 }
+```
 
-================================================================================
-FILE: EnemyActionSystem.cs
-PATH: Assets/Scripts/CardBattle/Battle/Systems/EnemyActionSystem.cs
-================================================================================
+## FILE: EnemyActionSystem.cs
+**Path:** `Assets/Scripts/CardBattle/Battle/Systems/EnemyActionSystem.cs`
+```csharp
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
@@ -741,11 +744,11 @@ namespace CardBattle.Core
         }
     }
 }
+```
 
-================================================================================
-FILE: TargetSelectionSystem.cs
-PATH: Assets/Scripts/CardBattle/Battle/Systems/TargetSelectionSystem.cs
-================================================================================
+## FILE: TargetSelectionSystem.cs
+**Path:** `Assets/Scripts/CardBattle/Battle/Systems/TargetSelectionSystem.cs`
+```csharp
 using UnityEngine;
 using UnityEngine.EventSystems;
 
@@ -1011,11 +1014,11 @@ namespace CardBattle.Core
         }
     }
 }
+```
 
-================================================================================
-FILE: BattleUnit.cs
-PATH: Assets/Scripts/CardBattle/Battle/Units/BattleUnit.cs
-================================================================================
+## FILE: BattleUnit.cs
+**Path:** `Assets/Scripts/CardBattle/Battle/Units/BattleUnit.cs`
+```csharp
 using System;
 using UnityEngine;
 
@@ -1135,11 +1138,11 @@ namespace CardBattle.Core
         }
     }
 }
+```
 
-================================================================================
-FILE: EnemyBattleUnit.cs
-PATH: Assets/Scripts/CardBattle/Battle/Units/EnemyBattleUnit.cs
-================================================================================
+## FILE: EnemyBattleUnit.cs
+**Path:** `Assets/Scripts/CardBattle/Battle/Units/EnemyBattleUnit.cs`
+```csharp
 using System.Collections;
 using UnityEngine;
 
@@ -1418,11 +1421,11 @@ namespace CardBattle.Core
         }
     }
 }
+```
 
-================================================================================
-FILE: PlayerBattleUnit.cs
-PATH: Assets/Scripts/CardBattle/Battle/Units/PlayerBattleUnit.cs
-================================================================================
+## FILE: PlayerBattleUnit.cs
+**Path:** `Assets/Scripts/CardBattle/Battle/Units/PlayerBattleUnit.cs`
+```csharp
 using UnityEngine;
 
 namespace CardBattle.Core
@@ -1593,11 +1596,11 @@ namespace CardBattle.Core
         }
     }
 }
+```
 
-================================================================================
-FILE: BattleUnitView.cs
-PATH: Assets/Scripts/CardBattle/Battle/Views/BattleUnitView.cs
-================================================================================
+## FILE: BattleUnitView.cs
+**Path:** `Assets/Scripts/CardBattle/Battle/Views/BattleUnitView.cs`
+```csharp
 using System;
 using UnityEngine;
 
@@ -1658,11 +1661,11 @@ namespace CardBattle.Core
         }
     }
 }
+```
 
-================================================================================
-FILE: BattleCameraFeedbackController.cs
-PATH: Assets/Scripts/CardBattle/Battle/Presentation/BattleCameraFeedbackController.cs
-================================================================================
+## FILE: BattleCameraFeedbackController.cs
+**Path:** `Assets/Scripts/CardBattle/Battle/Presentation/BattleCameraFeedbackController.cs`
+```csharp
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -1782,11 +1785,11 @@ namespace CardBattle.Core
         }
     }
 }
+```
 
-================================================================================
-FILE: CameraShakeController.cs
-PATH: Assets/Scripts/CardBattle/Battle/Presentation/CameraShakeController.cs
-================================================================================
+## FILE: CameraShakeController.cs
+**Path:** `Assets/Scripts/CardBattle/Battle/Presentation/CameraShakeController.cs`
+```csharp
 using System.Collections;
 using UnityEngine;
 
@@ -1901,3 +1904,4 @@ namespace CardBattle.Core
         }
     }
 }
+```

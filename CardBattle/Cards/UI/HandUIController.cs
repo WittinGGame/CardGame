@@ -18,6 +18,9 @@ namespace CardBattle.Core
         [SerializeField] private CardViewUI cardViewPrefab;
         [SerializeField] private RectTransform drawSpawnAnchor;
 
+        [Header("Audio")]
+        [SerializeField] private CardSFXController cardSfx;
+
         [Header("Options")]
         [SerializeField] private bool autoRefreshOnStart = true;
         [SerializeField] private bool disableUnplayableCards = true;
@@ -568,7 +571,10 @@ namespace CardBattle.Core
             {
                 var view = newViews[i];
                 if (view != null)
+                {
                     view.SetLayoutMovementBlocked(false);
+                    cardSfx?.PlayDraw();
+                }
 
                 if (stagger > 0f && i < newViews.Count - 1)
                     yield return new WaitForSeconds(stagger);

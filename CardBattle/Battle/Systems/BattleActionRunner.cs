@@ -21,6 +21,9 @@ namespace CardBattle.Core
         [SerializeField] private CardToGraveyardVFXController graveyardVfx;
         [SerializeField] private PileCounterUI pileCounterUI;
 
+        [Header("Audio")]
+        [SerializeField] private CardSFXController cardSfx;
+
         [Header("Fallback / Non-Attack Timing")]
         [SerializeField] private float nonAttackResolvePause = 0.05f;
         [SerializeField] private float endTurnPause = 0.2f;
@@ -59,6 +62,7 @@ namespace CardBattle.Core
 
             SetBusy(true);
             RefreshExternalUI();
+            cardSfx?.PlayCardPlayed();
 
             int cost = card.Data.ApCost;
             player.SpendApFromRunner(cost);

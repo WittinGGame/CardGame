@@ -1,7 +1,6 @@
-================================================================================
-FILE: BattleHUDController.cs
-PATH: Assets/Scripts/CardBattle/UI/HUD/BattleHUDController.cs
-================================================================================
+## FILE: BattleHUDController.cs
+**Path:** `Assets/Scripts/CardBattle/UI/HUD/BattleHUDController.cs`
+```csharp
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -179,11 +178,11 @@ namespace CardBattle.Core
         }
     }
 }
+```
 
-================================================================================
-FILE: HpBarUI.cs
-PATH: Assets/Scripts/CardBattle/UI/HUD/HpBarUI.cs
-================================================================================
+## FILE: HpBarUI.cs
+**Path:** `Assets/Scripts/CardBattle/UI/HUD/HpBarUI.cs`
+```csharp
 using TMPro;
 using UnityEngine;
 
@@ -218,11 +217,11 @@ namespace CardBattle.Core
         }
     }
 }
+```
 
-================================================================================
-FILE: PlayerHpBarBinder.cs
-PATH: Assets/Scripts/CardBattle/UI/HUD/PlayerHpBarBinder.cs
-================================================================================
+## FILE: PlayerHpBarBinder.cs
+**Path:** `Assets/Scripts/CardBattle/UI/HUD/PlayerHpBarBinder.cs`
+```csharp
 using UnityEngine;
 
 namespace CardBattle.Core
@@ -265,11 +264,11 @@ namespace CardBattle.Core
         }
     }
 }
+```
 
-================================================================================
-FILE: PileCounterUI.cs
-PATH: Assets/Scripts/CardBattle/UI/HUD/PileCounterUI.cs
-================================================================================
+## FILE: PileCounterUI.cs
+**Path:** `Assets/Scripts/CardBattle/UI/HUD/PileCounterUI.cs`
+```csharp
 using System.Collections;
 using TMPro;
 using UnityEngine;
@@ -502,11 +501,11 @@ namespace CardBattle.Core
         }
     }
 }
+```
 
-================================================================================
-FILE: GraveyardToDeckVFXController.cs
-PATH: Assets/Scripts/CardBattle/UI/HUD/GraveyardToDeckVFXController.cs
-================================================================================
+## FILE: GraveyardToDeckVFXController.cs
+**Path:** `Assets/Scripts/CardBattle/UI/HUD/GraveyardToDeckVFXController.cs`
+```csharp
 using System.Collections;
 using UnityEngine;
 using UnityEngine.UI;
@@ -723,11 +722,11 @@ namespace CardBattle.Core
         }
     }
 }
+```
 
-================================================================================
-FILE: CardToGraveyardVFXController.cs
-PATH: Assets/Scripts/CardBattle/UI/HUD/CardToGraveyardVFXController.cs
-================================================================================
+## FILE: CardToGraveyardVFXController.cs
+**Path:** `Assets/Scripts/CardBattle/UI/HUD/CardToGraveyardVFXController.cs`
+```csharp
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
@@ -949,11 +948,11 @@ namespace CardBattle.Core
         }
     }
 }
+```
 
-================================================================================
-FILE: FlyingCardGhostUI.cs
-PATH: Assets/Scripts/CardBattle/UI/HUD/FlyingCardGhostUI.cs
-================================================================================
+## FILE: FlyingCardGhostUI.cs
+**Path:** `Assets/Scripts/CardBattle/UI/HUD/FlyingCardGhostUI.cs`
+```csharp
 using System.Collections;
 using UnityEngine;
 using UnityEngine.UI;
@@ -1101,11 +1100,11 @@ namespace CardBattle.Core
         }
     }
 }
+```
 
-================================================================================
-FILE: TargetGuideLineUI.cs
-PATH: Assets/Scripts/CardBattle/UI/HUD/TargetGuideLineUI.cs
-================================================================================
+## FILE: TargetGuideLineUI.cs
+**Path:** `Assets/Scripts/CardBattle/UI/HUD/TargetGuideLineUI.cs`
+```csharp
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
@@ -1344,11 +1343,11 @@ namespace CardBattle.Core
         }
     }
 }
+```
 
-================================================================================
-FILE: WorldToUIFollow.cs
-PATH: Assets/Scripts/CardBattle/UI/World/WorldToUIFollow.cs
-================================================================================
+## FILE: WorldToUIFollow.cs
+**Path:** `Assets/Scripts/CardBattle/UI/World/WorldToUIFollow.cs`
+```csharp
 using UnityEngine;
 
 namespace CardBattle.Core
@@ -1432,11 +1431,11 @@ namespace CardBattle.Core
         }
     }
 }
+```
 
-================================================================================
-FILE: FloatingTextUI.cs
-PATH: Assets/Scripts/CardBattle/UI/Floating/FloatingTextUI.cs
-================================================================================
+## FILE: FloatingTextUI.cs
+**Path:** `Assets/Scripts/CardBattle/UI/Floating/FloatingTextUI.cs`
+```csharp
 using TMPro;
 using UnityEngine;
 
@@ -1495,12 +1494,11 @@ namespace CardBattle.Core
         }
     }
 }
+```
 
-
-================================================================================
-FILE: BattleFloatingTextSpawner.cs
-PATH: Assets/Scripts/CardBattle/UI/Floating/BattleFloatingTextSpawner.cs
-================================================================================
+## FILE: BattleFloatingTextSpawner.cs
+**Path:** `Assets/Scripts/CardBattle/UI/Floating/BattleFloatingTextSpawner.cs`
+```csharp
 using UnityEngine;
 
 namespace CardBattle.Core
@@ -1691,3 +1689,4 @@ namespace CardBattle.Core
         }
     }
 }
+```
