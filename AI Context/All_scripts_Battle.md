@@ -285,6 +285,7 @@ namespace CardBattle.Core
 
         [Header("Audio")]
         [SerializeField] private CardSFXController cardSfx;
+        [SerializeField] private CombatSFXController combatSfx;
 
         [Header("Fallback / Non-Attack Timing")]
         [SerializeField] private float nonAttackResolvePause = 0.05f;
@@ -452,8 +453,13 @@ namespace CardBattle.Core
             waitingForPlayerHit = false;
             playerAttackResolved = true;
 
-            if (pendingPlayerCardContext != null)
-                cardResolver.Resolve(pendingPlayerCardContext);
+            if (pendingPlayerCardContext == null)
+                return;
+
+            if (HasValidSwordHitTarget(pendingPlayerCardContext))
+                combatSfx?.PlayAttackHit();
+
+            cardResolver.Resolve(pendingPlayerCardContext);
         }
 
         private void HandlePlayerActionFinished()
@@ -534,6 +540,61 @@ namespace CardBattle.Core
 
             IsBusy = value;
             OnBusyStateChanged?.Invoke(IsBusy);
+        }
+
+        private static bool HasValidSwordHitTarget(CardPlayContext context)
+        {
+            if (context?.Card?.Data == null)
+                return false;
+
+            CardData cardData = context.Card.Data;
+
+            // Single-target attack
+            if (cardData.TargetMode == CardTargetMode.SingleEnemy)
+            {
+                return context.PrimaryTarget != null &&
+                    context.PrimaryTarget.IsAlive;
+            }
+
+            // All-enemy attack
+            if (cardData.TargetMode == CardTargetMode.AllEnemies)
+            {
+                if (context.Enemies == null)
+                    return false;
+
+                for (int i = 0; i < context.Enemies.Count; i++)
+                {
+                    EnemyBattleUnit enemy = context.Enemies[i];
+
+                    if (enemy != null && enemy.IsAlive)
+                        return true;
+                }
+
+                return false;
+            }
+
+            // Legacy attack cards without the Effects pipeline
+            if (cardData.CardType == CardType.Attack)
+            {
+                if (context.PrimaryTarget != null &&
+                    context.PrimaryTarget.IsAlive)
+                {
+                    return true;
+                }
+
+                if (context.Enemies == null)
+                    return false;
+
+                for (int i = 0; i < context.Enemies.Count; i++)
+                {
+                    EnemyBattleUnit enemy = context.Enemies[i];
+
+                    if (enemy != null && enemy.IsAlive)
+                        return true;
+                }
+            }
+
+            return false;
         }
     }
 }
@@ -1156,6 +1217,9 @@ namespace CardBattle.Core
         [SerializeField] private EnemyData enemyData;
         [SerializeField] private BattleUnitView battleUnitView;
 
+        [Header("Audio")]
+        [SerializeField] private CombatSFXController combatSfx;
+
         [Header("UI")]
         [SerializeField] private Transform uiAnchorHP;
         [SerializeField] private Transform uiAnchorIntent;
@@ -1396,6 +1460,11 @@ namespace CardBattle.Core
                 return;
 
             var damage = enemyData != null ? enemyData.AttackDamage : 0;
+            if (damage <= 0)
+                return;
+
+            combatSfx?.PlayAttackHit();
+
             bool wasAliveBeforeHit = pendingTarget.IsAlive;
             int blockBeforeHit = pendingTarget.CurrentBlock;
 

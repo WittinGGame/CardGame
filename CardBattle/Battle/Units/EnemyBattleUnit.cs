@@ -11,6 +11,9 @@ namespace CardBattle.Core
         [SerializeField] private EnemyData enemyData;
         [SerializeField] private BattleUnitView battleUnitView;
 
+        [Header("Audio")]
+        [SerializeField] private CombatSFXController combatSfx;
+
         [Header("UI")]
         [SerializeField] private Transform uiAnchorHP;
         [SerializeField] private Transform uiAnchorIntent;
@@ -251,6 +254,11 @@ namespace CardBattle.Core
                 return;
 
             var damage = enemyData != null ? enemyData.AttackDamage : 0;
+            if (damage <= 0)
+                return;
+
+            combatSfx?.PlayAttackHit();
+
             bool wasAliveBeforeHit = pendingTarget.IsAlive;
             int blockBeforeHit = pendingTarget.CurrentBlock;
 
