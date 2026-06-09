@@ -63,7 +63,7 @@ namespace CardBattle.Core
 
             SetBusy(true);
             RefreshExternalUI();
-            cardSfx?.PlayCardPlayed();
+            cardSfx?.PlayCardPlayed(card.Data.CardType);
 
             int cost = card.Data.ApCost;
             player.SpendApFromRunner(cost);

@@ -18,6 +18,7 @@ namespace CardBattle.Core
         public event Action<int> OnBlockChangedEvent;
 
         public event Action<BattleUnit, int> OnDamageTakenEvent;
+        public event Action<BattleUnit, int> OnBlockAbsorbedEvent;
         public event Action<BattleUnit, int> OnHealedEvent;
 
         protected virtual void Awake()
@@ -42,6 +43,9 @@ namespace CardBattle.Core
                 currentBlock -= absorbed;
                 remaining -= absorbed;
                 NotifyBlockChanged();
+
+                if (absorbed > 0)
+                    OnBlockAbsorbedEvent?.Invoke(this, absorbed);
             }
 
             int hpDamage = 0;

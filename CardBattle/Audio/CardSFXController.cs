@@ -1,9 +1,10 @@
 using UnityEngine;
+using UnityEngine.Serialization;
 
 namespace CardBattle.Core
 {
     /// <summary>
-    /// Presentation-only card SFX helper. Plays draw and play sounds with clip/pitch variation.
+    /// Presentation-only card SFX helper. Plays draw, play, and hover sounds with clip/pitch variation.
     /// </summary>
     [RequireComponent(typeof(AudioSource))]
     public class CardSFXController : MonoBehaviour
@@ -17,11 +18,44 @@ namespace CardBattle.Core
         [SerializeField] private float drawVolume = 1f;
         [SerializeField] private Vector2 drawPitchRange = new Vector2(0.95f, 1.05f);
 
-        [Header("Play Card")]
-        [SerializeField] private AudioClip[] playClips;
+        [Header("Attack Play")]
+        [SerializeField] private AudioClip[] attackPlayClips;
         [Range(0f, 1f)]
-        [SerializeField] private float playVolume = 1f;
-        [SerializeField] private Vector2 playPitchRange = new Vector2(0.95f, 1.05f);
+        [SerializeField] private float attackPlayVolume = 1f;
+        [SerializeField] private Vector2 attackPlayPitchRange = new Vector2(0.95f, 1.05f);
+
+        [Header("Defend Play")]
+        [SerializeField] private AudioClip[] defendPlayClips;
+        [Range(0f, 1f)]
+        [SerializeField] private float defendPlayVolume = 1f;
+        [SerializeField] private Vector2 defendPlayPitchRange = new Vector2(0.95f, 1.05f);
+
+        [Header("Buff Play")]
+        [SerializeField] private AudioClip[] buffPlayClips;
+        [Range(0f, 1f)]
+        [SerializeField] private float buffPlayVolume = 1f;
+        [SerializeField] private Vector2 buffPlayPitchRange = new Vector2(0.95f, 1.05f);
+
+        [Header("Heal Play")]
+        [SerializeField] private AudioClip[] healPlayClips;
+        [Range(0f, 1f)]
+        [SerializeField] private float healPlayVolume = 1f;
+        [SerializeField] private Vector2 healPlayPitchRange = new Vector2(0.95f, 1.05f);
+
+        [Header("Default Play")]
+        [FormerlySerializedAs("playClips")]
+        [SerializeField] private AudioClip[] defaultPlayClips;
+        [FormerlySerializedAs("playVolume")]
+        [Range(0f, 1f)]
+        [SerializeField] private float defaultPlayVolume = 1f;
+        [FormerlySerializedAs("playPitchRange")]
+        [SerializeField] private Vector2 defaultPlayPitchRange = new Vector2(0.95f, 1.05f);
+
+        [Header("Card Hover")]
+        [SerializeField] private AudioClip[] hoverClips;
+        [Range(0f, 1f)]
+        [SerializeField] private float hoverVolume = 0.5f;
+        [SerializeField] private Vector2 hoverPitchRange = new Vector2(0.98f, 1.02f);
 
         private void Awake()
         {
@@ -38,27 +72,64 @@ namespace CardBattle.Core
 
         public void PlayDraw()
         {
-            PlayRandomVariation(drawClips, drawVolume, drawPitchRange);
+            TryPlayRandomVariation(drawClips, drawVolume, drawPitchRange);
         }
 
-        public void PlayCardPlayed()
+        public void PlayCardPlayed(CardType cardType)
         {
-            PlayRandomVariation(playClips, playVolume, playPitchRange);
+            if (TryPlayCardTypeVariation(cardType))
+                return;
+
+            TryPlayRandomVariation(defaultPlayClips, defaultPlayVolume, defaultPlayPitchRange);
         }
 
-        private void PlayRandomVariation(AudioClip[] clips, float volume, Vector2 pitchRange)
+        public void PlayHover()
+        {
+            TryPlayRandomVariation(hoverClips, hoverVolume, hoverPitchRange);
+        }
+
+        private bool TryPlayCardTypeVariation(CardType cardType)
+        {
+            switch (cardType)
+            {
+                case CardType.Attack:
+                    return TryPlayRandomVariation(attackPlayClips, attackPlayVolume, attackPlayPitchRange);
+                case CardType.Defend:
+                    return TryPlayRandomVariation(defendPlayClips, defendPlayVolume, defendPlayPitchRange);
+                case CardType.Buff:
+                    return TryPlayRandomVariation(buffPlayClips, buffPlayVolume, buffPlayPitchRange);
+                case CardType.Heal:
+                    return TryPlayRandomVariation(healPlayClips, healPlayVolume, healPlayPitchRange);
+                default:
+                    return false;
+            }
+        }
+
+        private bool TryPlayRandomVariation(AudioClip[] clips, float volume, Vector2 pitchRange)
         {
             if (audioSource == null || clips == null || clips.Length == 0)
-                return;
+                return false;
 
-            AudioClip clip = clips[Random.Range(0, clips.Length)];
+            AudioClip clip = null;
+            int attempts = clips.Length;
+            while (attempts-- > 0)
+            {
+                AudioClip candidate = clips[Random.Range(0, clips.Length)];
+                if (candidate != null)
+                {
+                    clip = candidate;
+                    break;
+                }
+            }
+
             if (clip == null)
-                return;
+                return false;
 
             float minPitch = Mathf.Min(pitchRange.x, pitchRange.y);
             float maxPitch = Mathf.Max(pitchRange.x, pitchRange.y);
             audioSource.pitch = Random.Range(minPitch, maxPitch);
             audioSource.PlayOneShot(clip, Mathf.Clamp01(volume));
+            return true;
         }
     }
 }

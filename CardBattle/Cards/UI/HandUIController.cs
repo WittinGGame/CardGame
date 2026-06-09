@@ -296,7 +296,11 @@ namespace CardBattle.Core
 
         private void HandleCardHoverStarted(CardViewUI view)
         {
+            if (view == null || hoveredCardView == view)
+                return;
+
             hoveredCardView = view;
+            cardSfx?.PlayHover();
             LayoutCards();
         }
 
