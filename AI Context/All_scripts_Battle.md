@@ -456,7 +456,7 @@ namespace CardBattle.Core
             if (pendingPlayerCardContext == null)
                 return;
 
-            if (HasValidSwordHitTarget(pendingPlayerCardContext))
+            if (HasValidAttackHitTarget(pendingPlayerCardContext))
                 combatSfx?.PlayAttackHit();
 
             cardResolver.Resolve(pendingPlayerCardContext);
@@ -542,7 +542,7 @@ namespace CardBattle.Core
             OnBusyStateChanged?.Invoke(IsBusy);
         }
 
-        private static bool HasValidSwordHitTarget(CardPlayContext context)
+        private static bool HasValidAttackHitTarget(CardPlayContext context)
         {
             if (context?.Card?.Data == null)
                 return false;
@@ -1463,13 +1463,16 @@ namespace CardBattle.Core
             if (damage <= 0)
                 return;
 
-            combatSfx?.PlayAttackHit();
-
             bool wasAliveBeforeHit = pendingTarget.IsAlive;
             int blockBeforeHit = pendingTarget.CurrentBlock;
 
             int hpDamage = pendingTarget.TakeDamage(damage);
             bool blockedAnyDamage = blockBeforeHit > pendingTarget.CurrentBlock;
+
+            if (blockedAnyDamage)
+                combatSfx?.PlayBlock();
+            else if (hpDamage > 0)
+                combatSfx?.PlayAttackHit();
 
             if (wasAliveBeforeHit)
             {

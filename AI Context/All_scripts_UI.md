@@ -14,6 +14,9 @@ namespace CardBattle.Core
         [SerializeField] private EnemyActionSystem enemyActionSystem;
         [SerializeField] private BattleActionRunner battleActionRunner;
 
+        [Header("Audio")]
+        [SerializeField] private UISFXController uiSfx;
+
         [Header("UI References")]
         [SerializeField] private TextMeshProUGUI playerApText;
         [SerializeField] private TextMeshProUGUI playerHpText;
@@ -77,12 +80,16 @@ namespace CardBattle.Core
 
         private void OnClickEndTurn()
         {
-            if (battleActionRunner == null)
+            if (battleActionRunner == null || player == null)
+                return;
+
+            if (!player.CanAct || !player.IsAlive || !battleActionRunner.CanAcceptInput)
                 return;
 
             if (targetSelectionSystem != null && targetSelectionSystem.IsSelectingTarget)
                 targetSelectionSystem.CancelTargetSelection();
 
+            uiSfx?.PlayEndTurn();
             battleActionRunner.TryEndTurn();
         }
 

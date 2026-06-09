@@ -1,31 +1,23 @@
 using UnityEngine;
-using UnityEngine.Serialization;
 
 namespace CardBattle.Core
 {
     /// <summary>
-    /// Presentation-only combat SFX helper. Plays attack-hit and block sounds at real damage moments.
+    /// Presentation-only UI SFX helper. Supports button and menu feedback sounds.
     /// </summary>
     [RequireComponent(typeof(AudioSource))]
-    public class CombatSFXController : MonoBehaviour
+    public class UISFXController : MonoBehaviour
     {
         [Header("Source")]
         [SerializeField] private AudioSource audioSource;
 
-        [Header("Attack Hit")]
-        [FormerlySerializedAs("swordHitClips")]
-        [SerializeField] private AudioClip[] attackHitClips;
-        [FormerlySerializedAs("swordHitVolume")]
+        [Header("End Turn")]
+        [SerializeField] private AudioClip[] endTurnClips;
         [Range(0f, 1f)]
-        [SerializeField] private float attackHitVolume = 1f;
-        [FormerlySerializedAs("swordHitPitchRange")]
-        [SerializeField] private Vector2 attackHitPitchRange = new Vector2(0.95f, 1.05f);
+        [SerializeField] private float endTurnVolume = 1f;
+        [SerializeField] private Vector2 endTurnPitchRange = new Vector2(0.95f, 1.05f);
 
-        [Header("Block")]
-        [SerializeField] private AudioClip[] blockClips;
-        [Range(0f, 1f)]
-        [SerializeField] private float blockVolume = 1f;
-        [SerializeField] private Vector2 blockPitchRange = new Vector2(0.95f, 1.05f);
+        // Future: add hoverClips, confirmClips, cancelClips, errorClips with matching Play methods.
 
         private void Awake()
         {
@@ -40,16 +32,10 @@ namespace CardBattle.Core
             audioSource.spatialBlend = 0f;
         }
 
-        /// <summary>Plays a randomized attack-hit clip with pitch variation.</summary>
-        public void PlayAttackHit()
+        /// <summary>Plays a randomized End Turn button click clip with pitch variation.</summary>
+        public void PlayEndTurn()
         {
-            PlayRandomVariation(attackHitClips, attackHitVolume, attackHitPitchRange);
-        }
-
-        /// <summary>Plays a randomized block clip with pitch variation.</summary>
-        public void PlayBlock()
-        {
-            PlayRandomVariation(blockClips, blockVolume, blockPitchRange);
+            PlayRandomVariation(endTurnClips, endTurnVolume, endTurnPitchRange);
         }
 
         private void PlayRandomVariation(AudioClip[] clips, float volume, Vector2 pitchRange)

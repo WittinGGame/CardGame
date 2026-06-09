@@ -194,7 +194,7 @@ namespace CardBattle.Core
             if (pendingPlayerCardContext == null)
                 return;
 
-            if (HasValidSwordHitTarget(pendingPlayerCardContext))
+            if (HasValidAttackHitTarget(pendingPlayerCardContext))
                 combatSfx?.PlayAttackHit();
 
             cardResolver.Resolve(pendingPlayerCardContext);
@@ -280,7 +280,7 @@ namespace CardBattle.Core
             OnBusyStateChanged?.Invoke(IsBusy);
         }
 
-        private static bool HasValidSwordHitTarget(CardPlayContext context)
+        private static bool HasValidAttackHitTarget(CardPlayContext context)
         {
             if (context?.Card?.Data == null)
                 return false;

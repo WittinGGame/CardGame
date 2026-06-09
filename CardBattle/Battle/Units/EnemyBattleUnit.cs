@@ -257,13 +257,16 @@ namespace CardBattle.Core
             if (damage <= 0)
                 return;
 
-            combatSfx?.PlayAttackHit();
-
             bool wasAliveBeforeHit = pendingTarget.IsAlive;
             int blockBeforeHit = pendingTarget.CurrentBlock;
 
             int hpDamage = pendingTarget.TakeDamage(damage);
             bool blockedAnyDamage = blockBeforeHit > pendingTarget.CurrentBlock;
+
+            if (blockedAnyDamage)
+                combatSfx?.PlayBlock();
+            else if (hpDamage > 0)
+                combatSfx?.PlayAttackHit();
 
             if (wasAliveBeforeHit)
             {
