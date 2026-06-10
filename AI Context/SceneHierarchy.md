@@ -18,6 +18,7 @@
       1. CardAudio (CardSFXController)
       2. CombatAudio (CombatSFXController.cs)
       3. UIAudio (UISFXController)
+    8. BattleOutcomeController (BattleOutcomeController.cs)
   2. Units
     1. Player (PlayerBattleUnit.cs)
     2. Enemy_01 (EnemyBattleUnit.cs)

@@ -20,6 +20,7 @@ namespace CardBattle.Core
         public event Action<BattleUnit, int> OnDamageTakenEvent;
         public event Action<BattleUnit, int> OnBlockAbsorbedEvent;
         public event Action<BattleUnit, int> OnHealedEvent;
+        public event Action<BattleUnit> OnDefeatedEvent;
 
         protected virtual void Awake()
         {
@@ -35,6 +36,7 @@ namespace CardBattle.Core
             if (amount <= 0 || !IsAlive)
                 return 0;
 
+            bool wasAliveBeforeDamage = IsAlive;
             int remaining = amount;
 
             if (currentBlock > 0)
@@ -59,8 +61,11 @@ namespace CardBattle.Core
 
             OnDamageTakenEvent?.Invoke(this, hpDamage);
 
-            if (currentHp == 0)
+            if (wasAliveBeforeDamage && currentHp == 0)
+            {
                 OnDefeated();
+                OnDefeatedEvent?.Invoke(this);
+            }
 
             return hpDamage;
         }
