@@ -59,6 +59,7 @@ namespace CardBattle.Core
                 return;
 
             deckController.BuildFromInspectorBlueprint();
+            enemyActionSystem.ResetTurnCounter();
             enemyActionSystem.StartPlayerRound();
             _initialized = true;
 

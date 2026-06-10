@@ -15,11 +15,18 @@ namespace CardBattle.Core
         [SerializeField] private List<EnemyBattleUnit> enemies = new List<EnemyBattleUnit>();
         [SerializeField] private GraveyardToDeckVFXController graveyardToDeckVfx;
         [SerializeField] private float postReshuffleDrawDelay = 0.08f;
+
+        [Header("Turn Presentation")]
+        [SerializeField] private TurnPresentationController turnPresentation;
+
         private Coroutine runningEnemyActions;
 
         public PlayerBattleUnit Player => player;
         public IReadOnlyList<EnemyBattleUnit> Enemies => enemies;
         public bool IsResolvingEnemyActions => runningEnemyActions != null;
+        public int CurrentTurn { get; private set; }
+
+        public event System.Action<int> OnTurnStarted;
 
 #if UNITY_EDITOR
         private void OnValidate()
@@ -27,6 +34,11 @@ namespace CardBattle.Core
             enemies.RemoveAll(e => e == null);
         }
 #endif
+
+        public void ResetTurnCounter()
+        {
+            CurrentTurn = 0;
+        }
 
         /// <summary>Designer helper to register enemies without code.</summary>
         public void RegisterEnemy(EnemyBattleUnit enemy)
@@ -51,6 +63,12 @@ namespace CardBattle.Core
                 Debug.LogError("EnemyActionSystem requires a PlayerBattleUnit reference.");
                 yield break;
             }
+
+            CurrentTurn++;
+            OnTurnStarted?.Invoke(CurrentTurn);
+
+            if (turnPresentation != null)
+                yield return turnPresentation.PlayTurnIntro(CurrentTurn);
 
             // Reset enemy flags
             foreach (var enemy in enemies)
