@@ -4,7 +4,7 @@ using UnityEngine;
 namespace CardBattle.Core
 {
     /// <summary>
-    /// Phase 1: listens for unit defeat and logs battle outcome for debugging.
+    /// Tracks battle outcome state from unit defeat events.
     /// Does not lock input, stop actions, or transition scenes yet.
     /// </summary>
     public class BattleOutcomeController : MonoBehaviour
@@ -13,7 +13,11 @@ namespace CardBattle.Core
         [SerializeField] private EnemyActionSystem enemyActionSystem;
 
         private readonly List<EnemyBattleUnit> subscribedEnemies = new List<EnemyBattleUnit>();
-        private bool encounterClearedLogged;
+
+        public BattleOutcome CurrentOutcome { get; private set; } = BattleOutcome.None;
+        public bool IsBattleEnded => CurrentOutcome != BattleOutcome.None;
+
+        public event System.Action<BattleOutcome> OnBattleEnded;
 
         private void OnEnable()
         {
@@ -25,6 +29,12 @@ namespace CardBattle.Core
         {
             UnsubscribePlayer();
             UnsubscribeEnemies();
+        }
+
+        public void ResetOutcome()
+        {
+            CurrentOutcome = BattleOutcome.None;
+            Debug.Log("[BattleOutcome] Outcome reset.");
         }
 
         private void SubscribePlayer()
@@ -76,18 +86,14 @@ namespace CardBattle.Core
 
         private void HandlePlayerDefeated(BattleUnit unit)
         {
-            Debug.Log("[BattleOutcome] Player defeated.");
+            ResolveOutcome(BattleOutcome.PlayerDefeated);
         }
 
         private void HandleEnemyDefeated(BattleUnit unit)
         {
             Debug.Log($"[BattleOutcome] Enemy defeated: {unit.name}");
-            TryLogEncounterCleared();
-        }
 
-        private void TryLogEncounterCleared()
-        {
-            if (encounterClearedLogged || enemyActionSystem == null)
+            if (enemyActionSystem == null || IsBattleEnded)
                 return;
 
             var enemies = enemyActionSystem.Enemies;
@@ -98,8 +104,27 @@ namespace CardBattle.Core
                     return;
             }
 
-            encounterClearedLogged = true;
-            Debug.Log("[BattleOutcome] Encounter cleared.");
+            ResolveOutcome(BattleOutcome.EncounterCleared);
+        }
+
+        private void ResolveOutcome(BattleOutcome outcome)
+        {
+            if (outcome == BattleOutcome.None || IsBattleEnded)
+                return;
+
+            CurrentOutcome = outcome;
+
+            switch (outcome)
+            {
+                case BattleOutcome.PlayerDefeated:
+                    Debug.Log("[BattleOutcome] Player defeated.");
+                    break;
+                case BattleOutcome.EncounterCleared:
+                    Debug.Log("[BattleOutcome] Encounter cleared.");
+                    break;
+            }
+
+            OnBattleEnded?.Invoke(outcome);
         }
     }
 }

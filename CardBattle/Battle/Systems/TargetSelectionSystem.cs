@@ -21,6 +21,9 @@ namespace CardBattle.Core
         [SerializeField] private float handPaddingX = 30f;
         [SerializeField] private float handPaddingY = 20f;
 
+        [Header("Battle State")]
+        [SerializeField] private BattleOutcomeController battleOutcomeController;
+
         public bool IsSelectingTarget => _pendingCard != null;
 
         private CardInstance _pendingCard;
@@ -28,8 +31,34 @@ namespace CardBattle.Core
         private RectTransform _selectedCardGuideStartAnchor;
         private bool _canShowGuideLine;
 
+        private bool HasBattleEnded =>
+            battleOutcomeController != null &&
+            battleOutcomeController.IsBattleEnded;
+
+        private void OnEnable()
+        {
+            if (battleOutcomeController != null)
+                battleOutcomeController.OnBattleEnded += HandleBattleEnded;
+        }
+
+        private void OnDisable()
+        {
+            if (battleOutcomeController != null)
+                battleOutcomeController.OnBattleEnded -= HandleBattleEnded;
+
+            ForceCancelTargetSelection();
+        }
+
         private void Update()
         {
+            if (HasBattleEnded)
+            {
+                if (IsSelectingTarget)
+                    ForceCancelTargetSelection();
+
+                return;
+            }
+
             if (!IsSelectingTarget)
                 return;
 
@@ -86,6 +115,9 @@ namespace CardBattle.Core
 
         public void BeginTargetSelection(CardInstance card)
         {
+            if (HasBattleEnded)
+                return;
+
             if (card?.Data == null)
                 return;
 
@@ -123,9 +155,12 @@ namespace CardBattle.Core
                 return;
 
             Debug.Log("Target selection cancelled.");
+            ForceCancelTargetSelection();
+        }
 
+        public void ForceCancelTargetSelection()
+        {
             _pendingCard = null;
-
             SetHighlight(false);
 
             if (handUIController != null)
@@ -141,8 +176,14 @@ namespace CardBattle.Core
 
         public void ConfirmTarget(EnemyBattleUnit target)
         {
-            if (_pendingCard == null || battleActionRunner == null || target == null || !target.IsAlive)
+            if (HasBattleEnded ||
+                _pendingCard == null ||
+                battleActionRunner == null ||
+                target == null ||
+                !target.IsAlive)
+            {
                 return;
+            }
 
             SetHighlight(false);
 
@@ -155,6 +196,11 @@ namespace CardBattle.Core
             _selectedCardRect = null;
             _selectedCardGuideStartAnchor = null;
             _canShowGuideLine = false;
+        }
+
+        private void HandleBattleEnded(BattleOutcome outcome)
+        {
+            ForceCancelTargetSelection();
         }
 
         private void SetHighlight(bool value)

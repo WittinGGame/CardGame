@@ -21,6 +21,9 @@ namespace CardBattle.Core
         [SerializeField] private CardToGraveyardVFXController graveyardVfx;
         [SerializeField] private PileCounterUI pileCounterUI;
 
+        [Header("Battle State")]
+        [SerializeField] private BattleOutcomeController battleOutcomeController;
+
         [Header("Audio")]
         [SerializeField] private CardSFXController cardSfx;
         [SerializeField] private CombatSFXController combatSfx;
@@ -32,7 +35,17 @@ namespace CardBattle.Core
 
         public bool IsBusy { get; private set; }
         public event System.Action<bool> OnBusyStateChanged;
-        public bool CanAcceptInput => !IsBusy && player != null && player.CanAct && player.IsAlive;
+
+        private bool HasBattleEnded =>
+            battleOutcomeController != null &&
+            battleOutcomeController.IsBattleEnded;
+
+        public bool CanAcceptInput =>
+            !IsBusy &&
+            !HasBattleEnded &&
+            player != null &&
+            player.CanAct &&
+            player.IsAlive;
 
         private bool waitingForPlayerHit;
         private bool waitingForPlayerFinish;
@@ -40,18 +53,45 @@ namespace CardBattle.Core
         private CardPlayContext pendingPlayerCardContext;
         private EnemyBattleUnit pendingPrimaryTarget;
 
+        private void OnEnable()
+        {
+            if (battleOutcomeController != null)
+                battleOutcomeController.OnBattleEnded += HandleBattleEnded;
+        }
+
+        private void OnDisable()
+        {
+            if (battleOutcomeController != null)
+                battleOutcomeController.OnBattleEnded -= HandleBattleEnded;
+
+            CleanupPlayerAttackState();
+            SetBusy(false);
+        }
+
         public void TryPlayCard(CardInstance card, EnemyBattleUnit primaryTarget = null)
         {
-            if (IsBusy || card?.Data == null || player == null || !player.IsAlive)
+            if (HasBattleEnded ||
+                IsBusy ||
+                card?.Data == null ||
+                player == null ||
+                !player.IsAlive)
+            {
                 return;
+            }
 
             StartCoroutine(PlayCardSequence(card, primaryTarget));
         }
 
         public void TryEndTurn()
         {
-            if (IsBusy || player == null || !player.IsAlive || !player.CanAct)
+            if (HasBattleEnded ||
+                IsBusy ||
+                player == null ||
+                !player.IsAlive ||
+                !player.CanAct)
+            {
                 return;
+            }
 
             StartCoroutine(EndTurnSequence());
         }
@@ -109,6 +149,14 @@ namespace CardBattle.Core
                 yield return new WaitForSeconds(nonAttackResolvePause);
             }
 
+            if (HasBattleEnded)
+            {
+                RefreshExternalUI();
+                SetBusy(false);
+                RefreshExternalUI();
+                yield break;
+            }
+
             enemyActionSystem.HandlePlayerSuccessfullyPlayedCard();
 
             if (enemyActionSystem.IsResolvingEnemyActions)
@@ -150,8 +198,13 @@ namespace CardBattle.Core
                 yield return new WaitForSeconds(enemyResolveSafetyPause);
             }
 
-            if (player != null && player.IsAlive && HasAliveEnemy())
+            if (!HasBattleEnded &&
+                player != null &&
+                player.IsAlive &&
+                HasAliveEnemy())
+            {
                 yield return enemyActionSystem.StartPlayerRoundRoutine();
+            }
 
             RefreshExternalUI();
             SetBusy(false);
@@ -227,6 +280,11 @@ namespace CardBattle.Core
             pendingPrimaryTarget = null;
         }
 
+        private void HandleBattleEnded(BattleOutcome outcome)
+        {
+            RefreshExternalUI();
+        }
+
         private bool ValidateCardPlay(CardInstance card)
         {
             if (player == null || deckController == null || cardResolver == null || enemyActionSystem == null)
@@ -234,6 +292,9 @@ namespace CardBattle.Core
                 Debug.LogError("BattleActionRunner missing references.");
                 return false;
             }
+
+            if (HasBattleEnded)
+                return false;
 
             if (!player.CanAct || !player.IsAlive)
                 return false;
@@ -263,12 +324,6 @@ namespace CardBattle.Core
         {
             handUIController?.RefreshInteractivityExternal();
             battleHUDController?.RefreshUIExternal();
-        }
-
-        private void OnDisable()
-        {
-            CleanupPlayerAttackState();
-            SetBusy(false);
         }
 
         private void SetBusy(bool value)

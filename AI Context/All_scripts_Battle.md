@@ -284,6 +284,9 @@ namespace CardBattle.Core
         [SerializeField] private CardToGraveyardVFXController graveyardVfx;
         [SerializeField] private PileCounterUI pileCounterUI;
 
+        [Header("Battle State")]
+        [SerializeField] private BattleOutcomeController battleOutcomeController;
+
         [Header("Audio")]
         [SerializeField] private CardSFXController cardSfx;
         [SerializeField] private CombatSFXController combatSfx;
@@ -295,7 +298,17 @@ namespace CardBattle.Core
 
         public bool IsBusy { get; private set; }
         public event System.Action<bool> OnBusyStateChanged;
-        public bool CanAcceptInput => !IsBusy && player != null && player.CanAct && player.IsAlive;
+
+        private bool HasBattleEnded =>
+            battleOutcomeController != null &&
+            battleOutcomeController.IsBattleEnded;
+
+        public bool CanAcceptInput =>
+            !IsBusy &&
+            !HasBattleEnded &&
+            player != null &&
+            player.CanAct &&
+            player.IsAlive;
 
         private bool waitingForPlayerHit;
         private bool waitingForPlayerFinish;
@@ -303,18 +316,45 @@ namespace CardBattle.Core
         private CardPlayContext pendingPlayerCardContext;
         private EnemyBattleUnit pendingPrimaryTarget;
 
+        private void OnEnable()
+        {
+            if (battleOutcomeController != null)
+                battleOutcomeController.OnBattleEnded += HandleBattleEnded;
+        }
+
+        private void OnDisable()
+        {
+            if (battleOutcomeController != null)
+                battleOutcomeController.OnBattleEnded -= HandleBattleEnded;
+
+            CleanupPlayerAttackState();
+            SetBusy(false);
+        }
+
         public void TryPlayCard(CardInstance card, EnemyBattleUnit primaryTarget = null)
         {
-            if (IsBusy || card?.Data == null || player == null || !player.IsAlive)
+            if (HasBattleEnded ||
+                IsBusy ||
+                card?.Data == null ||
+                player == null ||
+                !player.IsAlive)
+            {
                 return;
+            }
 
             StartCoroutine(PlayCardSequence(card, primaryTarget));
         }
 
         public void TryEndTurn()
         {
-            if (IsBusy || player == null || !player.IsAlive || !player.CanAct)
+            if (HasBattleEnded ||
+                IsBusy ||
+                player == null ||
+                !player.IsAlive ||
+                !player.CanAct)
+            {
                 return;
+            }
 
             StartCoroutine(EndTurnSequence());
         }
@@ -372,6 +412,14 @@ namespace CardBattle.Core
                 yield return new WaitForSeconds(nonAttackResolvePause);
             }
 
+            if (HasBattleEnded)
+            {
+                RefreshExternalUI();
+                SetBusy(false);
+                RefreshExternalUI();
+                yield break;
+            }
+
             enemyActionSystem.HandlePlayerSuccessfullyPlayedCard();
 
             if (enemyActionSystem.IsResolvingEnemyActions)
@@ -413,8 +461,13 @@ namespace CardBattle.Core
                 yield return new WaitForSeconds(enemyResolveSafetyPause);
             }
 
-            if (player != null && player.IsAlive && HasAliveEnemy())
+            if (!HasBattleEnded &&
+                player != null &&
+                player.IsAlive &&
+                HasAliveEnemy())
+            {
                 yield return enemyActionSystem.StartPlayerRoundRoutine();
+            }
 
             RefreshExternalUI();
             SetBusy(false);
@@ -490,6 +543,11 @@ namespace CardBattle.Core
             pendingPrimaryTarget = null;
         }
 
+        private void HandleBattleEnded(BattleOutcome outcome)
+        {
+            RefreshExternalUI();
+        }
+
         private bool ValidateCardPlay(CardInstance card)
         {
             if (player == null || deckController == null || cardResolver == null || enemyActionSystem == null)
@@ -497,6 +555,9 @@ namespace CardBattle.Core
                 Debug.LogError("BattleActionRunner missing references.");
                 return false;
             }
+
+            if (HasBattleEnded)
+                return false;
 
             if (!player.CanAct || !player.IsAlive)
                 return false;
@@ -526,12 +587,6 @@ namespace CardBattle.Core
         {
             handUIController?.RefreshInteractivityExternal();
             battleHUDController?.RefreshUIExternal();
-        }
-
-        private void OnDisable()
-        {
-            CleanupPlayerAttackState();
-            SetBusy(false);
         }
 
         private void SetBusy(bool value)
@@ -852,6 +907,9 @@ namespace CardBattle.Core
         [SerializeField] private float handPaddingX = 30f;
         [SerializeField] private float handPaddingY = 20f;
 
+        [Header("Battle State")]
+        [SerializeField] private BattleOutcomeController battleOutcomeController;
+
         public bool IsSelectingTarget => _pendingCard != null;
 
         private CardInstance _pendingCard;
@@ -859,8 +917,34 @@ namespace CardBattle.Core
         private RectTransform _selectedCardGuideStartAnchor;
         private bool _canShowGuideLine;
 
+        private bool HasBattleEnded =>
+            battleOutcomeController != null &&
+            battleOutcomeController.IsBattleEnded;
+
+        private void OnEnable()
+        {
+            if (battleOutcomeController != null)
+                battleOutcomeController.OnBattleEnded += HandleBattleEnded;
+        }
+
+        private void OnDisable()
+        {
+            if (battleOutcomeController != null)
+                battleOutcomeController.OnBattleEnded -= HandleBattleEnded;
+
+            ForceCancelTargetSelection();
+        }
+
         private void Update()
         {
+            if (HasBattleEnded)
+            {
+                if (IsSelectingTarget)
+                    ForceCancelTargetSelection();
+
+                return;
+            }
+
             if (!IsSelectingTarget)
                 return;
 
@@ -917,6 +1001,9 @@ namespace CardBattle.Core
 
         public void BeginTargetSelection(CardInstance card)
         {
+            if (HasBattleEnded)
+                return;
+
             if (card?.Data == null)
                 return;
 
@@ -954,9 +1041,12 @@ namespace CardBattle.Core
                 return;
 
             Debug.Log("Target selection cancelled.");
+            ForceCancelTargetSelection();
+        }
 
+        public void ForceCancelTargetSelection()
+        {
             _pendingCard = null;
-
             SetHighlight(false);
 
             if (handUIController != null)
@@ -972,8 +1062,14 @@ namespace CardBattle.Core
 
         public void ConfirmTarget(EnemyBattleUnit target)
         {
-            if (_pendingCard == null || battleActionRunner == null || target == null || !target.IsAlive)
+            if (HasBattleEnded ||
+                _pendingCard == null ||
+                battleActionRunner == null ||
+                target == null ||
+                !target.IsAlive)
+            {
                 return;
+            }
 
             SetHighlight(false);
 
@@ -986,6 +1082,11 @@ namespace CardBattle.Core
             _selectedCardRect = null;
             _selectedCardGuideStartAnchor = null;
             _canShowGuideLine = false;
+        }
+
+        private void HandleBattleEnded(BattleOutcome outcome)
+        {
+            ForceCancelTargetSelection();
         }
 
         private void SetHighlight(bool value)
@@ -2071,6 +2172,128 @@ namespace CardBattle.Core
 }
 ```
 
+## FILE: BattleEndPresentationController.cs
+**Path:** `Assets/Scripts/CardBattle/Battle/Presentation/BattleEndPresentationController.cs`
+```csharp
+using System;
+using System.Collections;
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    /// <summary>
+    /// Delays the presentation-ready signal after battle logic has ended.
+    /// Does not open UI, change battle state, or stop gameplay coroutines.
+    /// </summary>
+    public class BattleEndPresentationController : MonoBehaviour
+    {
+        [SerializeField] private BattleOutcomeController battleOutcomeController;
+
+        [Header("Timing")]
+        [SerializeField] private float encounterClearedDelay = 1.0f;
+        [SerializeField] private float playerDefeatedDelay = 1.2f;
+
+        private Coroutine presentationRoutine;
+
+        public bool IsPresentationPending { get; private set; }
+        public bool IsPresentationReady { get; private set; }
+        public BattleOutcome ReadyOutcome { get; private set; } = BattleOutcome.None;
+
+        public event Action<BattleOutcome> OnBattleEndPresentationReady;
+
+        private void OnEnable()
+        {
+            if (battleOutcomeController != null)
+                battleOutcomeController.OnBattleEnded += HandleBattleEnded;
+        }
+
+        private void OnDisable()
+        {
+            if (battleOutcomeController != null)
+                battleOutcomeController.OnBattleEnded -= HandleBattleEnded;
+
+            StopPresentationRoutine();
+            IsPresentationPending = false;
+        }
+
+        public void ResetPresentation()
+        {
+            StopPresentationRoutine();
+            IsPresentationPending = false;
+            IsPresentationReady = false;
+            ReadyOutcome = BattleOutcome.None;
+            Debug.Log("[BattleEndPresentation] Reset.");
+        }
+
+        [ContextMenu("Debug Reset Presentation")]
+        private void DebugResetPresentation()
+        {
+            ResetPresentation();
+        }
+
+        private void HandleBattleEnded(BattleOutcome outcome)
+        {
+            if (outcome == BattleOutcome.None || IsPresentationPending || IsPresentationReady)
+                return;
+
+            IsPresentationPending = true;
+            presentationRoutine = StartCoroutine(PresentationDelayRoutine(outcome));
+        }
+
+        private IEnumerator PresentationDelayRoutine(BattleOutcome outcome)
+        {
+            float delay = GetDelay(outcome);
+            if (delay > 0f)
+                yield return new WaitForSeconds(delay);
+
+            presentationRoutine = null;
+            IsPresentationPending = false;
+            IsPresentationReady = true;
+            ReadyOutcome = outcome;
+
+            Debug.Log($"[BattleEndPresentation] Ready: {outcome}");
+            OnBattleEndPresentationReady?.Invoke(outcome);
+        }
+
+        private float GetDelay(BattleOutcome outcome)
+        {
+            switch (outcome)
+            {
+                case BattleOutcome.EncounterCleared:
+                    return Mathf.Max(0f, encounterClearedDelay);
+                case BattleOutcome.PlayerDefeated:
+                    return Mathf.Max(0f, playerDefeatedDelay);
+                default:
+                    return 0f;
+            }
+        }
+
+        private void StopPresentationRoutine()
+        {
+            if (presentationRoutine == null)
+                return;
+
+            StopCoroutine(presentationRoutine);
+            presentationRoutine = null;
+        }
+    }
+}
+```
+
+## FILE: BattleOutcome.cs
+**Path:** `Assets/Scripts/CardBattle/Battle/Systems/BattleOutcome.cs`
+```csharp
+namespace CardBattle.Core
+{
+    public enum BattleOutcome
+    {
+        None,
+        EncounterCleared,
+        PlayerDefeated
+    }
+}
+```
+
 ## FILE: BattleOutcomeController.cs
 **Path:** `Assets/Scripts/CardBattle/Battle/Systems/BattleOutcomeController.cs`
 ```csharp
@@ -2080,7 +2303,7 @@ using UnityEngine;
 namespace CardBattle.Core
 {
     /// <summary>
-    /// Phase 1: listens for unit defeat and logs battle outcome for debugging.
+    /// Tracks battle outcome state from unit defeat events.
     /// Does not lock input, stop actions, or transition scenes yet.
     /// </summary>
     public class BattleOutcomeController : MonoBehaviour
@@ -2089,7 +2312,11 @@ namespace CardBattle.Core
         [SerializeField] private EnemyActionSystem enemyActionSystem;
 
         private readonly List<EnemyBattleUnit> subscribedEnemies = new List<EnemyBattleUnit>();
-        private bool encounterClearedLogged;
+
+        public BattleOutcome CurrentOutcome { get; private set; } = BattleOutcome.None;
+        public bool IsBattleEnded => CurrentOutcome != BattleOutcome.None;
+
+        public event System.Action<BattleOutcome> OnBattleEnded;
 
         private void OnEnable()
         {
@@ -2101,6 +2328,12 @@ namespace CardBattle.Core
         {
             UnsubscribePlayer();
             UnsubscribeEnemies();
+        }
+
+        public void ResetOutcome()
+        {
+            CurrentOutcome = BattleOutcome.None;
+            Debug.Log("[BattleOutcome] Outcome reset.");
         }
 
         private void SubscribePlayer()
@@ -2152,18 +2385,14 @@ namespace CardBattle.Core
 
         private void HandlePlayerDefeated(BattleUnit unit)
         {
-            Debug.Log("[BattleOutcome] Player defeated.");
+            ResolveOutcome(BattleOutcome.PlayerDefeated);
         }
 
         private void HandleEnemyDefeated(BattleUnit unit)
         {
             Debug.Log($"[BattleOutcome] Enemy defeated: {unit.name}");
-            TryLogEncounterCleared();
-        }
 
-        private void TryLogEncounterCleared()
-        {
-            if (encounterClearedLogged || enemyActionSystem == null)
+            if (enemyActionSystem == null || IsBattleEnded)
                 return;
 
             var enemies = enemyActionSystem.Enemies;
@@ -2174,8 +2403,27 @@ namespace CardBattle.Core
                     return;
             }
 
-            encounterClearedLogged = true;
-            Debug.Log("[BattleOutcome] Encounter cleared.");
+            ResolveOutcome(BattleOutcome.EncounterCleared);
+        }
+
+        private void ResolveOutcome(BattleOutcome outcome)
+        {
+            if (outcome == BattleOutcome.None || IsBattleEnded)
+                return;
+
+            CurrentOutcome = outcome;
+
+            switch (outcome)
+            {
+                case BattleOutcome.PlayerDefeated:
+                    Debug.Log("[BattleOutcome] Player defeated.");
+                    break;
+                case BattleOutcome.EncounterCleared:
+                    Debug.Log("[BattleOutcome] Encounter cleared.");
+                    break;
+            }
+
+            OnBattleEnded?.Invoke(outcome);
         }
     }
 }
