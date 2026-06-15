@@ -6,7 +6,8 @@
 6. Main Camera
 7. UI Camera
 8. EventSystem
-9. CardBattle_Test
+9. RunManager (RunManager.cs)
+10. CardBattle_Test
   1. Systems
     1. DeckController (DeckController.cs)
     2. CardResolver (CardResolver.cs)
@@ -32,7 +33,7 @@
       7. AttackAudio (CombatSFXController.cs)
     3. Enemy_02 (EnemyBattleUnit.cs)
   3. Environment
-10. UI_Canvas
+11. UI_Canvas
   1. BG
   2. HandUI
     1. HandPanel
@@ -43,6 +44,6 @@
     4. Graveyard
     5. PlayerAP
   4. EnemyUIContainer
-11. BattleFloatingTextSpawner
-12. BattlePresentationController
+12. BattleFloatingTextSpawner
+13. BattlePresentationController
 
