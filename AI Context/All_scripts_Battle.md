@@ -69,7 +69,8 @@ namespace CardBattle.Core
                 if (!battleRunBridge.TryInitializeBattleFromActiveRun())
                 {
                     Debug.LogError(
-                        "BattleTestBootstrap: Active run exists, but Battle data could not be initialized.");
+                        "BattleTestBootstrap: Active run exists, " +
+                        "but Battle data could not be initialized.");
                     return;
                 }
             }
@@ -1335,6 +1336,9 @@ namespace CardBattle.Core
             NotifyHpChanged();
         }
 
+        /// <summary>
+        /// Initializes runtime max/current HP from external run data without combat side effects.
+        /// </summary>
         public virtual void InitializeVitals(int newMaxHp, int newCurrentHp)
         {
             maxHp = Mathf.Max(1, newMaxHp);

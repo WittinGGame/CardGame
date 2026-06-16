@@ -15,6 +15,9 @@ namespace CardBattle.Core
         [SerializeField] private DeckController deckController;
         [SerializeField] private PlayerBattleUnit player;
 
+        [Header("Battle Result")]
+        [SerializeField] private BattleEndPresentationController battleEndPresentationController;
+
         [Header("Options")]
         [SerializeField] private bool verboseLogs;
 
@@ -29,8 +32,62 @@ namespace CardBattle.Core
         public int LastAppliedCurrentHp { get; private set; }
         public int LastAppliedMaxHp { get; private set; }
 
+        public bool HasCommittedEncounterResult { get; private set; }
+        public BattleOutcome LastCommittedOutcome { get; private set; } = BattleOutcome.None;
+        public int LastCommittedCurrentHp { get; private set; }
+        public int CommitCount { get; private set; }
+
+        private BattleEndPresentationController subscribedPresentationController;
+
+        private void OnEnable()
+        {
+            RefreshPresentationSubscription();
+        }
+
+        private void OnDisable()
+        {
+            UnsubscribePresentationController();
+        }
+
+        private void OnDestroy()
+        {
+            UnsubscribePresentationController();
+        }
+
+        private void RefreshPresentationSubscription()
+        {
+            UnsubscribePresentationController();
+
+            if (battleEndPresentationController == null)
+            {
+                if (verboseLogs)
+                {
+                    Debug.LogWarning(
+                        "[BattleRunBridge] BattleEndPresentationController reference is missing. " +
+                        "Automatic Encounter HP commit is disabled.");
+                }
+
+                return;
+            }
+
+            subscribedPresentationController = battleEndPresentationController;
+            subscribedPresentationController.OnBattleEndPresentationReady +=
+                HandleBattleEndPresentationReady;
+        }
+
+        private void UnsubscribePresentationController()
+        {
+            if (subscribedPresentationController == null)
+                return;
+
+            subscribedPresentationController.OnBattleEndPresentationReady -=
+                HandleBattleEndPresentationReady;
+            subscribedPresentationController = null;
+        }
+
         public bool TryInitializeBattleFromActiveRun()
         {
+            ResetEncounterCommitState();
             ResetAllDiagnostics();
 
             if (!TryGetValidActiveRun(out RunState run))
@@ -52,11 +109,9 @@ namespace CardBattle.Core
             if (verboseLogs)
             {
                 Debug.Log(
-                    $"[BattleRunBridge] Built battle deck from active run. " +
-                    $"Class={run.playerClassId} | Records={run.currentDeck.Count} | " +
-                    $"Resolved={LastResolvedCardCount} | Missing={LastMissingCardCount}");
-                Debug.Log(
-                    $"[BattleRunBridge] Applied player vitals from active run. " +
+                    $"[BattleRunBridge] Initialized Battle from active run. " +
+                    $"Class={run.playerClassId} | " +
+                    $"Cards={LastResolvedCardCount} | " +
                     $"HP={LastAppliedCurrentHp}/{LastAppliedMaxHp}");
             }
 
@@ -110,6 +165,103 @@ namespace CardBattle.Core
             }
 
             return true;
+        }
+
+        public void ResetEncounterCommitState()
+        {
+            HasCommittedEncounterResult = false;
+            LastCommittedOutcome = BattleOutcome.None;
+            LastCommittedCurrentHp = 0;
+
+            if (verboseLogs)
+                Debug.Log("[BattleRunBridge] Encounter commit state reset.");
+        }
+
+        public bool TryCommitPlayerHpToActiveRun()
+        {
+            if (HasCommittedEncounterResult)
+                return false;
+
+            if (player == null)
+            {
+                Debug.LogError(
+                    "[BattleRunBridge] PlayerBattleUnit reference is missing. Encounter result commit aborted.");
+                return false;
+            }
+
+            RunManager runManager = RunManager.Instance;
+            if (runManager == null)
+            {
+                if (verboseLogs)
+                {
+                    Debug.LogWarning(
+                        "[BattleRunBridge] RunManager.Instance is null. Encounter result commit skipped.");
+                }
+
+                return false;
+            }
+
+            if (!runManager.HasActiveRun)
+            {
+                if (verboseLogs)
+                {
+                    Debug.LogWarning(
+                        "[BattleRunBridge] No active run exists. Encounter result commit skipped.");
+                }
+
+                return false;
+            }
+
+            RunState run = runManager.CurrentRun;
+            if (run == null)
+            {
+                Debug.LogError(
+                    "[BattleRunBridge] CurrentRun is null. Encounter result commit aborted.");
+                return false;
+            }
+
+            if (!player.IsAlive)
+            {
+                Debug.LogError(
+                    "[BattleRunBridge] Player is not alive. Encounter result commit aborted.");
+                return false;
+            }
+
+            if (player.CurrentHp <= 0)
+            {
+                Debug.LogError(
+                    "[BattleRunBridge] Player current HP is zero or below. Encounter result commit aborted.");
+                return false;
+            }
+
+            if (!runManager.SetCurrentHp(player.CurrentHp))
+            {
+                Debug.LogError(
+                    "[BattleRunBridge] RunManager.SetCurrentHp was rejected. Encounter result commit aborted.");
+                return false;
+            }
+
+            HasCommittedEncounterResult = true;
+            LastCommittedOutcome = BattleOutcome.EncounterCleared;
+            LastCommittedCurrentHp = run.currentHp;
+            CommitCount++;
+
+            if (verboseLogs)
+            {
+                Debug.Log(
+                    $"[BattleRunBridge] Encounter result committed to active run. " +
+                    $"Outcome=EncounterCleared | HP={LastCommittedCurrentHp}/{run.maxHp}");
+            }
+
+            return true;
+        }
+
+        private void HandleBattleEndPresentationReady(BattleOutcome outcome)
+        {
+            if (outcome != BattleOutcome.EncounterCleared)
+                return;
+
+            TryCommitPlayerHpToActiveRun();
         }
 
         private bool TryGetValidActiveRun(out RunState run)
@@ -223,7 +375,7 @@ namespace CardBattle.Core
                 return false;
             }
 
-            if (run.maxHp <= 0)
+            if (run.maxHp < 1)
             {
                 Debug.LogError(
                     $"[BattleRunBridge] Active run max HP is invalid: {run.maxHp}.");
@@ -233,7 +385,8 @@ namespace CardBattle.Core
             if (run.currentHp <= 0)
             {
                 Debug.LogError(
-                    $"[BattleRunBridge] Active run current HP is invalid: {run.currentHp}.");
+                    "[BattleRunBridge] Active run player HP is zero or below. " +
+                    "Battle initialization aborted.");
                 return false;
             }
 

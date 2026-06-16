@@ -11,7 +11,7 @@ namespace CardBattle.Core
         {
             var starterDeck = new List<RunCardRecord>
             {
-                new RunCardRecord("strike"),
+                new RunCardRecord("heal"),
                 new RunCardRecord("strike"),
                 new RunCardRecord("block"),
                 new RunCardRecord("strike")
@@ -21,11 +21,10 @@ namespace CardBattle.Core
                 "run_persistence_test",
                 12345,
                 "knight",
-                80,
+                60,
                 starterDeck
             );
 
-            RunManager.Instance.CurrentRun.maxHp = 120;
             RunManager.Instance.SetCurrentHp(42);
             RunManager.Instance.AddGold(75);
             RunManager.Instance.AddCard("AllStrike");

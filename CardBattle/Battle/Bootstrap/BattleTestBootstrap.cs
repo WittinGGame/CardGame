@@ -66,7 +66,8 @@ namespace CardBattle.Core
                 if (!battleRunBridge.TryInitializeBattleFromActiveRun())
                 {
                     Debug.LogError(
-                        "BattleTestBootstrap: Active run exists, but Battle data could not be initialized.");
+                        "BattleTestBootstrap: Active run exists, " +
+                        "but Battle data could not be initialized.");
                     return;
                 }
             }

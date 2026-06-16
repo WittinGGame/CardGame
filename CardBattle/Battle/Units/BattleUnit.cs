@@ -117,6 +117,9 @@ namespace CardBattle.Core
             NotifyHpChanged();
         }
 
+        /// <summary>
+        /// Initializes runtime max/current HP from external run data without combat side effects.
+        /// </summary>
         public virtual void InitializeVitals(int newMaxHp, int newCurrentHp)
         {
             maxHp = Mathf.Max(1, newMaxHp);
