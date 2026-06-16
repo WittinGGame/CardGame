@@ -11,22 +11,24 @@ namespace CardBattle.Core
         {
             var starterDeck = new List<RunCardRecord>
             {
-                new RunCardRecord("knight_strike"),
-                new RunCardRecord("knight_strike"),
-                new RunCardRecord("knight_guard")
+                new RunCardRecord("strike"),
+                new RunCardRecord("strike"),
+                new RunCardRecord("block"),
+                new RunCardRecord("strike")
             };
 
             bool success = RunManager.Instance.StartNewRun(
                 "run_persistence_test",
                 12345,
                 "knight",
-                60,
+                80,
                 starterDeck
             );
 
+            RunManager.Instance.CurrentRun.maxHp = 120;
             RunManager.Instance.SetCurrentHp(42);
             RunManager.Instance.AddGold(75);
-            RunManager.Instance.AddCard("heavy_slash");
+            RunManager.Instance.AddCard("AllStrike");
 
             Debug.Log(
                 $"[Persistence Test] Started={success} | " +

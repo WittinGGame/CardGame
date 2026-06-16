@@ -21,6 +21,7 @@
       3. UIAudio (UISFXController)
     8. BattleOutcomeController (BattleOutcomeController.cs)
     9. BattleEndPresentationController (BattleEndPresentationController.cs)
+    10. BattleRunBridge (BattleRunBridge.cs)
   2. Units
     1. Player (PlayerBattleUnit.cs)
     2. Enemy_01 (EnemyBattleUnit.cs)

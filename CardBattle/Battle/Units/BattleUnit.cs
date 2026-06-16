@@ -117,6 +117,15 @@ namespace CardBattle.Core
             NotifyHpChanged();
         }
 
+        public virtual void InitializeVitals(int newMaxHp, int newCurrentHp)
+        {
+            maxHp = Mathf.Max(1, newMaxHp);
+            currentHp = Mathf.Clamp(newCurrentHp, 0, maxHp);
+
+            OnHpChanged();
+            NotifyHpChanged();
+        }
+
         protected virtual void OnHpChanged() { }
         protected virtual void OnDefeated() { }
 

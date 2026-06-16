@@ -28,6 +28,9 @@ namespace CardBattle.Core
         [SerializeField] private bool verboseLogs = true;
         [SerializeField] private int defaultTargetEnemyIndex = 0;
 
+        [Header("Run Integration")]
+        [SerializeField] private BattleRunBridge battleRunBridge;
+
         private bool _initialized;
 
         private void Start()
@@ -58,7 +61,20 @@ namespace CardBattle.Core
             if (!ValidateReferences())
                 return;
 
-            deckController.BuildFromInspectorBlueprint();
+            if (battleRunBridge != null && battleRunBridge.HasActiveRun)
+            {
+                if (!battleRunBridge.TryInitializeBattleFromActiveRun())
+                {
+                    Debug.LogError(
+                        "BattleTestBootstrap: Active run exists, but Battle data could not be initialized.");
+                    return;
+                }
+            }
+            else
+            {
+                deckController.BuildFromInspectorBlueprint();
+            }
+
             enemyActionSystem.ResetTurnCounter();
             enemyActionSystem.StartPlayerRound();
             _initialized = true;
