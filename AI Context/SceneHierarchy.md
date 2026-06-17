@@ -46,6 +46,17 @@
     4. Graveyard
     5. PlayerAP
   4. EnemyUIContainer
+  5. RewardUI
+    1. RewardPanel
+      1. DimBackground
+      2. Title
+      3. GoldRoot
+        1. GoldAmountText
+      4. ChoiceContainer
+      5. NoChoicesRoot
+      6. ResultText
+      7. SkipButton
+      8. ContinueButton
 12. BattleFloatingTextSpawner
 13. BattlePresentationController
 
