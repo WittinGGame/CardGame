@@ -64,6 +64,9 @@ namespace CardBattle.Core
         {
             enemyData = data;
             ApplyEnemyData();
+            _hasAttackedThisPlayerRound = false;
+            attackInProgress = false;
+            NotifyStateChanged();
         }
 
         private void ApplyEnemyData()

@@ -675,7 +675,6 @@ namespace CardBattle.Core
 
 ## FILE: EnemyActionSystem.cs
 **Path:** `Assets/Scripts/CardBattle/Battle/Systems/EnemyActionSystem.cs`
-```csharp
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
@@ -723,6 +722,22 @@ namespace CardBattle.Core
         {
             if (enemy != null && !enemies.Contains(enemy))
                 enemies.Add(enemy);
+        }
+
+        public void ClearRegisteredEnemies()
+        {
+            enemies.Clear();
+        }
+
+        public void ReplaceRegisteredEnemies(IReadOnlyList<EnemyBattleUnit> newEnemies)
+        {
+            enemies.Clear();
+
+            if (newEnemies == null)
+                return;
+
+            for (int i = 0; i < newEnemies.Count; i++)
+                RegisterEnemy(newEnemies[i]);
         }
 
         /// <summary>
@@ -1428,6 +1443,9 @@ namespace CardBattle.Core
         {
             enemyData = data;
             ApplyEnemyData();
+            _hasAttackedThisPlayerRound = false;
+            attackInProgress = false;
+            NotifyStateChanged();
         }
 
         private void ApplyEnemyData()

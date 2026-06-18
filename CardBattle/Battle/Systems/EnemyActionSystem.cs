@@ -47,6 +47,22 @@ namespace CardBattle.Core
                 enemies.Add(enemy);
         }
 
+        public void ClearRegisteredEnemies()
+        {
+            enemies.Clear();
+        }
+
+        public void ReplaceRegisteredEnemies(IReadOnlyList<EnemyBattleUnit> newEnemies)
+        {
+            enemies.Clear();
+
+            if (newEnemies == null)
+                return;
+
+            for (int i = 0; i < newEnemies.Count; i++)
+                RegisterEnemy(newEnemies[i]);
+        }
+
         /// <summary>
         /// Begins the player's round: clears enemy attack flags, refreshes AP, and draws cards.
         /// Call this from your battle director after enemy phases (if any) complete.

@@ -26,6 +26,7 @@
     12. EncounterCompletionController (EncounterCompletionController.cs)
     13. EncounterDataDebugTest
     14. RuntimeEncounterContext
+    15. EncounterEnemySceneBinder
   2. Units
     1. Player (PlayerBattleUnit.cs)
     2. Enemy_01 (EnemyBattleUnit.cs)
