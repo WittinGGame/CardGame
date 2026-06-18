@@ -1,7 +1,5 @@
 ## FILE: CardData.cs
-
 **Path:** `Assets/Scripts/CardBattle/Cards/Data/CardData.cs`
-
 ```csharp
 using System.Collections.Generic;
 using UnityEngine;
@@ -58,9 +56,7 @@ namespace CardBattle.Core
 ```
 
 ## FILE: CardTargetMode.cs
-
 **Path:** `Assets/Scripts/CardBattle/Cards/Data/CardTargetMode.cs`
-
 ```csharp
 namespace CardBattle.Core
 {
@@ -93,9 +89,7 @@ namespace CardBattle.Core
 ```
 
 ## FILE: CardEffectData.cs
-
 **Path:** `Assets/Scripts/CardBattle/Cards/Effects/CardEffectData.cs`
-
 ```csharp
 using UnityEngine;
 
@@ -113,9 +107,7 @@ namespace CardBattle.Core
 ```
 
 ## FILE: AddBlockEffectData.cs
-
 **Path:** `Assets/Scripts/CardBattle/Cards/Effects/AddBlockEffectData.cs`
-
 ```csharp
 using UnityEngine;
 
@@ -196,9 +188,7 @@ namespace CardBattle.Core
 ```
 
 ## FILE: HealEffectData.cs
-
 **Path:** `Assets/Scripts/CardBattle/Cards/Effects/HealEffectData.cs`
-
 ```csharp
 using UnityEngine;
 
@@ -227,9 +217,7 @@ namespace CardBattle.Core
 ```
 
 ## FILE: CardEffectExecutionContext.cs
-
 **Path:** `Assets/Scripts/CardBattle/Cards/Runtime/CardEffectExecutionContext.cs`
-
 ```csharp
 using System.Collections.Generic;
 
@@ -251,9 +239,7 @@ namespace CardBattle.Core
 ```
 
 ## FILE: CardInstance.cs
-
 **Path:** `Assets/Scripts/CardBattle/Cards/Runtime/CardInstance.cs`
-
 ```csharp
 using System;
 using System.Collections.Generic;
@@ -291,9 +277,7 @@ namespace CardBattle.Core
 ```
 
 ## FILE: CardPlayContext.cs
-
 **Path:** `Assets/Scripts/CardBattle/Cards/Runtime/CardPlayContext.cs`
-
 ```csharp
 using System.Collections.Generic;
 
@@ -344,9 +328,7 @@ namespace CardBattle.Core
 ```
 
 ## FILE: CardResolver.cs
-
 **Path:** `Assets/Scripts/CardBattle/Cards/Systems/CardResolver.cs`
-
 ```csharp
 using UnityEngine;
 
@@ -751,9 +733,7 @@ namespace CardBattle.Core
 ```
 
 ## FILE: HandUIController.cs
-
 **Path:** `Assets/Scripts/CardBattle/Cards/UI/HandUIController.cs`
-
 ```csharp
 using System.Collections;
 using System.Collections.Generic;
@@ -1272,6 +1252,17 @@ namespace CardBattle.Core
             RefreshCardInteractivity();
         }
 
+        /// <summary>Clears hand UI selection and spawned views before deck rebuild for a new battle.</summary>
+        public void ResetHandRuntimeStateForNewBattle()
+        {
+            if (dealRoutine != null)
+                StopDealRoutineAndReleaseLocks();
+
+            DeselectCurrentCard();
+            hoveredCardView = null;
+            ClearSpawnedCards();
+        }
+
         private EnemyBattleUnit GetDefaultAliveEnemy()
         {
             if (enemyActionSystem == null)
@@ -1442,9 +1433,7 @@ namespace CardBattle.Core
 ```
 
 ## FILE: CardTypeBadgeSet.cs
-
 **Path:** `Assets/Scripts/CardBattle/Cards/UI/CardTypeBadgeSet.cs`
-
 ```csharp
 using UnityEngine;
 
@@ -1482,4 +1471,3 @@ namespace CardBattle.Core
     }
 }
 ```
-

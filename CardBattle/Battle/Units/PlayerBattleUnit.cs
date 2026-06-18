@@ -151,6 +151,18 @@ namespace CardBattle.Core
                 deckController.DiscardEntireHand();
         }
 
+        /// <summary>Clears transient combat state before a new encounter battle start. Does not change HP.</summary>
+        public void ResetBattleRuntimeStateForNewEncounter()
+        {
+            _turnCommitted = true;
+            CurrentAp = 0;
+            _pendingAttackBonus = 0;
+            ClearBlock();
+            OnDebugBuffChanged?.Invoke(DebugBuffCount);
+            NotifyApChanged();
+            NotifyTurnStateChanged();
+        }
+
         private void NotifyApChanged()
         {
             OnApChangedEvent?.Invoke(CurrentAp, ApPerRound);

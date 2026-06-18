@@ -515,6 +515,17 @@ namespace CardBattle.Core
             RefreshCardInteractivity();
         }
 
+        /// <summary>Clears hand UI selection and spawned views before deck rebuild for a new battle.</summary>
+        public void ResetHandRuntimeStateForNewBattle()
+        {
+            if (dealRoutine != null)
+                StopDealRoutineAndReleaseLocks();
+
+            DeselectCurrentCard();
+            hoveredCardView = null;
+            ClearSpawnedCards();
+        }
+
         private EnemyBattleUnit GetDefaultAliveEnemy()
         {
             if (enemyActionSystem == null)

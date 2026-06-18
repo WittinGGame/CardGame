@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Text;
 using UnityEngine;
 
@@ -30,6 +31,16 @@ namespace CardBattle.Core
         [SerializeField] private bool selectDefaultEncounterIfNone = true;
         [SerializeField] private bool requireRuntimeEncounterForBattle = false;
 
+        [Header("Runtime Cleanup")]
+        [SerializeField] private BattleActionRunner battleActionRunner;
+        [SerializeField] private TargetSelectionSystem targetSelectionSystem;
+        [SerializeField] private HandUIController handUIController;
+        [SerializeField] private BattleHUDController battleHUDController;
+        [SerializeField] private PileCounterUI pileCounterUI;
+        [SerializeField] private bool cleanupRuntimeStateOnStartBattle = true;
+        [SerializeField] private bool resetPlayerRuntimeStateOnStartBattle = true;
+        [SerializeField] private bool refreshUiAfterBattleStart = true;
+
         [Header("Optional")]
         [SerializeField] private bool autoStartOnPlay = true;
         [SerializeField] private bool verboseLogs = true;
@@ -43,7 +54,13 @@ namespace CardBattle.Core
         public string LastEncounterPreparationError { get; private set; } = string.Empty;
         public int EncounterPreparationSuccessCount { get; private set; }
 
+        public bool LastRuntimeCleanupAttempted { get; private set; }
+        public bool LastRuntimeCleanupSucceeded { get; private set; }
+        public string LastRuntimeCleanupError { get; private set; } = string.Empty;
+        public int RuntimeCleanupSuccessCount { get; private set; }
+
         private bool _initialized;
+        private Coroutine startBattleRoutine;
 
         private void Start()
         {
@@ -70,40 +87,80 @@ namespace CardBattle.Core
         [ContextMenu("Start Test Battle")]
         public void StartTestBattle()
         {
-            if (!ValidateReferences())
-                return;
-
-            if (!TryPrepareRuntimeEncounterForBattle())
+            if (startBattleRoutine != null)
             {
-                Debug.LogError(
-                    "BattleTestBootstrap: Runtime encounter preparation failed. Battle start aborted.");
+                if (verboseLogs)
+                {
+                    Debug.LogWarning("[BattleTestBootstrap] Start battle is already running.");
+                }
+
                 return;
             }
 
-            if (battleRunBridge != null && battleRunBridge.HasActiveRun)
+            startBattleRoutine = StartCoroutine(StartTestBattleRoutine());
+        }
+
+        private IEnumerator StartTestBattleRoutine()
+        {
+            try
             {
-                if (!battleRunBridge.TryInitializeBattleFromActiveRun())
+                if (!ValidateReferences())
+                    yield break;
+
+                if (!TryCleanupRuntimeStateBeforeBattleStart())
+                    yield break;
+
+                if (!TryPrepareRuntimeEncounterForBattle())
                 {
                     Debug.LogError(
-                        "BattleTestBootstrap: Active run exists, " +
-                        "but Battle data could not be initialized.");
-                    return;
+                        "BattleTestBootstrap: Runtime encounter preparation failed. Battle start aborted.");
+                    yield break;
+                }
+
+                if (battleRunBridge != null && battleRunBridge.HasActiveRun)
+                {
+                    if (!battleRunBridge.TryInitializeBattleFromActiveRun())
+                    {
+                        Debug.LogError(
+                            "BattleTestBootstrap: Active run exists, " +
+                            "but Battle data could not be initialized.");
+                        yield break;
+                    }
+                }
+                else
+                {
+                    deckController.BuildFromInspectorBlueprint();
+                }
+
+                if (refreshUiAfterBattleStart)
+                {
+                    handUIController?.RefreshHandUI();
+                    pileCounterUI?.ForceSyncDisplayedToReal();
+                    battleHUDController?.RefreshUIExternal();
+                }
+
+                enemyActionSystem.ResetTurnCounter();
+                yield return enemyActionSystem.StartPlayerRoundRoutine();
+
+                _initialized = true;
+
+                if (verboseLogs)
+                {
+                    Debug.Log("=== Test Battle Started ===");
+                    PrintBattleState();
                 }
             }
-            else
+            finally
             {
-                deckController.BuildFromInspectorBlueprint();
+                startBattleRoutine = null;
             }
+        }
 
-            enemyActionSystem.ResetTurnCounter();
-            enemyActionSystem.StartPlayerRound();
-            _initialized = true;
-
-            if (verboseLogs)
-            {
-                Debug.Log("=== Test Battle Started ===");
-                PrintBattleState();
-            }
+        [ContextMenu("Debug Cleanup Runtime State")]
+        private void DebugCleanupRuntimeState()
+        {
+            TryCleanupRuntimeStateBeforeBattleStart();
+            DebugPrintBattleStartFlowState();
         }
 
         [ContextMenu("Debug Prepare Runtime Encounter")]
@@ -137,14 +194,28 @@ namespace CardBattle.Core
                 $"PrepareRuntimeEncounterOnStartBattle={prepareRuntimeEncounterOnStartBattle}\n" +
                 $"SelectDefaultEncounterIfNone={selectDefaultEncounterIfNone}\n" +
                 $"RequireRuntimeEncounterForBattle={requireRuntimeEncounterForBattle}\n" +
+                $"CleanupRuntimeStateOnStartBattle={cleanupRuntimeStateOnStartBattle}\n" +
+                $"ResetPlayerRuntimeStateOnStartBattle={resetPlayerRuntimeStateOnStartBattle}\n" +
+                $"RefreshUiAfterBattleStart={refreshUiAfterBattleStart}\n" +
                 $"LastEncounterPreparationAttempted={LastEncounterPreparationAttempted}\n" +
                 $"LastEncounterPreparationSucceeded={LastEncounterPreparationSucceeded}\n" +
                 $"LastEncounterPreparationError={LastEncounterPreparationError}\n" +
                 $"EncounterPreparationSuccessCount={EncounterPreparationSuccessCount}\n" +
+                $"LastRuntimeCleanupAttempted={LastRuntimeCleanupAttempted}\n" +
+                $"LastRuntimeCleanupSucceeded={LastRuntimeCleanupSucceeded}\n" +
+                $"LastRuntimeCleanupError={LastRuntimeCleanupError}\n" +
+                $"RuntimeCleanupSuccessCount={RuntimeCleanupSuccessCount}\n" +
                 $"CurrentEncounterId={currentEncounterId}\n" +
                 $"EncounterValid={encounterValid}\n" +
                 $"BinderApplied={binderApplied}\n" +
-                $"EnemyActionSystemCount={enemyCount}");
+                $"EnemyActionSystemCount={enemyCount}\n" +
+                $"BattleActionRunnerBusy={battleActionRunner != null && battleActionRunner.IsBusy}\n" +
+                $"TargetSelectionActive={targetSelectionSystem != null && targetSelectionSystem.IsSelectingTarget}\n" +
+                $"PlayerAp={(player != null ? player.CurrentAp.ToString() : "n/a")}/{(player != null ? player.ApPerRound.ToString() : "n/a")}\n" +
+                $"PlayerBlock={(player != null ? player.CurrentBlock.ToString() : "n/a")}\n" +
+                $"Deck={(deckController != null ? deckController.Deck.Count.ToString() : "n/a")}\n" +
+                $"Hand={(deckController != null ? deckController.Hand.Count.ToString() : "n/a")}\n" +
+                $"Graveyard={(deckController != null ? deckController.Graveyard.Count.ToString() : "n/a")}");
         }
 
         public void TryPlayCardAtHandIndex(int handIndex)
@@ -223,6 +294,7 @@ namespace CardBattle.Core
             {
                 sb.AppendLine($"Player HP: {player.CurrentHp}/{player.MaxHp}");
                 sb.AppendLine($"Player AP: {player.CurrentAp}/{player.ApPerRound}");
+                sb.AppendLine($"Player Block: {player.CurrentBlock}");
                 sb.AppendLine($"Player CanAct: {player.CanAct}");
             }
 
@@ -250,6 +322,39 @@ namespace CardBattle.Core
             }
 
             Debug.Log(sb.ToString());
+        }
+
+        private bool TryCleanupRuntimeStateBeforeBattleStart()
+        {
+            LastRuntimeCleanupAttempted = false;
+            LastRuntimeCleanupSucceeded = false;
+            LastRuntimeCleanupError = string.Empty;
+
+            if (!cleanupRuntimeStateOnStartBattle)
+            {
+                LastRuntimeCleanupSucceeded = true;
+                return true;
+            }
+
+            LastRuntimeCleanupAttempted = true;
+
+            battleActionRunner?.ResetRuntimeActionState();
+            targetSelectionSystem?.ForceCancelTargetSelection();
+            handUIController?.ResetHandRuntimeStateForNewBattle();
+
+            if (resetPlayerRuntimeStateOnStartBattle && player != null)
+                player.ResetBattleRuntimeStateForNewEncounter();
+
+            pileCounterUI?.ForceSyncDisplayedToReal();
+            battleHUDController?.RefreshUIExternal();
+
+            LastRuntimeCleanupSucceeded = true;
+            RuntimeCleanupSuccessCount++;
+
+            if (verboseLogs)
+                Debug.Log("[BattleTestBootstrap] Runtime battle state cleanup complete.");
+
+            return true;
         }
 
         private bool TryPrepareRuntimeEncounterForBattle()

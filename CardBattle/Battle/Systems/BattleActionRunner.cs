@@ -52,6 +52,7 @@ namespace CardBattle.Core
         private bool playerAttackResolved;
         private CardPlayContext pendingPlayerCardContext;
         private EnemyBattleUnit pendingPrimaryTarget;
+        private Coroutine runningActionRoutine;
 
         private void OnEnable()
         {
@@ -63,6 +64,12 @@ namespace CardBattle.Core
         {
             if (battleOutcomeController != null)
                 battleOutcomeController.OnBattleEnded -= HandleBattleEnded;
+
+            if (runningActionRoutine != null)
+            {
+                StopCoroutine(runningActionRoutine);
+                runningActionRoutine = null;
+            }
 
             CleanupPlayerAttackState();
             SetBusy(false);
@@ -79,7 +86,20 @@ namespace CardBattle.Core
                 return;
             }
 
-            StartCoroutine(PlayCardSequence(card, primaryTarget));
+            runningActionRoutine = StartCoroutine(PlayCardSequence(card, primaryTarget));
+        }
+
+        public void ResetRuntimeActionState()
+        {
+            if (runningActionRoutine != null)
+            {
+                StopCoroutine(runningActionRoutine);
+                runningActionRoutine = null;
+            }
+
+            CleanupPlayerAttackState();
+            SetBusy(false);
+            RefreshExternalUI();
         }
 
         public void TryEndTurn()
@@ -93,87 +113,106 @@ namespace CardBattle.Core
                 return;
             }
 
-            StartCoroutine(EndTurnSequence());
+            runningActionRoutine = StartCoroutine(EndTurnSequence());
         }
 
         private IEnumerator PlayCardSequence(CardInstance card, EnemyBattleUnit primaryTarget)
         {
-            if (!ValidateCardPlay(card))
-                yield break;
-
-            SetBusy(true);
-            RefreshExternalUI();
-            cardSfx?.PlayCardPlayed(card.Data.CardType);
-
-            int cost = card.Data.ApCost;
-            player.SpendApFromRunner(cost);
-
-            CardViewUI handViewForVfx =
-                handUIController != null ? handUIController.GetViewForCard(card) : null;
-            if (graveyardVfx != null)
-                graveyardVfx.PlaySingleCardToGraveyard(handViewForVfx);
-
-            deckController.PlayCardFromHand(card);
-
-            if (graveyardVfx == null)
-                pileCounterUI?.ForceSyncDisplayedToReal();
-
-            bool isAttack = card.Data.CardType == CardType.Attack;
-            pendingPrimaryTarget = primaryTarget;
-
-            if (isAttack)
+            try
             {
-                if (player?.View == null)
+                if (!ValidateCardPlay(card))
+                    yield break;
+
+                SetBusy(true);
+                RefreshExternalUI();
+                cardSfx?.PlayCardPlayed(card.Data.CardType);
+
+                int cost = card.Data.ApCost;
+                player.SpendApFromRunner(cost);
+
+                CardViewUI handViewForVfx =
+                    handUIController != null ? handUIController.GetViewForCard(card) : null;
+                if (graveyardVfx != null)
+                    graveyardVfx.PlaySingleCardToGraveyard(handViewForVfx);
+
+                deckController.PlayCardFromHand(card);
+
+                if (graveyardVfx == null)
+                    pileCounterUI?.ForceSyncDisplayedToReal();
+
+                bool isAttack = card.Data.CardType == CardType.Attack;
+                pendingPrimaryTarget = primaryTarget;
+
+                if (isAttack)
                 {
-                    Debug.LogWarning("BattleActionRunner: Player view is missing, falling back to immediate resolve.");
-                    ResolvePlayerCardImmediate(card, primaryTarget);
+                    if (player?.View == null)
+                    {
+                        Debug.LogWarning("BattleActionRunner: Player view is missing, falling back to immediate resolve.");
+                        ResolvePlayerCardImmediate(card, primaryTarget);
+                    }
+                    else
+                    {
+                        pendingPlayerCardContext = new CardPlayContext(player, card, enemyActionSystem.Enemies, primaryTarget);
+                        waitingForPlayerHit = true;
+                        waitingForPlayerFinish = true;
+                        playerAttackResolved = false;
+
+                        SubscribePlayerViewEvents();
+                        player.View.PlayAttack();
+
+                        yield return new WaitUntil(() => !waitingForPlayerFinish);
+
+                        CleanupPlayerAttackState();
+                    }
                 }
                 else
                 {
-                    pendingPlayerCardContext = new CardPlayContext(player, card, enemyActionSystem.Enemies, primaryTarget);
-                    waitingForPlayerHit = true;
-                    waitingForPlayerFinish = true;
-                    playerAttackResolved = false;
-
-                    SubscribePlayerViewEvents();
-                    player.View.PlayAttack();
-
-                    yield return new WaitUntil(() => !waitingForPlayerFinish);
-
-                    CleanupPlayerAttackState();
+                    ResolvePlayerCardImmediate(card, primaryTarget);
+                    yield return new WaitForSeconds(nonAttackResolvePause);
                 }
-            }
-            else
-            {
-                ResolvePlayerCardImmediate(card, primaryTarget);
-                yield return new WaitForSeconds(nonAttackResolvePause);
-            }
 
-            if (HasBattleEnded)
-            {
+                if (HasBattleEnded)
+                {
+                    RefreshExternalUI();
+                    SetBusy(false);
+                    RefreshExternalUI();
+                    yield break;
+                }
+
+                enemyActionSystem.HandlePlayerSuccessfullyPlayedCard();
+
+                if (enemyActionSystem.IsResolvingEnemyActions)
+                {
+                    yield return new WaitUntil(() => !enemyActionSystem.IsResolvingEnemyActions);
+                }
+                else
+                {
+                    yield return new WaitForSeconds(enemyResolveSafetyPause);
+                }
+
                 RefreshExternalUI();
                 SetBusy(false);
                 RefreshExternalUI();
-                yield break;
             }
-
-            enemyActionSystem.HandlePlayerSuccessfullyPlayedCard();
-
-            if (enemyActionSystem.IsResolvingEnemyActions)
+            finally
             {
-                yield return new WaitUntil(() => !enemyActionSystem.IsResolvingEnemyActions);
+                runningActionRoutine = null;
             }
-            else
-            {
-                yield return new WaitForSeconds(enemyResolveSafetyPause);
-            }
-
-            RefreshExternalUI();
-            SetBusy(false);
-            RefreshExternalUI();
         }
 
         private IEnumerator EndTurnSequence()
+        {
+            try
+            {
+                yield return EndTurnSequenceCore();
+            }
+            finally
+            {
+                runningActionRoutine = null;
+            }
+        }
+
+        private IEnumerator EndTurnSequenceCore()
         {
             SetBusy(true);
             RefreshExternalUI();
