@@ -24,6 +24,7 @@
     10. BattleRunBridge (BattleRunBridge.cs)
     11. RewardController (RewardController.cs)
     12. EncounterCompletionController (EncounterCompletionController.cs)
+    13. EncounterDataDebugTest
   2. Units
     1. Player (PlayerBattleUnit.cs)
     2. Enemy_01 (EnemyBattleUnit.cs)

@@ -2481,3 +2481,537 @@ namespace CardBattle.Core
     }
 }
 ```
+
+## FILE: EncounterCatalog.cs
+**Path:** `Assets/Scripts/Run/Encounters/Data/EncounterCatalog.cs`
+```csharp
+using System;
+using System.Collections.Generic;
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    [CreateAssetMenu(
+        fileName = "EncounterCatalog",
+        menuName = "Card Battle/Encounters/Encounter Catalog",
+        order = 31)]
+    public class EncounterCatalog : ScriptableObject
+    {
+        [SerializeField] private List<EncounterData> encounters = new List<EncounterData>();
+
+        public IReadOnlyList<EncounterData> Encounters => encounters;
+
+        public bool TryGetEncounter(string encounterId, out EncounterData encounter)
+        {
+            encounter = null;
+
+            if (string.IsNullOrWhiteSpace(encounterId) || encounters == null)
+                return false;
+
+            for (int i = 0; i < encounters.Count; i++)
+            {
+                EncounterData candidate = encounters[i];
+                if (candidate == null)
+                    continue;
+
+                if (string.Equals(candidate.EncounterId, encounterId, StringComparison.Ordinal))
+                {
+                    encounter = candidate;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        public int CountValidEncounters()
+        {
+            if (encounters == null)
+                return 0;
+
+            int count = 0;
+            for (int i = 0; i < encounters.Count; i++)
+            {
+                EncounterData encounter = encounters[i];
+                if (encounter != null && encounter.IsRuntimeValid(out _))
+                    count++;
+            }
+
+            return count;
+        }
+
+#if UNITY_EDITOR
+        private void OnValidate()
+        {
+            if (encounters == null || encounters.Count == 0)
+                return;
+
+            var seenIds = new HashSet<string>(StringComparer.Ordinal);
+
+            for (int i = 0; i < encounters.Count; i++)
+            {
+                EncounterData encounter = encounters[i];
+                if (encounter == null)
+                {
+                    Debug.LogWarning(
+                        $"[EncounterCatalog] Null EncounterData entry at index {i} in '{name}'.",
+                        this);
+                    continue;
+                }
+
+                string id = encounter.EncounterId;
+                if (string.IsNullOrWhiteSpace(id))
+                {
+                    Debug.LogWarning(
+                        $"[EncounterCatalog] Encounter at index {i} has a blank Encounter ID in '{name}'.",
+                        this);
+                }
+                else if (!seenIds.Add(id))
+                {
+                    Debug.LogWarning(
+                        $"[EncounterCatalog] Duplicate Encounter ID '{id}' in '{name}'.",
+                        this);
+                }
+
+                if (!encounter.IsRuntimeValid(out string error))
+                {
+                    Debug.LogWarning(
+                        $"[EncounterCatalog] Encounter '{encounter.name}' is invalid: {error}",
+                        this);
+                }
+            }
+        }
+#endif
+    }
+}
+```
+
+## FILE: EncounterData.cs
+**Path:** `Assets/Scripts/Run/Encounters/Data/EncounterData.cs`
+```csharp
+using System;
+using System.Collections.Generic;
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    [CreateAssetMenu(
+        fileName = "Encounter",
+        menuName = "Card Battle/Encounters/Encounter Data",
+        order = 30)]
+    public class EncounterData : ScriptableObject
+    {
+        [Header("Identity")]
+        [SerializeField] private string encounterId;
+        [SerializeField] private string displayName;
+        [SerializeField] private EncounterType encounterType = EncounterType.Normal;
+
+        [Header("Environment")]
+        [SerializeField] private string environmentId;
+        [SerializeField] private string environmentSceneName;
+
+        [Header("Enemies")]
+        [SerializeField] private List<EncounterEnemyEntry> enemies = new List<EncounterEnemyEntry>();
+
+        [Header("Reward")]
+        [SerializeField] private EncounterRewardConfig rewardConfig;
+
+        [Header("Randomization")]
+        [SerializeField] private int encounterSeedOffset;
+
+        public string EncounterId =>
+            string.IsNullOrWhiteSpace(encounterId)
+                ? name
+                : encounterId;
+
+        public string DisplayName =>
+            string.IsNullOrWhiteSpace(displayName)
+                ? name
+                : displayName;
+
+        public EncounterType EncounterType => encounterType;
+        public string EnvironmentId => environmentId;
+        public string EnvironmentSceneName => environmentSceneName;
+        public EncounterRewardConfig RewardConfig => rewardConfig;
+        public int EncounterSeedOffset => encounterSeedOffset;
+
+        public IReadOnlyList<EncounterEnemyEntry> Enemies => enemies;
+        public int EnemyCount => enemies != null ? enemies.Count : 0;
+
+        public bool TryGetEnemyEntry(string slotId, out EncounterEnemyEntry entry)
+        {
+            entry = null;
+
+            if (string.IsNullOrWhiteSpace(slotId) || enemies == null)
+                return false;
+
+            for (int i = 0; i < enemies.Count; i++)
+            {
+                EncounterEnemyEntry candidate = enemies[i];
+                if (candidate == null || !candidate.IsValid)
+                    continue;
+
+                if (string.Equals(candidate.SlotId, slotId, StringComparison.Ordinal))
+                {
+                    entry = candidate;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        public int GetValidEnemyCount()
+        {
+            if (enemies == null)
+                return 0;
+
+            int count = 0;
+            for (int i = 0; i < enemies.Count; i++)
+            {
+                EncounterEnemyEntry entry = enemies[i];
+                if (entry != null && entry.IsValid)
+                    count++;
+            }
+
+            return count;
+        }
+
+        public void GetValidEnemyEntries(List<EncounterEnemyEntry> output)
+        {
+            if (output == null)
+                return;
+
+            output.Clear();
+
+            if (enemies == null)
+                return;
+
+            for (int i = 0; i < enemies.Count; i++)
+            {
+                EncounterEnemyEntry entry = enemies[i];
+                if (entry != null && entry.IsValid)
+                    output.Add(entry);
+            }
+
+            output.Sort(CompareSpawnOrder);
+        }
+
+        public bool IsRuntimeValid(out string error)
+        {
+            error = string.Empty;
+
+            if (string.IsNullOrWhiteSpace(EncounterId))
+            {
+                error = "Encounter ID is blank.";
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(environmentId))
+            {
+                error = "Environment ID is blank.";
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(environmentSceneName))
+            {
+                error = "Environment Scene Name is blank.";
+                return false;
+            }
+
+            if (rewardConfig == null)
+            {
+                error = "Reward Config is missing.";
+                return false;
+            }
+
+            if (enemies == null || enemies.Count == 0)
+            {
+                error = "Encounter has no valid enemy entries.";
+                return false;
+            }
+
+            var seenSlotIds = new HashSet<string>(StringComparer.Ordinal);
+            int validCount = 0;
+
+            for (int i = 0; i < enemies.Count; i++)
+            {
+                EncounterEnemyEntry entry = enemies[i];
+                if (entry == null)
+                {
+                    error = $"Enemy entry at index {i} is null.";
+                    return false;
+                }
+
+                if (!entry.IsValid)
+                {
+                    if (string.IsNullOrWhiteSpace(entry.SlotId))
+                    {
+                        error = $"Enemy entry at index {i} has a blank slot ID.";
+                        return false;
+                    }
+
+                    error = $"Enemy entry at index {i} has no EnemyData.";
+                    return false;
+                }
+
+                if (!seenSlotIds.Add(entry.SlotId))
+                {
+                    error = $"Duplicate slot ID '{entry.SlotId}'.";
+                    return false;
+                }
+
+                validCount++;
+            }
+
+            if (validCount == 0)
+            {
+                error = "Encounter has no valid enemy entries.";
+                return false;
+            }
+
+            return true;
+        }
+
+        private static int CompareSpawnOrder(EncounterEnemyEntry a, EncounterEnemyEntry b)
+        {
+            if (ReferenceEquals(a, b))
+                return 0;
+
+            if (a == null)
+                return 1;
+
+            if (b == null)
+                return -1;
+
+            return a.SpawnOrder.CompareTo(b.SpawnOrder);
+        }
+
+#if UNITY_EDITOR
+        private void OnValidate()
+        {
+            if (string.IsNullOrWhiteSpace(encounterId))
+            {
+                Debug.LogWarning(
+                    $"[EncounterData] Encounter ID is blank in '{name}'.",
+                    this);
+            }
+
+            if (string.IsNullOrWhiteSpace(environmentId))
+            {
+                Debug.LogWarning(
+                    $"[EncounterData] Environment ID is blank in '{name}'.",
+                    this);
+            }
+
+            if (string.IsNullOrWhiteSpace(environmentSceneName))
+            {
+                Debug.LogWarning(
+                    $"[EncounterData] Environment Scene Name is blank in '{name}'.",
+                    this);
+            }
+
+            if (rewardConfig == null)
+            {
+                Debug.LogWarning(
+                    $"[EncounterData] Reward Config is missing in '{name}'.",
+                    this);
+            }
+
+            if (enemies == null || enemies.Count == 0)
+            {
+                Debug.LogWarning(
+                    $"[EncounterData] No enemy entries configured in '{name}'.",
+                    this);
+                return;
+            }
+
+            var seenSlotIds = new HashSet<string>(StringComparer.Ordinal);
+            var seenSpawnOrders = new HashSet<int>();
+
+            for (int i = 0; i < enemies.Count; i++)
+            {
+                EncounterEnemyEntry entry = enemies[i];
+                if (entry == null)
+                {
+                    Debug.LogWarning(
+                        $"[EncounterData] Null enemy entry at index {i} in '{name}'.",
+                        this);
+                    continue;
+                }
+
+                if (string.IsNullOrWhiteSpace(entry.SlotId))
+                {
+                    Debug.LogWarning(
+                        $"[EncounterData] Enemy entry at index {i} has a blank slot ID in '{name}'.",
+                        this);
+                }
+                else if (!seenSlotIds.Add(entry.SlotId))
+                {
+                    Debug.LogWarning(
+                        $"[EncounterData] Duplicate slot ID '{entry.SlotId}' in '{name}'.",
+                        this);
+                }
+
+                if (!seenSpawnOrders.Add(entry.SpawnOrder))
+                {
+                    Debug.LogWarning(
+                        $"[EncounterData] Duplicate spawn order {entry.SpawnOrder} in '{name}'.",
+                        this);
+                }
+
+                if (entry.EnemyData == null)
+                {
+                    Debug.LogWarning(
+                        $"[EncounterData] Enemy entry at index {i} has no EnemyData in '{name}'.",
+                        this);
+                }
+            }
+        }
+#endif
+    }
+}
+```
+
+## FILE: EncounterEnemyEntry.cs
+**Path:** `Assets/Scripts/Run/Encounters/Data/EncounterEnemyEntry.cs`
+```csharp
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    [System.Serializable]
+    public class EncounterEnemyEntry
+    {
+        [SerializeField] private string slotId;
+        [SerializeField] private EnemyData enemyData;
+        [SerializeField] private int spawnOrder;
+
+        public string SlotId => slotId;
+        public EnemyData EnemyData => enemyData;
+        public int SpawnOrder => spawnOrder;
+
+        public bool IsValid =>
+            !string.IsNullOrWhiteSpace(slotId) &&
+            enemyData != null;
+
+        public string EnemyId =>
+            enemyData != null ? enemyData.EnemyId : string.Empty;
+    }
+}
+```
+
+## FILE: EncounterType.cs
+**Path:** `Assets/Scripts/Run/Encounters/Data/EncounterType.cs`
+```csharp
+namespace CardBattle.Core
+{
+    public enum EncounterType
+    {
+        Normal,
+        Elite,
+        Boss
+    }
+}
+```
+
+## FILE: EncounterDataDebugTest.cs
+**Path:** `Assets/Scripts/Run/Encounters/Debug/EncounterDataDebugTest.cs`
+```csharp
+using System.Collections.Generic;
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    public class EncounterDataDebugTest : MonoBehaviour
+    {
+        [SerializeField] private EncounterData encounterData;
+        [SerializeField] private EncounterCatalog encounterCatalog;
+        [SerializeField] private string lookupEncounterId;
+
+        private readonly List<EncounterEnemyEntry> sortedEnemyScratch = new List<EncounterEnemyEntry>();
+
+        [ContextMenu("Debug Print Encounter")]
+        private void DebugPrintEncounter()
+        {
+            if (encounterData == null)
+            {
+                Debug.LogError("[EncounterDataDebugTest] EncounterData reference is missing.");
+                return;
+            }
+
+            bool isValid = encounterData.IsRuntimeValid(out string error);
+
+            Debug.Log(
+                $"[EncounterDataDebugTest] --- Encounter ---\n" +
+                $"EncounterId={encounterData.EncounterId}\n" +
+                $"DisplayName={encounterData.DisplayName}\n" +
+                $"Type={encounterData.EncounterType}\n" +
+                $"EnvironmentId={encounterData.EnvironmentId}\n" +
+                $"EnvironmentSceneName={encounterData.EnvironmentSceneName}\n" +
+                $"RewardConfig={(encounterData.RewardConfig != null ? encounterData.RewardConfig.name : "null")}\n" +
+                $"EncounterSeedOffset={encounterData.EncounterSeedOffset}\n" +
+                $"EnemyCount={encounterData.EnemyCount}\n" +
+                $"ValidEnemyCount={encounterData.GetValidEnemyCount()}\n" +
+                $"IsRuntimeValid={isValid}\n" +
+                $"ValidationError={(isValid ? string.Empty : error)}");
+
+            sortedEnemyScratch.Clear();
+            encounterData.GetValidEnemyEntries(sortedEnemyScratch);
+
+            for (int i = 0; i < sortedEnemyScratch.Count; i++)
+            {
+                EncounterEnemyEntry entry = sortedEnemyScratch[i];
+                if (entry == null)
+                    continue;
+
+                Debug.Log(
+                    $"[EncounterDataDebugTest] Enemy[{i}] | " +
+                    $"SlotId={entry.SlotId} | " +
+                    $"EnemyId={entry.EnemyId} | " +
+                    $"DisplayName={(entry.EnemyData != null ? entry.EnemyData.DisplayName : "n/a")} | " +
+                    $"SpawnOrder={entry.SpawnOrder}");
+            }
+        }
+
+        [ContextMenu("Debug Validate Encounter")]
+        private void DebugValidateEncounter()
+        {
+            if (encounterData == null)
+            {
+                Debug.LogError("[EncounterDataDebugTest] EncounterData reference is missing.");
+                return;
+            }
+
+            bool isValid = encounterData.IsRuntimeValid(out string error);
+            Debug.Log(
+                $"[EncounterDataDebugTest] Validate | " +
+                $"IsRuntimeValid={isValid} | " +
+                $"Error={(isValid ? "none" : error)}");
+        }
+
+        [ContextMenu("Debug Catalog Lookup")]
+        private void DebugCatalogLookup()
+        {
+            if (encounterCatalog == null)
+            {
+                Debug.LogError("[EncounterDataDebugTest] EncounterCatalog reference is missing.");
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(lookupEncounterId))
+            {
+                Debug.LogWarning("[EncounterDataDebugTest] lookupEncounterId is blank.");
+                return;
+            }
+
+            bool found = encounterCatalog.TryGetEncounter(lookupEncounterId, out EncounterData foundEncounter);
+            Debug.Log(
+                $"[EncounterDataDebugTest] Catalog Lookup | " +
+                $"Id='{lookupEncounterId}' | Found={found} | " +
+                $"Asset={(foundEncounter != null ? foundEncounter.name : "null")} | " +
+                $"ValidEncounters={encounterCatalog.CountValidEncounters()}");
+        }
+    }
+}
+```
