@@ -26,6 +26,13 @@ namespace CardBattle.Core
         [SerializeField] private DeckController deckController;
         [SerializeField] private EnemyActionSystem enemyActionSystem;
 
+        [Header("Encounter Startup")]
+        [SerializeField] private RuntimeEncounterContext runtimeEncounterContext;
+        [SerializeField] private EncounterEnemySceneBinder encounterEnemySceneBinder;
+        [SerializeField] private bool prepareRuntimeEncounterOnStartBattle = true;
+        [SerializeField] private bool selectDefaultEncounterIfNone = true;
+        [SerializeField] private bool requireRuntimeEncounterForBattle = false;
+
         [Header("Optional")]
         [SerializeField] private bool autoStartOnPlay = true;
         [SerializeField] private bool verboseLogs = true;
@@ -33,6 +40,11 @@ namespace CardBattle.Core
 
         [Header("Run Integration")]
         [SerializeField] private BattleRunBridge battleRunBridge;
+
+        public bool LastEncounterPreparationAttempted { get; private set; }
+        public bool LastEncounterPreparationSucceeded { get; private set; }
+        public string LastEncounterPreparationError { get; private set; } = string.Empty;
+        public int EncounterPreparationSuccessCount { get; private set; }
 
         private bool _initialized;
 
@@ -64,6 +76,13 @@ namespace CardBattle.Core
             if (!ValidateReferences())
                 return;
 
+            if (!TryPrepareRuntimeEncounterForBattle())
+            {
+                Debug.LogError(
+                    "BattleTestBootstrap: Runtime encounter preparation failed. Battle start aborted.");
+                return;
+            }
+
             if (battleRunBridge != null && battleRunBridge.HasActiveRun)
             {
                 if (!battleRunBridge.TryInitializeBattleFromActiveRun())
@@ -88,6 +107,47 @@ namespace CardBattle.Core
                 Debug.Log("=== Test Battle Started ===");
                 PrintBattleState();
             }
+        }
+
+        [ContextMenu("Debug Prepare Runtime Encounter")]
+        private void DebugPrepareRuntimeEncounter()
+        {
+            bool prepared = TryPrepareRuntimeEncounterForBattle();
+            Debug.Log($"[BattleTestBootstrap] TryPrepareRuntimeEncounterForBattle => {prepared}");
+            DebugPrintBattleStartFlowState();
+        }
+
+        [ContextMenu("Debug Print Battle Start Flow State")]
+        public void DebugPrintBattleStartFlowState()
+        {
+            string currentEncounterId = runtimeEncounterContext != null
+                ? runtimeEncounterContext.CurrentEncounterId
+                : string.Empty;
+
+            bool encounterValid = runtimeEncounterContext != null &&
+                                  runtimeEncounterContext.ValidateCurrentEncounter();
+
+            bool binderApplied = encounterEnemySceneBinder != null &&
+                                 encounterEnemySceneBinder.HasAppliedEncounterEnemies;
+
+            int enemyCount = enemyActionSystem != null
+                ? enemyActionSystem.Enemies.Count
+                : -1;
+
+            Debug.Log(
+                $"[BattleTestBootstrap] --- Battle Start Flow ---\n" +
+                $"Initialized={_initialized}\n" +
+                $"PrepareRuntimeEncounterOnStartBattle={prepareRuntimeEncounterOnStartBattle}\n" +
+                $"SelectDefaultEncounterIfNone={selectDefaultEncounterIfNone}\n" +
+                $"RequireRuntimeEncounterForBattle={requireRuntimeEncounterForBattle}\n" +
+                $"LastEncounterPreparationAttempted={LastEncounterPreparationAttempted}\n" +
+                $"LastEncounterPreparationSucceeded={LastEncounterPreparationSucceeded}\n" +
+                $"LastEncounterPreparationError={LastEncounterPreparationError}\n" +
+                $"EncounterPreparationSuccessCount={EncounterPreparationSuccessCount}\n" +
+                $"CurrentEncounterId={currentEncounterId}\n" +
+                $"EncounterValid={encounterValid}\n" +
+                $"BinderApplied={binderApplied}\n" +
+                $"EnemyActionSystemCount={enemyCount}");
         }
 
         public void TryPlayCardAtHandIndex(int handIndex)
@@ -195,6 +255,135 @@ namespace CardBattle.Core
             Debug.Log(sb.ToString());
         }
 
+        private bool TryPrepareRuntimeEncounterForBattle()
+        {
+            LastEncounterPreparationAttempted = false;
+            LastEncounterPreparationSucceeded = false;
+            LastEncounterPreparationError = string.Empty;
+
+            if (!prepareRuntimeEncounterOnStartBattle)
+            {
+                LastEncounterPreparationSucceeded = true;
+                return true;
+            }
+
+            LastEncounterPreparationAttempted = true;
+
+            if (runtimeEncounterContext == null)
+            {
+                if (requireRuntimeEncounterForBattle)
+                {
+                    return FailEncounterPreparation("RuntimeEncounterContext reference is missing.");
+                }
+
+                return WarnAndSkipEncounterPreparation("no RuntimeEncounterContext assigned.");
+            }
+
+            if (!runtimeEncounterContext.HasCurrentEncounter)
+            {
+                if (selectDefaultEncounterIfNone)
+                    runtimeEncounterContext.TrySelectDefaultEncounter();
+
+                if (!runtimeEncounterContext.HasCurrentEncounter)
+                {
+                    if (requireRuntimeEncounterForBattle)
+                    {
+                        return FailEncounterPreparation(
+                            "No current encounter is selected and default selection failed.");
+                    }
+
+                    return WarnAndSkipEncounterPreparation(
+                        "no current encounter is selected and default selection failed.");
+                }
+            }
+
+            if (!runtimeEncounterContext.ValidateCurrentEncounter())
+            {
+                string validationError = runtimeEncounterContext.LastValidationError;
+                if (requireRuntimeEncounterForBattle)
+                {
+                    return FailEncounterPreparation(
+                        string.IsNullOrEmpty(validationError)
+                            ? "Current encounter is invalid."
+                            : validationError);
+                }
+
+                return WarnAndSkipEncounterPreparation(
+                    string.IsNullOrEmpty(validationError)
+                        ? "current encounter is invalid."
+                        : validationError);
+            }
+
+            if (encounterEnemySceneBinder == null)
+            {
+                if (requireRuntimeEncounterForBattle)
+                {
+                    return FailEncounterPreparation("EncounterEnemySceneBinder reference is missing.");
+                }
+
+                return WarnAndSkipEncounterPreparation("no EncounterEnemySceneBinder assigned.");
+            }
+
+            if (!encounterEnemySceneBinder.TryApplyCurrentEncounterEnemies())
+            {
+                string binderError = encounterEnemySceneBinder.LastApplyError;
+                if (requireRuntimeEncounterForBattle)
+                {
+                    return FailEncounterPreparation(
+                        string.IsNullOrEmpty(binderError)
+                            ? "EncounterEnemySceneBinder rejected current encounter."
+                            : binderError);
+                }
+
+                return WarnAndSkipEncounterPreparation(
+                    string.IsNullOrEmpty(binderError)
+                        ? "EncounterEnemySceneBinder rejected current encounter."
+                        : binderError);
+            }
+
+            LastEncounterPreparationSucceeded = true;
+            LastEncounterPreparationError = string.Empty;
+            EncounterPreparationSuccessCount++;
+
+            if (verboseLogs)
+            {
+                Debug.Log(
+                    $"[BattleTestBootstrap] Runtime encounter prepared. " +
+                    $"Encounter={runtimeEncounterContext.CurrentEncounterId} | " +
+                    $"BoundEnemies={encounterEnemySceneBinder.LastBoundEnemyCount}");
+            }
+
+            return true;
+        }
+
+        private bool FailEncounterPreparation(string error)
+        {
+            LastEncounterPreparationSucceeded = false;
+            LastEncounterPreparationError = error;
+
+            if (verboseLogs)
+            {
+                Debug.LogError(
+                    $"[BattleTestBootstrap] Runtime encounter preparation failed: {error}");
+            }
+
+            return false;
+        }
+
+        private bool WarnAndSkipEncounterPreparation(string message)
+        {
+            LastEncounterPreparationSucceeded = true;
+            LastEncounterPreparationError = string.Empty;
+
+            if (verboseLogs)
+            {
+                Debug.LogWarning(
+                    $"[BattleTestBootstrap] Runtime encounter preparation skipped: {message}");
+            }
+
+            return true;
+        }
+
         private EnemyBattleUnit GetDefaultAliveEnemy()
         {
             var enemies = enemyActionSystem.Enemies;
@@ -270,6 +459,48 @@ namespace CardBattle.Core
             }
 
             return valid;
+        }
+    }
+}
+```
+
+## FILE: BattleStartFlowDebugTest.cs
+**Path:** `Assets/Scripts/CardBattle/Battle/Bootstrap/Debug/BattleStartFlowDebugTest.cs`
+```csharp
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    public class BattleStartFlowDebugTest : MonoBehaviour
+    {
+        [SerializeField] private BattleTestBootstrap battleTestBootstrap;
+
+        [ContextMenu("Debug Start Battle")]
+        private void DebugStartBattle()
+        {
+            if (!TryGetBootstrap())
+                return;
+
+            battleTestBootstrap.StartTestBattle();
+            DebugPrint();
+        }
+
+        [ContextMenu("Debug Print Battle Start Flow")]
+        private void DebugPrint()
+        {
+            if (!TryGetBootstrap())
+                return;
+
+            battleTestBootstrap.DebugPrintBattleStartFlowState();
+        }
+
+        private bool TryGetBootstrap()
+        {
+            if (battleTestBootstrap != null)
+                return true;
+
+            Debug.LogError("[BattleStartFlowDebugTest] BattleTestBootstrap reference is missing.");
+            return false;
         }
     }
 }

@@ -52,24 +52,23 @@ namespace CardBattle.Core
             if (!selectDefaultOnStart)
                 return;
 
-            if (defaultEncounter != null)
-            {
-                TrySelectEncounter(defaultEncounter);
-                return;
-            }
-
-            if (!string.IsNullOrWhiteSpace(defaultEncounterId))
-            {
-                TrySelectEncounterById(defaultEncounterId);
-                return;
-            }
-
-            if (verboseLogs)
+            if (!TrySelectDefaultEncounter() && verboseLogs)
             {
                 Debug.LogWarning(
                     "[RuntimeEncounterContext] Select Default On Start is enabled, " +
                     "but no default encounter or default encounter ID is assigned.");
             }
+        }
+
+        public bool TrySelectDefaultEncounter()
+        {
+            if (defaultEncounter != null)
+                return TrySelectEncounter(defaultEncounter);
+
+            if (!string.IsNullOrWhiteSpace(defaultEncounterId))
+                return TrySelectEncounterById(defaultEncounterId);
+
+            return false;
         }
 
         public bool TrySelectEncounter(EncounterData encounter)
