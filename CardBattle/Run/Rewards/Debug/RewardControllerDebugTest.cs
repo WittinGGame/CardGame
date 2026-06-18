@@ -151,6 +151,39 @@ namespace CardBattle.Core
             DebugPrintReward();
         }
 
+        [ContextMenu("Debug Resolve Reward Config")]
+        private void DebugResolveRewardConfig()
+        {
+            if (!TryGetController())
+                return;
+
+            bool resolved = rewardController.TryGetCurrentResolvedRewardConfig(
+                out EncounterRewardConfig config);
+            Debug.Log(
+                $"[RewardControllerDebugTest] TryGetCurrentResolvedRewardConfig => {resolved} | " +
+                $"Config={(config != null ? config.name : "null")}");
+            DebugPrintRewardConfigSource();
+        }
+
+        [ContextMenu("Debug Print Reward Config Source")]
+        private void DebugPrintRewardConfigSource()
+        {
+            if (!TryGetController())
+                return;
+
+            RewardSession session = rewardController.CurrentSession;
+
+            Debug.Log(
+                $"[RewardControllerDebugTest] --- Reward Config Source ---\n" +
+                $"LastResolvedRewardConfig=" +
+                $"{(rewardController.LastResolvedRewardConfig != null ? rewardController.LastResolvedRewardConfig.name : "null")}\n" +
+                $"LastResolvedRewardSource={rewardController.LastResolvedRewardSource}\n" +
+                $"LastUsedRuntimeEncounterRewardConfig={rewardController.LastUsedRuntimeEncounterRewardConfig}\n" +
+                $"LastRewardConfigResolveError={rewardController.LastRewardConfigResolveError}\n" +
+                $"HasCurrentSession={session != null}\n" +
+                $"SessionComplete={session != null && session.IsComplete}");
+        }
+
         private bool TryGetController()
         {
             if (rewardController != null)

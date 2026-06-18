@@ -1056,6 +1056,10 @@ namespace CardBattle.Core
     /// </summary>
     public class RewardController : MonoBehaviour
     {
+        [Header("Encounter Source")]
+        [SerializeField] private RuntimeEncounterContext runtimeEncounterContext;
+        [SerializeField] private bool preferRuntimeEncounterRewardConfig = true;
+
         [Header("Reward Source")]
         [SerializeField] private EncounterRewardConfig rewardConfig;
 
@@ -1079,6 +1083,11 @@ namespace CardBattle.Core
         public int SessionCreateCount { get; private set; }
         public int GoldGrantCount { get; private set; }
         public int CardGrantCount { get; private set; }
+
+        public EncounterRewardConfig LastResolvedRewardConfig { get; private set; }
+        public string LastResolvedRewardSource { get; private set; } = string.Empty;
+        public bool LastUsedRuntimeEncounterRewardConfig { get; private set; }
+        public string LastRewardConfigResolveError { get; private set; } = string.Empty;
 
         public event Action<RewardSession> OnRewardSessionStarted;
         public event Action<int> OnRewardGoldGranted;
@@ -1144,6 +1153,11 @@ namespace CardBattle.Core
             TryBeginReward();
         }
 
+        public bool TryGetCurrentResolvedRewardConfig(out EncounterRewardConfig resolvedConfig)
+        {
+            return TryResolveRewardConfig(out resolvedConfig);
+        }
+
         public bool TryBeginReward()
         {
             if (CurrentSession != null && !CurrentSession.IsComplete)
@@ -1168,15 +1182,15 @@ namespace CardBattle.Core
                 return false;
             }
 
-            if (rewardConfig == null)
+            if (!TryResolveRewardConfig(out EncounterRewardConfig resolvedRewardConfig))
             {
                 Debug.LogError(
-                    "[RewardController] EncounterRewardConfig reference is missing. Reward session not created.");
+                    $"[RewardController] Reward config resolution failed. {LastRewardConfigResolveError}");
                 return false;
             }
 
-            int goldAmount = rewardConfig.GoldReward;
-            int requestedCardChoices = rewardConfig.CardChoiceCount;
+            int goldAmount = resolvedRewardConfig.GoldReward;
+            int requestedCardChoices = resolvedRewardConfig.CardChoiceCount;
 
             if (goldAmount <= 0 && requestedCardChoices <= 0)
             {
@@ -1185,7 +1199,7 @@ namespace CardBattle.Core
                 return false;
             }
 
-            if (requestedCardChoices > 0 && rewardConfig.CardRewardPool == null)
+            if (requestedCardChoices > 0 && resolvedRewardConfig.CardRewardPool == null)
             {
                 Debug.LogError(
                     "[RewardController] Card choices are requested but CardRewardPool is missing. " +
@@ -1228,7 +1242,7 @@ namespace CardBattle.Core
             if (requestedCardChoices > 0)
             {
                 System.Random random = CreateRewardRandom(run);
-                int generatedCount = rewardConfig.CardRewardPool.BuildUniqueChoices(
+                int generatedCount = resolvedRewardConfig.CardRewardPool.BuildUniqueChoices(
                     requestedCardChoices,
                     random,
                     cardChoices);
@@ -1260,6 +1274,7 @@ namespace CardBattle.Core
             {
                 Debug.Log(
                     $"[RewardController] Reward session started. " +
+                    $"Source={LastResolvedRewardSource} | " +
                     $"Gold={session.GoldAmount} | Choices={session.ChoiceCount} | " +
                     $"SessionCreateCount={SessionCreateCount}");
             }
@@ -1270,6 +1285,75 @@ namespace CardBattle.Core
         public bool TryGrantPendingGold()
         {
             return TryGrantGoldForCurrentSession();
+        }
+
+        private bool TryResolveRewardConfig(out EncounterRewardConfig resolvedConfig)
+        {
+            resolvedConfig = null;
+            LastResolvedRewardConfig = null;
+            LastResolvedRewardSource = string.Empty;
+            LastUsedRuntimeEncounterRewardConfig = false;
+            LastRewardConfigResolveError = string.Empty;
+
+            if (preferRuntimeEncounterRewardConfig &&
+                runtimeEncounterContext != null &&
+                runtimeEncounterContext.HasCurrentEncounter &&
+                runtimeEncounterContext.IsCurrentEncounterValid)
+            {
+                EncounterRewardConfig encounterConfig = runtimeEncounterContext.CurrentRewardConfig;
+                if (encounterConfig == null)
+                {
+                    LastRewardConfigResolveError = "Current encounter has no RewardConfig.";
+                    if (verboseLogs)
+                    {
+                        Debug.LogWarning(
+                            $"[RewardController] Reward config resolution failed: {LastRewardConfigResolveError}");
+                    }
+
+                    return false;
+                }
+
+                resolvedConfig = encounterConfig;
+                LastResolvedRewardConfig = encounterConfig;
+                LastResolvedRewardSource =
+                    $"RuntimeEncounter: {runtimeEncounterContext.CurrentEncounterId}";
+                LastUsedRuntimeEncounterRewardConfig = true;
+
+                if (verboseLogs)
+                {
+                    Debug.Log(
+                        $"[RewardController] Using reward config from RuntimeEncounter: " +
+                        $"{runtimeEncounterContext.CurrentEncounterId} | Config={encounterConfig.name}");
+                }
+
+                return true;
+            }
+
+            if (rewardConfig != null)
+            {
+                resolvedConfig = rewardConfig;
+                LastResolvedRewardConfig = rewardConfig;
+                LastResolvedRewardSource = "Fallback Inspector";
+                LastUsedRuntimeEncounterRewardConfig = false;
+
+                if (verboseLogs)
+                {
+                    Debug.Log(
+                        $"[RewardController] Using fallback Inspector reward config: {rewardConfig.name}");
+                }
+
+                return true;
+            }
+
+            LastRewardConfigResolveError =
+                "No reward config available from runtime encounter or fallback.";
+            if (verboseLogs)
+            {
+                Debug.LogWarning(
+                    $"[RewardController] Reward config resolution failed: {LastRewardConfigResolveError}");
+            }
+
+            return false;
         }
 
         private bool TryGrantGoldForCurrentSession()
@@ -1407,6 +1491,10 @@ namespace CardBattle.Core
             CurrentSession = null;
             rewardCreatedForCurrentEncounter = false;
             completionEventRaised = false;
+            LastResolvedRewardConfig = null;
+            LastResolvedRewardSource = string.Empty;
+            LastUsedRuntimeEncounterRewardConfig = false;
+            LastRewardConfigResolveError = string.Empty;
 
             if (verboseLogs)
                 Debug.Log("[RewardController] Reward state reset.");
@@ -1430,13 +1518,20 @@ namespace CardBattle.Core
                 Debug.Log("[RewardController] Reward session completed.");
         }
 
-        // EncounterData will later supply encounter/node-specific seed input.
         private System.Random CreateRewardRandom(RunState run)
         {
             unchecked
             {
                 int seed = run.runSeed;
                 seed = seed * 31 + GetStableOrdinalHash(run.runId);
+
+                if (runtimeEncounterContext != null &&
+                    runtimeEncounterContext.HasCurrentEncounter)
+                {
+                    seed = seed * 31 +
+                           GetStableOrdinalHash(runtimeEncounterContext.CurrentEncounterId);
+                }
+
                 seed = seed * 31 + rewardSeedOffset;
                 seed = seed * 31 + SessionCreateCount;
                 return new System.Random(seed);
@@ -2373,6 +2468,207 @@ namespace CardBattle.Core
                 return;
 
             Debug.LogWarning($"[EncounterCompletion] Cannot complete: {reason}");
+        }
+    }
+}
+```
+
+## FILE: RewardControllerDebugTest.cs
+**Path:** `Assets/Scripts/Run/Rewards/Debug/RewardControllerDebugTest.cs`
+```csharp
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    public class RewardControllerDebugTest : MonoBehaviour
+    {
+        [SerializeField] private RewardController rewardController;
+
+        private int completionEventCount;
+
+        private void OnEnable()
+        {
+            if (rewardController == null)
+                return;
+
+            rewardController.OnRewardSessionCompleted += HandleRewardSessionCompleted;
+        }
+
+        private void OnDisable()
+        {
+            if (rewardController == null)
+                return;
+
+            rewardController.OnRewardSessionCompleted -= HandleRewardSessionCompleted;
+        }
+
+        private void HandleRewardSessionCompleted(RewardSession session)
+        {
+            completionEventCount++;
+            Debug.Log(
+                $"[RewardControllerDebugTest] OnRewardSessionCompleted fired " +
+                $"(count={completionEventCount}) | Complete={session.IsComplete}");
+        }
+
+        [ContextMenu("Debug Begin Reward")]
+        private void DebugBeginReward()
+        {
+            if (!TryGetController())
+                return;
+
+            bool started = rewardController.TryBeginReward();
+            Debug.Log($"[RewardControllerDebugTest] TryBeginReward => {started}");
+            DebugPrintReward();
+        }
+
+        [ContextMenu("Debug Choose Card 0")]
+        private void DebugChooseCard0()
+        {
+            DebugChooseCard(0);
+        }
+
+        [ContextMenu("Debug Choose Card 1")]
+        private void DebugChooseCard1()
+        {
+            DebugChooseCard(1);
+        }
+
+        [ContextMenu("Debug Choose Card 2")]
+        private void DebugChooseCard2()
+        {
+            DebugChooseCard(2);
+        }
+
+        private void DebugChooseCard(int index)
+        {
+            if (!TryGetController())
+                return;
+
+            bool chosen = rewardController.TryChooseCard(index);
+            Debug.Log($"[RewardControllerDebugTest] TryChooseCard({index}) => {chosen}");
+            DebugPrintReward();
+        }
+
+        [ContextMenu("Debug Skip Card")]
+        private void DebugSkipCard()
+        {
+            if (!TryGetController())
+                return;
+
+            bool skipped = rewardController.TrySkipCard();
+            Debug.Log($"[RewardControllerDebugTest] TrySkipCard => {skipped}");
+            DebugPrintReward();
+        }
+
+        [ContextMenu("Debug Print Reward")]
+        private void DebugPrintReward()
+        {
+            if (!TryGetController())
+                return;
+
+            RewardSession session = rewardController.CurrentSession;
+            RunManager runManager = RunManager.Instance;
+
+            Debug.Log(
+                $"[RewardControllerDebugTest] --- Reward State ---\n" +
+                $"HasActiveReward={rewardController.HasActiveReward}\n" +
+                $"IsRewardComplete={rewardController.IsRewardComplete}\n" +
+                $"SessionCreateCount={rewardController.SessionCreateCount}\n" +
+                $"GoldGrantCount={rewardController.GoldGrantCount}\n" +
+                $"CardGrantCount={rewardController.CardGrantCount}\n" +
+                $"CompletionEvents={completionEventCount}\n" +
+                $"RunGold={(runManager != null && runManager.HasActiveRun ? runManager.CurrentRun.gold : -1)}\n" +
+                $"RunDeckCount={(runManager != null && runManager.HasActiveRun ? runManager.CurrentRun.currentDeck.Count : -1)}");
+
+            if (session == null)
+            {
+                Debug.Log("[RewardControllerDebugTest] CurrentSession is null.");
+                return;
+            }
+
+            Debug.Log(
+                $"[RewardControllerDebugTest] Session | " +
+                $"GoldAmount={session.GoldAmount} | GoldGranted={session.GoldGranted} | " +
+                $"CardChoiceResolved={session.CardChoiceResolved} | WasCardSkipped={session.WasCardSkipped} | " +
+                $"IsComplete={session.IsComplete} | ChoiceCount={session.ChoiceCount}");
+
+            for (int i = 0; i < session.ChoiceCount; i++)
+            {
+                CardData card = session.CardChoices[i];
+                if (card == null)
+                {
+                    Debug.Log($"[RewardControllerDebugTest] Choice {i}: null");
+                    continue;
+                }
+
+                Debug.Log(
+                    $"[RewardControllerDebugTest] Choice {i}: " +
+                    $"CardId={card.CardId} | DisplayName={card.DisplayName}");
+            }
+
+            if (session.SelectedCard != null)
+            {
+                Debug.Log(
+                    $"[RewardControllerDebugTest] Selected: " +
+                    $"CardId={session.SelectedCard.CardId} | DisplayName={session.SelectedCard.DisplayName}");
+            }
+            else
+            {
+                Debug.Log("[RewardControllerDebugTest] Selected: none");
+            }
+        }
+
+        [ContextMenu("Debug Reset Reward State")]
+        private void DebugResetRewardState()
+        {
+            if (!TryGetController())
+                return;
+
+            rewardController.ResetRewardState();
+            Debug.Log("[RewardControllerDebugTest] ResetRewardState called.");
+            DebugPrintReward();
+        }
+
+        [ContextMenu("Debug Resolve Reward Config")]
+        private void DebugResolveRewardConfig()
+        {
+            if (!TryGetController())
+                return;
+
+            bool resolved = rewardController.TryGetCurrentResolvedRewardConfig(
+                out EncounterRewardConfig config);
+            Debug.Log(
+                $"[RewardControllerDebugTest] TryGetCurrentResolvedRewardConfig => {resolved} | " +
+                $"Config={(config != null ? config.name : "null")}");
+            DebugPrintRewardConfigSource();
+        }
+
+        [ContextMenu("Debug Print Reward Config Source")]
+        private void DebugPrintRewardConfigSource()
+        {
+            if (!TryGetController())
+                return;
+
+            RewardSession session = rewardController.CurrentSession;
+
+            Debug.Log(
+                $"[RewardControllerDebugTest] --- Reward Config Source ---\n" +
+                $"LastResolvedRewardConfig=" +
+                $"{(rewardController.LastResolvedRewardConfig != null ? rewardController.LastResolvedRewardConfig.name : "null")}\n" +
+                $"LastResolvedRewardSource={rewardController.LastResolvedRewardSource}\n" +
+                $"LastUsedRuntimeEncounterRewardConfig={rewardController.LastUsedRuntimeEncounterRewardConfig}\n" +
+                $"LastRewardConfigResolveError={rewardController.LastRewardConfigResolveError}\n" +
+                $"HasCurrentSession={session != null}\n" +
+                $"SessionComplete={session != null && session.IsComplete}");
+        }
+
+        private bool TryGetController()
+        {
+            if (rewardController != null)
+                return true;
+
+            Debug.LogError("[RewardControllerDebugTest] RewardController reference is missing.");
+            return false;
         }
     }
 }
