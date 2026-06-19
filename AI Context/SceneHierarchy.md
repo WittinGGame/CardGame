@@ -28,6 +28,7 @@
     14. RuntimeEncounterContext (RuntimeEncounterContext.cs)
     15. EncounterEnemySceneBinder (EncounterEnemySceneBinder.cs)
     16. EncounterFlowResetController (EncounterFlowResetController.cs)
+    17. MapRuntimeController (MapRuntimeController.cs)
   2. Units
     1. Player (PlayerBattleUnit.cs)
     2. Enemy_01 (EnemyBattleUnit.cs)

@@ -4498,3 +4498,1109 @@ namespace CardBattle.Core
     }
 }
 ```
+
+## FILE: MapActData.cs
+**Path:** `Assets/Scripts/Run/Map/Data/MapActData.cs`
+```csharp
+using System;
+using System.Collections.Generic;
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    [CreateAssetMenu(
+        fileName = "MapAct",
+        menuName = "Card Battle/Map/Map Act Data",
+        order = 40)]
+    public class MapActData : ScriptableObject
+    {
+        [Header("Identity")]
+        [SerializeField] private string actId;
+        [SerializeField] private string displayName;
+        [SerializeField] private string startNodeId;
+
+        [Header("Nodes")]
+        [SerializeField] private List<MapNodeData> nodes = new List<MapNodeData>();
+
+        public string ActId => actId;
+        public string DisplayName => displayName;
+        public string StartNodeId => startNodeId;
+        public IReadOnlyList<MapNodeData> Nodes => nodes;
+
+        public bool TryGetNode(string nodeId, out MapNodeData node)
+        {
+            node = null;
+
+            if (string.IsNullOrWhiteSpace(nodeId) || nodes == null)
+                return false;
+
+            for (int i = 0; i < nodes.Count; i++)
+            {
+                MapNodeData candidate = nodes[i];
+                if (candidate == null)
+                    continue;
+
+                if (string.Equals(candidate.NodeId, nodeId, StringComparison.Ordinal))
+                {
+                    node = candidate;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        public bool ContainsNode(string nodeId)
+        {
+            return TryGetNode(nodeId, out _);
+        }
+
+        public bool IsRuntimeValid(out string error)
+        {
+            error = string.Empty;
+
+            if (string.IsNullOrWhiteSpace(actId))
+            {
+                error = "Act ID is blank.";
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(startNodeId))
+            {
+                error = "Start Node ID is blank.";
+                return false;
+            }
+
+            if (nodes == null || nodes.Count == 0)
+            {
+                error = "Nodes list is null or empty.";
+                return false;
+            }
+
+            var seenNodeIds = new HashSet<string>(StringComparer.Ordinal);
+
+            for (int i = 0; i < nodes.Count; i++)
+            {
+                MapNodeData node = nodes[i];
+                if (node == null)
+                {
+                    error = $"Node at index {i} is null.";
+                    return false;
+                }
+
+                if (!node.HasValidNodeId)
+                {
+                    error = $"Node at index {i} has a blank nodeId.";
+                    return false;
+                }
+
+                if (!seenNodeIds.Add(node.NodeId))
+                {
+                    error = $"Duplicate node ID '{node.NodeId}'.";
+                    return false;
+                }
+
+                if (!node.IsRuntimeValid(out string nodeError))
+                {
+                    error = nodeError;
+                    return false;
+                }
+            }
+
+            if (!ContainsNode(startNodeId))
+            {
+                error = $"Start node ID '{startNodeId}' does not exist in nodes.";
+                return false;
+            }
+
+            for (int i = 0; i < nodes.Count; i++)
+            {
+                MapNodeData node = nodes[i];
+                if (node?.ConnectedNodeIds == null)
+                    continue;
+
+                for (int j = 0; j < node.ConnectedNodeIds.Count; j++)
+                {
+                    string connectedId = node.ConnectedNodeIds[j];
+                    if (string.IsNullOrWhiteSpace(connectedId))
+                    {
+                        error = $"Node '{node.NodeId}' has a blank connected node ID at index {j}.";
+                        return false;
+                    }
+
+                    if (!ContainsNode(connectedId))
+                    {
+                        error =
+                            $"Node '{node.NodeId}' references missing connected node ID '{connectedId}'.";
+                        return false;
+                    }
+                }
+            }
+
+            return true;
+        }
+
+        public int CountValidNodes()
+        {
+            if (nodes == null)
+                return 0;
+
+            int count = 0;
+            for (int i = 0; i < nodes.Count; i++)
+            {
+                MapNodeData node = nodes[i];
+                if (node != null && node.IsRuntimeValid(out _))
+                    count++;
+            }
+
+            return count;
+        }
+
+#if UNITY_EDITOR
+        private void OnValidate()
+        {
+            if (!IsRuntimeValid(out string error))
+            {
+                Debug.LogWarning(
+                    $"[MapActData] '{name}' is invalid: {error}",
+                    this);
+            }
+
+            if (nodes == null || nodes.Count == 0)
+                return;
+
+            var seenNodeIds = new HashSet<string>(StringComparer.Ordinal);
+
+            for (int i = 0; i < nodes.Count; i++)
+            {
+                MapNodeData node = nodes[i];
+                if (node == null)
+                {
+                    Debug.LogWarning(
+                        $"[MapActData] Null node at index {i} in '{name}'.",
+                        this);
+                    continue;
+                }
+
+                if (!node.HasValidNodeId)
+                {
+                    Debug.LogWarning(
+                        $"[MapActData] Node at index {i} has a blank nodeId in '{name}'.",
+                        this);
+                }
+                else if (!seenNodeIds.Add(node.NodeId))
+                {
+                    Debug.LogWarning(
+                        $"[MapActData] Duplicate node ID '{node.NodeId}' in '{name}'.",
+                        this);
+                }
+
+                if (node.ConnectedNodeIds == null)
+                    continue;
+
+                for (int j = 0; j < node.ConnectedNodeIds.Count; j++)
+                {
+                    string connectedId = node.ConnectedNodeIds[j];
+                    if (string.IsNullOrWhiteSpace(connectedId))
+                        continue;
+
+                    if (!ContainsNode(connectedId))
+                    {
+                        Debug.LogWarning(
+                            $"[MapActData] Node '{node.NodeId}' references missing connected node ID " +
+                            $"'{connectedId}' in '{name}'.",
+                            this);
+                    }
+                }
+            }
+        }
+#endif
+    }
+}
+```
+
+## FILE: MapNodeData.cs
+**Path:** `Assets/Scripts/Run/Map/Data/MapNodeData.cs`
+```csharp
+using System;
+using System.Collections.Generic;
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    [Serializable]
+    public class MapNodeData
+    {
+        [SerializeField] private string nodeId;
+        [SerializeField] private string displayName;
+        [SerializeField] private MapNodeType nodeType;
+        [SerializeField] private string encounterId;
+        [SerializeField] private List<string> connectedNodeIds = new List<string>();
+        [SerializeField] private Vector2 uiPosition;
+
+        public string NodeId => nodeId;
+        public string DisplayName => displayName;
+        public MapNodeType NodeType => nodeType;
+        public string EncounterId => encounterId;
+        public IReadOnlyList<string> ConnectedNodeIds => connectedNodeIds;
+        public Vector2 UiPosition => uiPosition;
+
+        public bool HasEncounter => !string.IsNullOrWhiteSpace(encounterId);
+
+        public bool IsBattleNode =>
+            nodeType == MapNodeType.NormalBattle ||
+            nodeType == MapNodeType.EliteBattle ||
+            nodeType == MapNodeType.Boss;
+
+        public bool HasValidNodeId => !string.IsNullOrWhiteSpace(nodeId);
+
+        public bool IsRuntimeValid(out string error)
+        {
+            error = string.Empty;
+
+            if (!HasValidNodeId)
+            {
+                error = "Node ID is blank.";
+                return false;
+            }
+
+            if (connectedNodeIds == null)
+            {
+                error = $"Node '{nodeId}' has null connectedNodeIds.";
+                return false;
+            }
+
+            if (nodeType != MapNodeType.Start && IsBattleNode && !HasEncounter)
+            {
+                error = $"Battle node '{nodeId}' is missing encounterId.";
+                return false;
+            }
+
+            return true;
+        }
+    }
+}
+```
+
+## FILE: MapNodeState.cs
+**Path:** `Assets/Scripts/Run/Map/Data/MapNodeState.cs`
+```csharp
+namespace CardBattle.Core
+{
+    public enum MapNodeState
+    {
+        Locked,
+        Available,
+        Completed,
+        Current
+    }
+}
+```
+
+## FILE: MapNodeType.cs
+**Path:** `Assets/Scripts/Run/Map/Data/MapNodeType.cs`
+```csharp
+namespace CardBattle.Core
+{
+    public enum MapNodeType
+    {
+        Start,
+        NormalBattle,
+        EliteBattle,
+        Boss,
+        Shop,
+        Rest,
+        Event
+    }
+}
+```
+
+## FILE: MapRuntimeDebugTest.cs
+**Path:** `Assets/Scripts/Run/Map/Debug/MapRuntimeDebugTest.cs`
+```csharp
+using System.Collections.Generic;
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    public class MapRuntimeDebugTest : MonoBehaviour
+    {
+        [SerializeField] private MapRuntimeController mapRuntimeController;
+        [SerializeField] private RuntimeEncounterContext runtimeEncounterContext;
+        [SerializeField] private string nodeIdToSelect = "act1_normal_a";
+        [SerializeField] private bool autoRunDebugFlowOnStart;
+
+        private void Start()
+        {
+            if (autoRunDebugFlowOnStart)
+                DebugRunPhase6AFlow();
+        }
+
+        [ContextMenu("Debug Initialize Map")]
+        private void DebugInitializeMap()
+        {
+            if (!TryGetController())
+                return;
+
+            bool initialized = mapRuntimeController.InitializeMap();
+            Debug.Log($"[MapRuntimeDebugTest] InitializeMap => {initialized}");
+        }
+
+        [ContextMenu("Debug Select Node")]
+        private void DebugSelectNode()
+        {
+            if (!TryGetController())
+                return;
+
+            bool selected = mapRuntimeController.TrySelectNode(nodeIdToSelect);
+            Debug.Log($"[MapRuntimeDebugTest] TrySelectNode('{nodeIdToSelect}') => {selected}");
+        }
+
+        [ContextMenu("Debug Complete Selected Node")]
+        private void DebugCompleteSelectedNode()
+        {
+            if (!TryGetController())
+                return;
+
+            bool completed = mapRuntimeController.TryCompleteSelectedNode();
+            Debug.Log($"[MapRuntimeDebugTest] TryCompleteSelectedNode => {completed}");
+        }
+
+        [ContextMenu("Debug Print Map State")]
+        private void DebugPrintMapState()
+        {
+            if (!TryGetController())
+                return;
+
+            mapRuntimeController.DebugPrintMapState();
+        }
+
+        [ContextMenu("Debug Run Phase 6A Flow")]
+        private void DebugRunPhase6AFlow()
+        {
+            if (!TryGetController())
+                return;
+
+            Debug.Log("[MapRuntimeDebugTest] === Phase 6A Flow Start ===");
+
+            if (!mapRuntimeController.InitializeMap())
+            {
+                Debug.LogError("[MapRuntimeDebugTest] === Phase 6A Flow Failed (Initialize) ===");
+                return;
+            }
+
+            mapRuntimeController.DebugPrintMapState();
+
+            List<string> availableNodes =
+                mapRuntimeController.CurrentMapState.GetNodeIdsByState(MapNodeState.Available);
+
+            if (availableNodes.Count == 0)
+            {
+                Debug.LogError(
+                    "[MapRuntimeDebugTest] === Phase 6A Flow Failed (No Available Nodes) ===");
+                return;
+            }
+
+            string firstAvailable = availableNodes[0];
+
+            if (!mapRuntimeController.TrySelectNode(firstAvailable))
+            {
+                Debug.LogError(
+                    "[MapRuntimeDebugTest] === Phase 6A Flow Failed (Select Node) ===");
+                return;
+            }
+
+            RuntimeEncounterContext context = ResolveEncounterContext();
+            if (context != null)
+            {
+                Debug.Log(
+                    $"[MapRuntimeDebugTest] RuntimeEncounterContext.CurrentEncounterId=" +
+                    $"{context.CurrentEncounterId}");
+            }
+
+            if (!mapRuntimeController.TryCompleteSelectedNode())
+            {
+                Debug.LogError(
+                    "[MapRuntimeDebugTest] === Phase 6A Flow Failed (Complete Node) ===");
+                return;
+            }
+
+            mapRuntimeController.DebugPrintMapState();
+            Debug.Log("[MapRuntimeDebugTest] === Phase 6A Flow Success ===");
+        }
+
+        private RuntimeEncounterContext ResolveEncounterContext()
+        {
+            if (runtimeEncounterContext != null)
+                return runtimeEncounterContext;
+
+            return FindFirstObjectByType<RuntimeEncounterContext>();
+        }
+
+        private bool TryGetController()
+        {
+            if (mapRuntimeController != null)
+                return true;
+
+            Debug.LogError(
+                "[MapRuntimeDebugTest] MapRuntimeController reference is missing.");
+            return false;
+        }
+    }
+}
+```
+
+## FILE: StaticAct1MapDebugFactory.cs
+**Path:** `Assets/Scripts/Run/Map/Debug/StaticAct1MapDebugFactory.cs`
+```csharp
+using System;
+using System.Collections.Generic;
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    /// <summary>
+    /// Debug-only factory for creating a static Act 1 map without hand-authoring a ScriptableObject.
+    /// </summary>
+    public static class StaticAct1MapDebugFactory
+    {
+        public const string DefaultAssetPath = "Assets/Data/Map/Act1_Map.asset";
+
+        public static MapActData CreateAct1Map()
+        {
+            var act = ScriptableObject.CreateInstance<MapActData>();
+
+            SetPrivateField(act, "actId", "act1");
+            SetPrivateField(act, "displayName", "Act 1");
+            SetPrivateField(act, "startNodeId", "start");
+
+            var nodes = new List<MapNodeData>
+            {
+                CreateNode("start", "Start", MapNodeType.Start, string.Empty,
+                    new[] { "act1_normal_a", "act1_normal_b" }, new Vector2(0f, 0f)),
+                CreateNode("act1_normal_a", "Normal Battle A", MapNodeType.NormalBattle, "act1_normal_01",
+                    new[] { "act1_normal_c", "act1_elite_a" }, new Vector2(-1f, 1f)),
+                CreateNode("act1_normal_b", "Normal Battle B", MapNodeType.NormalBattle, "act1_normal_01",
+                    new[] { "act1_normal_c" }, new Vector2(1f, 1f)),
+                CreateNode("act1_normal_c", "Normal Battle C", MapNodeType.NormalBattle, "act1_normal_01",
+                    new[] { "act1_boss" }, new Vector2(0f, 2f)),
+                CreateNode("act1_elite_a", "Elite Battle A", MapNodeType.EliteBattle, "act1_normal_01",
+                    new[] { "act1_boss" }, new Vector2(-1f, 2f)),
+                CreateNode("act1_boss", "Boss", MapNodeType.Boss, "act1_normal_01",
+                    Array.Empty<string>(), new Vector2(0f, 3f))
+            };
+
+            SetPrivateField(act, "nodes", nodes);
+            return act;
+        }
+
+#if UNITY_EDITOR
+        [UnityEditor.MenuItem("Card Battle/Map/Create Act 1 Debug Map Asset")]
+        public static void CreateAct1MapAsset()
+        {
+            MapActData act = CreateAct1Map();
+            act.name = "Act1_Map";
+
+            string directory = System.IO.Path.GetDirectoryName(DefaultAssetPath);
+            if (!string.IsNullOrEmpty(directory) && !System.IO.Directory.Exists(directory))
+                System.IO.Directory.CreateDirectory(directory);
+
+            if (UnityEditor.AssetDatabase.LoadAssetAtPath<MapActData>(DefaultAssetPath) != null)
+            {
+                UnityEngine.Object.DestroyImmediate(act);
+                Debug.LogWarning(
+                    $"[StaticAct1MapDebugFactory] Asset already exists at '{DefaultAssetPath}'.");
+                return;
+            }
+
+            UnityEditor.AssetDatabase.CreateAsset(act, DefaultAssetPath);
+            UnityEditor.AssetDatabase.SaveAssets();
+            UnityEditor.AssetDatabase.Refresh();
+
+            Debug.Log(
+                $"[StaticAct1MapDebugFactory] Created Act 1 map asset at '{DefaultAssetPath}'.");
+        }
+#endif
+
+        private static MapNodeData CreateNode(
+            string nodeId,
+            string displayName,
+            MapNodeType nodeType,
+            string encounterId,
+            string[] connectedNodeIds,
+            Vector2 uiPosition)
+        {
+            var node = new MapNodeData();
+            SetPrivateField(node, "nodeId", nodeId);
+            SetPrivateField(node, "displayName", displayName);
+            SetPrivateField(node, "nodeType", nodeType);
+            SetPrivateField(node, "encounterId", encounterId);
+            SetPrivateField(node, "connectedNodeIds", new List<string>(connectedNodeIds));
+            SetPrivateField(node, "uiPosition", uiPosition);
+            return node;
+        }
+
+        private static void SetPrivateField(object target, string fieldName, object value)
+        {
+            var field = target.GetType().GetField(
+                fieldName,
+                System.Reflection.BindingFlags.Instance |
+                System.Reflection.BindingFlags.NonPublic);
+
+            if (field == null)
+            {
+                Debug.LogError(
+                    $"[StaticAct1MapDebugFactory] Could not find field '{fieldName}' on {target.GetType().Name}.");
+                return;
+            }
+
+            field.SetValue(target, value);
+        }
+    }
+}
+```
+
+## FILE: RunMapNodeState.cs
+**Path:** `Assets/Scripts/Run/Map/Runtime/RunMapNodeState.cs`
+```csharp
+using System;
+
+namespace CardBattle.Core
+{
+    [Serializable]
+    public class RunMapNodeState
+    {
+        [UnityEngine.SerializeField] private string nodeId;
+        [UnityEngine.SerializeField] private MapNodeState state;
+
+        public string NodeId => nodeId;
+        public MapNodeState State => state;
+
+        public RunMapNodeState(string nodeId, MapNodeState state)
+        {
+            this.nodeId = nodeId;
+            this.state = state;
+        }
+
+        public void SetState(MapNodeState newState)
+        {
+            state = newState;
+        }
+
+        public RunMapNodeState Clone()
+        {
+            return new RunMapNodeState(nodeId, state);
+        }
+    }
+}
+```
+
+## FILE: RunMapState.cs
+**Path:** `Assets/Scripts/Run/Map/Runtime/RunMapState.cs`
+```csharp
+using System;
+using System.Collections.Generic;
+
+namespace CardBattle.Core
+{
+    [Serializable]
+    public class RunMapState
+    {
+        [UnityEngine.SerializeField] private string actId = string.Empty;
+        [UnityEngine.SerializeField] private string currentNodeId = string.Empty;
+        [UnityEngine.SerializeField] private string selectedNodeId = string.Empty;
+        [UnityEngine.SerializeField] private List<RunMapNodeState> nodeStates = new List<RunMapNodeState>();
+
+        public string ActId => actId;
+        public string CurrentNodeId => currentNodeId;
+        public string SelectedNodeId => selectedNodeId;
+        public IReadOnlyList<RunMapNodeState> NodeStates => nodeStates;
+
+        public void InitializeFromAct(MapActData actData)
+        {
+            if (actData == null)
+                throw new ArgumentNullException(nameof(actData));
+
+            actId = actData.ActId;
+            currentNodeId = actData.StartNodeId;
+            selectedNodeId = string.Empty;
+            nodeStates = new List<RunMapNodeState>();
+
+            IReadOnlyList<MapNodeData> nodes = actData.Nodes;
+            for (int i = 0; i < nodes.Count; i++)
+            {
+                MapNodeData node = nodes[i];
+                if (node == null || !node.HasValidNodeId)
+                    continue;
+
+                nodeStates.Add(new RunMapNodeState(node.NodeId, MapNodeState.Locked));
+            }
+
+            SetNodeState(actData.StartNodeId, MapNodeState.Completed);
+
+            if (actData.TryGetNode(actData.StartNodeId, out MapNodeData startNode) &&
+                startNode.ConnectedNodeIds != null)
+            {
+                for (int i = 0; i < startNode.ConnectedNodeIds.Count; i++)
+                {
+                    string connectedId = startNode.ConnectedNodeIds[i];
+                    SetNodeState(connectedId, MapNodeState.Available);
+                }
+            }
+        }
+
+        public bool TryGetNodeState(string nodeId, out MapNodeState state)
+        {
+            state = MapNodeState.Locked;
+
+            if (string.IsNullOrWhiteSpace(nodeId))
+                return false;
+
+            for (int i = 0; i < nodeStates.Count; i++)
+            {
+                RunMapNodeState entry = nodeStates[i];
+                if (entry == null)
+                    continue;
+
+                if (string.Equals(entry.NodeId, nodeId, StringComparison.Ordinal))
+                {
+                    state = entry.State;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        public bool SetNodeState(string nodeId, MapNodeState state)
+        {
+            if (string.IsNullOrWhiteSpace(nodeId))
+                return false;
+
+            for (int i = 0; i < nodeStates.Count; i++)
+            {
+                RunMapNodeState entry = nodeStates[i];
+                if (entry == null)
+                    continue;
+
+                if (string.Equals(entry.NodeId, nodeId, StringComparison.Ordinal))
+                {
+                    entry.SetState(state);
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        public bool IsNodeAvailable(string nodeId)
+        {
+            return TryGetNodeState(nodeId, out MapNodeState state) &&
+                   state == MapNodeState.Available;
+        }
+
+        public bool IsNodeCompleted(string nodeId)
+        {
+            return TryGetNodeState(nodeId, out MapNodeState state) &&
+                   state == MapNodeState.Completed;
+        }
+
+        public bool IsNodeCurrent(string nodeId)
+        {
+            return TryGetNodeState(nodeId, out MapNodeState state) &&
+                   state == MapNodeState.Current;
+        }
+
+        public List<string> GetNodeIdsByState(MapNodeState state)
+        {
+            var result = new List<string>();
+
+            for (int i = 0; i < nodeStates.Count; i++)
+            {
+                RunMapNodeState entry = nodeStates[i];
+                if (entry == null)
+                    continue;
+
+                if (entry.State == state)
+                    result.Add(entry.NodeId);
+            }
+
+            return result;
+        }
+
+        public void ClearSelection()
+        {
+            selectedNodeId = string.Empty;
+        }
+
+        public void SetCurrentNodeId(string nodeId)
+        {
+            currentNodeId = nodeId ?? string.Empty;
+        }
+
+        public void SetSelectedNodeId(string nodeId)
+        {
+            selectedNodeId = nodeId ?? string.Empty;
+        }
+
+        public RunMapState Clone()
+        {
+            var clone = new RunMapState
+            {
+                actId = actId,
+                currentNodeId = currentNodeId,
+                selectedNodeId = selectedNodeId,
+                nodeStates = new List<RunMapNodeState>(nodeStates.Count)
+            };
+
+            for (int i = 0; i < nodeStates.Count; i++)
+            {
+                RunMapNodeState entry = nodeStates[i];
+                clone.nodeStates.Add(entry != null ? entry.Clone() : null);
+            }
+
+            return clone;
+        }
+    }
+}
+```
+
+## FILE: MapRuntimeController.cs
+**Path:** `Assets/Scripts/Run/Map/Systems/MapRuntimeController.cs`
+```csharp
+using System;
+using System.Collections.Generic;
+using System.Text;
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    public class MapRuntimeController : MonoBehaviour
+    {
+        [Header("Map Source")]
+        [SerializeField] private MapActData actData;
+
+        [Header("Encounter")]
+        [SerializeField] private RuntimeEncounterContext runtimeEncounterContext;
+
+        [Header("Options")]
+        [SerializeField] private bool initializeOnStart;
+        [SerializeField] private bool verboseLogs = true;
+
+        public MapActData ActData => actData;
+        public RunMapState CurrentMapState { get; private set; }
+        public bool HasInitialized { get; private set; }
+
+        public string CurrentNodeId =>
+            CurrentMapState != null ? CurrentMapState.CurrentNodeId : string.Empty;
+
+        public string SelectedNodeId =>
+            CurrentMapState != null ? CurrentMapState.SelectedNodeId : string.Empty;
+
+        public bool HasSelectedNode =>
+            CurrentMapState != null &&
+            !string.IsNullOrWhiteSpace(CurrentMapState.SelectedNodeId);
+
+        public event Action<RunMapState> OnMapInitialized;
+        public event Action<string, MapNodeState> OnNodeStateChanged;
+        public event Action<MapNodeData> OnNodeSelected;
+        public event Action<MapNodeData> OnNodeCompleted;
+        public event Action OnMapStateChanged;
+
+        private void Start()
+        {
+            if (initializeOnStart)
+                InitializeMap();
+        }
+
+        public bool InitializeMap()
+        {
+            if (actData == null)
+            {
+                LogError("Cannot initialize map: Act Data is missing.");
+                return false;
+            }
+
+            if (!actData.IsRuntimeValid(out string error))
+            {
+                LogError($"Cannot initialize map: {error}");
+                return false;
+            }
+
+            CurrentMapState = new RunMapState();
+            CurrentMapState.InitializeFromAct(actData);
+            HasInitialized = true;
+
+            OnMapInitialized?.Invoke(CurrentMapState);
+            OnMapStateChanged?.Invoke();
+
+            if (verboseLogs)
+            {
+                Debug.Log(
+                    $"[MapRuntimeController] Map initialized. Act={actData.ActId} | Start={actData.StartNodeId}");
+
+                List<string> available = CurrentMapState.GetNodeIdsByState(MapNodeState.Available);
+                Debug.Log(
+                    $"[MapRuntimeController] Available Nodes: {FormatNodeIdList(available)}");
+            }
+
+            return true;
+        }
+
+        public bool TrySelectNode(string nodeId)
+        {
+            if (!HasInitialized || CurrentMapState == null)
+            {
+                LogError("Cannot select node: Map is not initialized.");
+                return false;
+            }
+
+            if (actData == null || !actData.TryGetNode(nodeId, out MapNodeData node))
+            {
+                LogError($"Cannot select node: Node ID '{nodeId}' was not found.");
+                return false;
+            }
+
+            if (!CanSelectNode(nodeId))
+            {
+                if (verboseLogs)
+                {
+                    Debug.LogWarning(
+                        $"[MapRuntimeController] Cannot select node '{nodeId}': " +
+                        $"state is {GetNodeState(nodeId)}, expected Available.");
+                }
+
+                return false;
+            }
+
+            bool runtimeEncounterSelected = true;
+
+            if (node.HasEncounter)
+            {
+                if (runtimeEncounterContext == null)
+                {
+                    LogError(
+                        $"Cannot select node '{nodeId}': RuntimeEncounterContext is missing " +
+                        $"but node requires encounter '{node.EncounterId}'.");
+                    return false;
+                }
+
+                runtimeEncounterSelected =
+                    runtimeEncounterContext.TrySelectEncounterById(node.EncounterId);
+
+                if (!runtimeEncounterSelected)
+                {
+                    if (verboseLogs)
+                    {
+                        Debug.LogWarning(
+                            $"[MapRuntimeController] Cannot select node '{nodeId}': " +
+                            $"encounter selection failed for '{node.EncounterId}'.");
+                    }
+
+                    return false;
+                }
+            }
+
+            ClearCurrentNodesExcept(nodeId);
+
+            CurrentMapState.SetSelectedNodeId(nodeId);
+            CurrentMapState.SetCurrentNodeId(nodeId);
+            SetNodeStateInternal(nodeId, MapNodeState.Current);
+
+            OnNodeSelected?.Invoke(node);
+            OnMapStateChanged?.Invoke();
+
+            if (verboseLogs)
+            {
+                Debug.Log(
+                    $"[MapRuntimeController] Selected node: {nodeId} | " +
+                    $"Encounter={(node.HasEncounter ? node.EncounterId : "none")} | " +
+                    $"RuntimeEncounterSelected={runtimeEncounterSelected}");
+            }
+
+            return true;
+        }
+
+        public bool TryCompleteSelectedNode()
+        {
+            if (CurrentMapState == null)
+            {
+                LogError("Cannot complete selected node: Map state is missing.");
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(CurrentMapState.SelectedNodeId))
+            {
+                if (verboseLogs)
+                {
+                    Debug.LogWarning(
+                        "[MapRuntimeController] Cannot complete selected node: No selected node.");
+                }
+
+                return false;
+            }
+
+            return TryCompleteNode(CurrentMapState.SelectedNodeId);
+        }
+
+        public bool TryGetSelectedNode(out MapNodeData node)
+        {
+            node = null;
+
+            if (CurrentMapState == null || actData == null)
+                return false;
+
+            if (string.IsNullOrWhiteSpace(CurrentMapState.SelectedNodeId))
+                return false;
+
+            return actData.TryGetNode(CurrentMapState.SelectedNodeId, out node);
+        }
+
+        public bool TryCompleteNode(string nodeId)
+        {
+            if (!HasInitialized || CurrentMapState == null)
+            {
+                LogError("Cannot complete node: Map is not initialized.");
+                return false;
+            }
+
+            if (actData == null || !actData.TryGetNode(nodeId, out MapNodeData node))
+            {
+                LogError($"Cannot complete node: Node ID '{nodeId}' was not found.");
+                return false;
+            }
+
+            MapNodeState state = GetNodeState(nodeId);
+            if (state != MapNodeState.Current && state != MapNodeState.Available)
+            {
+                if (verboseLogs)
+                {
+                    Debug.LogWarning(
+                        $"[MapRuntimeController] Cannot complete node '{nodeId}': " +
+                        $"state is {state}, expected Current or Available.");
+                }
+
+                return false;
+            }
+
+            SetNodeStateInternal(nodeId, MapNodeState.Completed);
+            CurrentMapState.SetCurrentNodeId(nodeId);
+
+            if (string.Equals(CurrentMapState.SelectedNodeId, nodeId, StringComparison.Ordinal))
+                CurrentMapState.ClearSelection();
+
+            var unlockedNodes = new List<string>();
+
+            if (node.ConnectedNodeIds != null)
+            {
+                for (int i = 0; i < node.ConnectedNodeIds.Count; i++)
+                {
+                    string connectedId = node.ConnectedNodeIds[i];
+                    if (!CurrentMapState.TryGetNodeState(connectedId, out MapNodeState connectedState))
+                        continue;
+
+                    if (connectedState != MapNodeState.Locked)
+                        continue;
+
+                    SetNodeStateInternal(connectedId, MapNodeState.Available);
+                    unlockedNodes.Add(connectedId);
+                }
+            }
+
+            OnNodeCompleted?.Invoke(node);
+            OnMapStateChanged?.Invoke();
+
+            if (verboseLogs)
+            {
+                Debug.Log($"[MapRuntimeController] Completed node: {nodeId}");
+                Debug.Log(
+                    $"[MapRuntimeController] Unlocked nodes: {FormatNodeIdList(unlockedNodes)}");
+            }
+
+            return true;
+        }
+
+        public bool CanSelectNode(string nodeId)
+        {
+            if (!HasInitialized || CurrentMapState == null)
+                return false;
+
+            return CurrentMapState.IsNodeAvailable(nodeId);
+        }
+
+        public MapNodeState GetNodeState(string nodeId)
+        {
+            if (CurrentMapState == null ||
+                !CurrentMapState.TryGetNodeState(nodeId, out MapNodeState state))
+            {
+                return MapNodeState.Locked;
+            }
+
+            return state;
+        }
+
+        public void DebugPrintMapState()
+        {
+            if (!HasInitialized || CurrentMapState == null)
+            {
+                Debug.Log("[MapRuntimeController] Map is not initialized.");
+                return;
+            }
+
+            var builder = new StringBuilder();
+            builder.AppendLine("[MapRuntimeController] --- Map State ---");
+            builder.AppendLine($"CurrentNodeId={CurrentMapState.CurrentNodeId}");
+            builder.AppendLine($"SelectedNodeId={CurrentMapState.SelectedNodeId}");
+            builder.AppendLine(
+                $"Completed={FormatNodeIdList(CurrentMapState.GetNodeIdsByState(MapNodeState.Completed))}");
+            builder.AppendLine(
+                $"Available={FormatNodeIdList(CurrentMapState.GetNodeIdsByState(MapNodeState.Available))}");
+
+            List<string> currentNodes = CurrentMapState.GetNodeIdsByState(MapNodeState.Current);
+            if (currentNodes.Count > 0)
+            {
+                builder.AppendLine($"Current={FormatNodeIdList(currentNodes)}");
+            }
+
+            builder.AppendLine(
+                $"Locked={FormatNodeIdList(CurrentMapState.GetNodeIdsByState(MapNodeState.Locked))}");
+
+            Debug.Log(builder.ToString().TrimEnd());
+        }
+
+        private void ClearCurrentNodesExcept(string selectedNodeId)
+        {
+            List<string> currentNodes = CurrentMapState.GetNodeIdsByState(MapNodeState.Current);
+            for (int i = 0; i < currentNodes.Count; i++)
+            {
+                string currentId = currentNodes[i];
+                if (string.Equals(currentId, selectedNodeId, StringComparison.Ordinal))
+                    continue;
+
+                SetNodeStateInternal(currentId, MapNodeState.Available);
+            }
+        }
+
+        private void SetNodeStateInternal(string nodeId, MapNodeState state)
+        {
+            if (!CurrentMapState.SetNodeState(nodeId, state))
+                return;
+
+            OnNodeStateChanged?.Invoke(nodeId, state);
+        }
+
+        private static string FormatNodeIdList(List<string> nodeIds)
+        {
+            if (nodeIds == null || nodeIds.Count == 0)
+                return string.Empty;
+
+            return string.Join(", ", nodeIds);
+        }
+
+        private void LogError(string message)
+        {
+            Debug.LogError($"[MapRuntimeController] {message}");
+        }
+    }
+}
+```
