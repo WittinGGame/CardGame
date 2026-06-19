@@ -15,6 +15,7 @@ namespace CardBattle.Core
 
         [Header("Options")]
         [SerializeField] private bool initializeOnStart;
+        [SerializeField] private bool lockUnchosenBranchesOnComplete = true;
         [SerializeField] private bool verboseLogs = true;
 
         public MapActData ActData => actData;
@@ -220,22 +221,14 @@ namespace CardBattle.Core
                 CurrentMapState.ClearSelection();
 
             var unlockedNodes = new List<string>();
+            var lockedUnchosenBranches = new List<string>();
 
-            if (node.ConnectedNodeIds != null)
-            {
-                for (int i = 0; i < node.ConnectedNodeIds.Count; i++)
-                {
-                    string connectedId = node.ConnectedNodeIds[i];
-                    if (!CurrentMapState.TryGetNodeState(connectedId, out MapNodeState connectedState))
-                        continue;
+            HashSet<string> nextAvailableIds = BuildConnectedNodeIdSet(node);
 
-                    if (connectedState != MapNodeState.Locked)
-                        continue;
+            if (lockUnchosenBranchesOnComplete)
+                LockUnchosenBranches(nodeId, nextAvailableIds, lockedUnchosenBranches);
 
-                    SetNodeStateInternal(connectedId, MapNodeState.Available);
-                    unlockedNodes.Add(connectedId);
-                }
-            }
+            UnlockConnectedNodes(node, unlockedNodes);
 
             OnNodeCompleted?.Invoke(node);
             OnMapStateChanged?.Invoke();
@@ -243,11 +236,87 @@ namespace CardBattle.Core
             if (verboseLogs)
             {
                 Debug.Log($"[MapRuntimeController] Completed node: {nodeId}");
+
+                if (lockUnchosenBranchesOnComplete && lockedUnchosenBranches.Count > 0)
+                {
+                    Debug.Log(
+                        $"[MapRuntimeController] Locked unchosen branches: " +
+                        $"{FormatNodeIdList(lockedUnchosenBranches)}");
+                }
+
                 Debug.Log(
                     $"[MapRuntimeController] Unlocked nodes: {FormatNodeIdList(unlockedNodes)}");
             }
 
             return true;
+        }
+
+        private static HashSet<string> BuildConnectedNodeIdSet(MapNodeData node)
+        {
+            var connectedIds = new HashSet<string>(StringComparer.Ordinal);
+
+            if (node?.ConnectedNodeIds == null)
+                return connectedIds;
+
+            for (int i = 0; i < node.ConnectedNodeIds.Count; i++)
+            {
+                string connectedId = node.ConnectedNodeIds[i];
+                if (!string.IsNullOrWhiteSpace(connectedId))
+                    connectedIds.Add(connectedId);
+            }
+
+            return connectedIds;
+        }
+
+        private void LockUnchosenBranches(
+            string completedNodeId,
+            HashSet<string> nextAvailableIds,
+            List<string> lockedUnchosenBranches)
+        {
+            IReadOnlyList<RunMapNodeState> allStates = CurrentMapState.NodeStates;
+            for (int i = 0; i < allStates.Count; i++)
+            {
+                RunMapNodeState entry = allStates[i];
+                if (entry == null)
+                    continue;
+
+                string id = entry.NodeId;
+                MapNodeState entryState = entry.State;
+
+                if (entryState == MapNodeState.Completed)
+                    continue;
+
+                if (string.Equals(id, completedNodeId, StringComparison.Ordinal))
+                    continue;
+
+                if (nextAvailableIds.Contains(id))
+                    continue;
+
+                if (entryState != MapNodeState.Available && entryState != MapNodeState.Current)
+                    continue;
+
+                SetNodeStateInternal(id, MapNodeState.Locked);
+                lockedUnchosenBranches.Add(id);
+            }
+        }
+
+        private void UnlockConnectedNodes(MapNodeData node, List<string> unlockedNodes)
+        {
+            if (node.ConnectedNodeIds == null)
+                return;
+
+            for (int i = 0; i < node.ConnectedNodeIds.Count; i++)
+            {
+                string connectedId = node.ConnectedNodeIds[i];
+                if (!CurrentMapState.TryGetNodeState(connectedId, out MapNodeState connectedState))
+                    continue;
+
+                if (connectedState != MapNodeState.Locked)
+                    continue;
+
+                SetNodeStateInternal(connectedId, MapNodeState.Available);
+                unlockedNodes.Add(connectedId);
+            }
         }
 
         public bool CanSelectNode(string nodeId)

@@ -5060,6 +5060,84 @@ namespace CardBattle.Core
 }
 ```
 
+## FILE: TreeMapUIDebugTest.cs
+**Path:** `Assets/Scripts/Run/Map/Debug/TreeMapUIDebugTest.cs`
+```csharp
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    public class TreeMapUIDebugTest : MonoBehaviour
+    {
+        [SerializeField] private TreeMapUIController treeMapUIController;
+        [SerializeField] private MapRuntimeController mapRuntimeController;
+
+        [ContextMenu("Debug Show Map")]
+        private void DebugShowMap()
+        {
+            if (!TryGetTreeMapUI())
+                return;
+
+            treeMapUIController.Show();
+            Debug.Log("[TreeMapUIDebugTest] Map shown.");
+        }
+
+        [ContextMenu("Debug Hide Map")]
+        private void DebugHideMap()
+        {
+            if (!TryGetTreeMapUI())
+                return;
+
+            treeMapUIController.Hide();
+            Debug.Log("[TreeMapUIDebugTest] Map hidden.");
+        }
+
+        [ContextMenu("Debug Rebuild Map UI")]
+        private void DebugRebuildMapUI()
+        {
+            if (!TryGetTreeMapUI())
+                return;
+
+            treeMapUIController.Rebuild();
+            Debug.Log("[TreeMapUIDebugTest] Map UI rebuilt.");
+        }
+
+        [ContextMenu("Debug Refresh Map UI")]
+        private void DebugRefreshMapUI()
+        {
+            if (!TryGetTreeMapUI())
+                return;
+
+            treeMapUIController.Refresh();
+            Debug.Log("[TreeMapUIDebugTest] Map UI refreshed.");
+        }
+
+        [ContextMenu("Debug Print Map State")]
+        private void DebugPrintMapState()
+        {
+            if (mapRuntimeController == null)
+            {
+                Debug.LogError(
+                    "[TreeMapUIDebugTest] MapRuntimeController reference is missing.");
+                return;
+            }
+
+            mapRuntimeController.DebugPrintMapState();
+        }
+
+        private bool TryGetTreeMapUI()
+        {
+            if (treeMapUIController != null)
+                return true;
+
+            Debug.LogError(
+                "[TreeMapUIDebugTest] TreeMapUIController reference is missing.");
+            return false;
+        }
+    }
+}
+```
+
 ## FILE: RunMapNodeState.cs
 **Path:** `Assets/Scripts/Run/Map/Runtime/RunMapNodeState.cs`
 ```csharp
@@ -5285,6 +5363,7 @@ namespace CardBattle.Core
 
         [Header("Options")]
         [SerializeField] private bool initializeOnStart;
+        [SerializeField] private bool lockUnchosenBranchesOnComplete = true;
         [SerializeField] private bool verboseLogs = true;
 
         public MapActData ActData => actData;
@@ -5490,22 +5569,14 @@ namespace CardBattle.Core
                 CurrentMapState.ClearSelection();
 
             var unlockedNodes = new List<string>();
+            var lockedUnchosenBranches = new List<string>();
 
-            if (node.ConnectedNodeIds != null)
-            {
-                for (int i = 0; i < node.ConnectedNodeIds.Count; i++)
-                {
-                    string connectedId = node.ConnectedNodeIds[i];
-                    if (!CurrentMapState.TryGetNodeState(connectedId, out MapNodeState connectedState))
-                        continue;
+            HashSet<string> nextAvailableIds = BuildConnectedNodeIdSet(node);
 
-                    if (connectedState != MapNodeState.Locked)
-                        continue;
+            if (lockUnchosenBranchesOnComplete)
+                LockUnchosenBranches(nodeId, nextAvailableIds, lockedUnchosenBranches);
 
-                    SetNodeStateInternal(connectedId, MapNodeState.Available);
-                    unlockedNodes.Add(connectedId);
-                }
-            }
+            UnlockConnectedNodes(node, unlockedNodes);
 
             OnNodeCompleted?.Invoke(node);
             OnMapStateChanged?.Invoke();
@@ -5513,11 +5584,87 @@ namespace CardBattle.Core
             if (verboseLogs)
             {
                 Debug.Log($"[MapRuntimeController] Completed node: {nodeId}");
+
+                if (lockUnchosenBranchesOnComplete && lockedUnchosenBranches.Count > 0)
+                {
+                    Debug.Log(
+                        $"[MapRuntimeController] Locked unchosen branches: " +
+                        $"{FormatNodeIdList(lockedUnchosenBranches)}");
+                }
+
                 Debug.Log(
                     $"[MapRuntimeController] Unlocked nodes: {FormatNodeIdList(unlockedNodes)}");
             }
 
             return true;
+        }
+
+        private static HashSet<string> BuildConnectedNodeIdSet(MapNodeData node)
+        {
+            var connectedIds = new HashSet<string>(StringComparer.Ordinal);
+
+            if (node?.ConnectedNodeIds == null)
+                return connectedIds;
+
+            for (int i = 0; i < node.ConnectedNodeIds.Count; i++)
+            {
+                string connectedId = node.ConnectedNodeIds[i];
+                if (!string.IsNullOrWhiteSpace(connectedId))
+                    connectedIds.Add(connectedId);
+            }
+
+            return connectedIds;
+        }
+
+        private void LockUnchosenBranches(
+            string completedNodeId,
+            HashSet<string> nextAvailableIds,
+            List<string> lockedUnchosenBranches)
+        {
+            IReadOnlyList<RunMapNodeState> allStates = CurrentMapState.NodeStates;
+            for (int i = 0; i < allStates.Count; i++)
+            {
+                RunMapNodeState entry = allStates[i];
+                if (entry == null)
+                    continue;
+
+                string id = entry.NodeId;
+                MapNodeState entryState = entry.State;
+
+                if (entryState == MapNodeState.Completed)
+                    continue;
+
+                if (string.Equals(id, completedNodeId, StringComparison.Ordinal))
+                    continue;
+
+                if (nextAvailableIds.Contains(id))
+                    continue;
+
+                if (entryState != MapNodeState.Available && entryState != MapNodeState.Current)
+                    continue;
+
+                SetNodeStateInternal(id, MapNodeState.Locked);
+                lockedUnchosenBranches.Add(id);
+            }
+        }
+
+        private void UnlockConnectedNodes(MapNodeData node, List<string> unlockedNodes)
+        {
+            if (node.ConnectedNodeIds == null)
+                return;
+
+            for (int i = 0; i < node.ConnectedNodeIds.Count; i++)
+            {
+                string connectedId = node.ConnectedNodeIds[i];
+                if (!CurrentMapState.TryGetNodeState(connectedId, out MapNodeState connectedState))
+                    continue;
+
+                if (connectedState != MapNodeState.Locked)
+                    continue;
+
+                SetNodeStateInternal(connectedId, MapNodeState.Available);
+                unlockedNodes.Add(connectedId);
+            }
         }
 
         public bool CanSelectNode(string nodeId)
@@ -5600,6 +5747,788 @@ namespace CardBattle.Core
         private void LogError(string message)
         {
             Debug.LogError($"[MapRuntimeController] {message}");
+        }
+    }
+}
+```
+
+## FILE: TreeMapBattleFlowController.cs
+**Path:** `Assets/Scripts/Run/Map/Systems/TreeMapBattleFlowController.cs`
+```csharp
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    public class TreeMapBattleFlowController : MonoBehaviour
+    {
+        [Header("Map UI")]
+        [SerializeField] private TreeMapUIController treeMapUIController;
+
+        [Header("Map Runtime")]
+        [SerializeField] private MapRuntimeController mapRuntimeController;
+
+        [Header("Battle")]
+        [SerializeField] private BattleTestBootstrap battleTestBootstrap;
+
+        [Header("Encounter Flow")]
+        [SerializeField] private EncounterCompletionController encounterCompletionController;
+        [SerializeField] private EncounterFlowResetController encounterFlowResetController;
+
+        [Header("Options")]
+        [SerializeField] private bool hideMapWhenBattleStarts = true;
+        [SerializeField] private bool showMapAfterEncounterCompletion = true;
+        [SerializeField] private bool completeSelectedNodeOnEncounterCompletion = true;
+        [SerializeField] private bool prepareNextEncounterStateAfterCompletion = true;
+        [SerializeField] private bool verboseLogs = true;
+
+        private TreeMapUIController subscribedTreeMapUI;
+        private EncounterCompletionController subscribedEncounterCompletion;
+
+        private void OnEnable()
+        {
+            SubscribeTreeMapUI();
+            SubscribeEncounterCompletion();
+        }
+
+        private void OnDisable()
+        {
+            UnsubscribeTreeMapUI();
+            UnsubscribeEncounterCompletion();
+        }
+
+        private void HandleStartBattleRequested(MapNodeData node)
+        {
+            if (node == null)
+            {
+                LogError("Cannot start battle: node is null.");
+                return;
+            }
+
+            if (mapRuntimeController == null)
+            {
+                LogError("Cannot start battle: MapRuntimeController is missing.");
+                return;
+            }
+
+            if (!mapRuntimeController.HasSelectedNode)
+            {
+                LogError("Cannot start battle: no node is selected on the map.");
+                return;
+            }
+
+            if (battleTestBootstrap == null)
+            {
+                LogError("Cannot start battle: BattleTestBootstrap is missing.");
+                return;
+            }
+
+            if (hideMapWhenBattleStarts && treeMapUIController != null)
+                treeMapUIController.Hide();
+
+            battleTestBootstrap.StartTestBattle();
+
+            if (verboseLogs)
+            {
+                Debug.Log(
+                    $"[TreeMapBattleFlow] Starting battle from node={node.NodeId} | " +
+                    $"encounter={node.EncounterId}");
+            }
+        }
+
+        private void HandleEncounterCompletionReady()
+        {
+            if (completeSelectedNodeOnEncounterCompletion && mapRuntimeController != null)
+            {
+                bool completed = mapRuntimeController.TryCompleteSelectedNode();
+
+                if (verboseLogs)
+                {
+                    Debug.Log(
+                        $"[TreeMapBattleFlow] TryCompleteSelectedNode => {completed}");
+                }
+            }
+
+            if (prepareNextEncounterStateAfterCompletion && encounterFlowResetController != null)
+            {
+                bool prepared = encounterFlowResetController.TryPrepareNextEncounterState();
+
+                if (verboseLogs)
+                {
+                    Debug.Log(
+                        $"[TreeMapBattleFlow] TryPrepareNextEncounterState => {prepared}");
+                }
+            }
+
+            if (showMapAfterEncounterCompletion && treeMapUIController != null)
+            {
+                treeMapUIController.Show();
+                treeMapUIController.Refresh();
+            }
+
+            if (verboseLogs)
+            {
+                Debug.Log(
+                    "[TreeMapBattleFlow] Encounter completed. Map updated and shown.");
+            }
+        }
+
+        private void SubscribeTreeMapUI()
+        {
+            UnsubscribeTreeMapUI();
+
+            if (treeMapUIController == null)
+                return;
+
+            subscribedTreeMapUI = treeMapUIController;
+            subscribedTreeMapUI.OnStartBattleRequested += HandleStartBattleRequested;
+        }
+
+        private void UnsubscribeTreeMapUI()
+        {
+            if (subscribedTreeMapUI == null)
+                return;
+
+            subscribedTreeMapUI.OnStartBattleRequested -= HandleStartBattleRequested;
+            subscribedTreeMapUI = null;
+        }
+
+        private void SubscribeEncounterCompletion()
+        {
+            UnsubscribeEncounterCompletion();
+
+            if (encounterCompletionController == null)
+                return;
+
+            subscribedEncounterCompletion = encounterCompletionController;
+            subscribedEncounterCompletion.OnEncounterCompletionReady += HandleEncounterCompletionReady;
+        }
+
+        private void UnsubscribeEncounterCompletion()
+        {
+            if (subscribedEncounterCompletion == null)
+                return;
+
+            subscribedEncounterCompletion.OnEncounterCompletionReady -= HandleEncounterCompletionReady;
+            subscribedEncounterCompletion = null;
+        }
+
+        private void LogError(string message)
+        {
+            Debug.LogError($"[TreeMapBattleFlow] {message}");
+        }
+    }
+}
+```
+
+## FILE: TreeMapLineUI.cs
+**Path:** `Assets/Scripts/Run/Map/UI/TreeMapLineUI.cs`
+```csharp
+using UnityEngine;
+using UnityEngine.UI;
+
+namespace CardBattle.Core
+{
+    public class TreeMapLineUI : MonoBehaviour
+    {
+        [SerializeField] private RectTransform rectTransform;
+        [SerializeField] private Image image;
+
+        public void Bind(Vector2 start, Vector2 end, Color color, float thickness)
+        {
+            if (rectTransform == null)
+                rectTransform = transform as RectTransform;
+
+            Vector2 delta = end - start;
+            float distance = delta.magnitude;
+            float angle = Mathf.Atan2(delta.y, delta.x) * Mathf.Rad2Deg;
+
+            rectTransform.anchoredPosition = (start + end) * 0.5f;
+            rectTransform.sizeDelta = new Vector2(distance, thickness);
+            rectTransform.localRotation = Quaternion.Euler(0f, 0f, angle);
+
+            SetColor(color);
+        }
+
+        public void SetColor(Color color)
+        {
+            if (image != null)
+                image.color = color;
+        }
+    }
+}
+```
+
+## FILE: TreeMapNodeButtonUI.cs
+**Path:** `Assets/Scripts/Run/Map/UI/TreeMapNodeButtonUI.cs`
+```csharp
+using System;
+using TMPro;
+using UnityEngine;
+using UnityEngine.UI;
+
+namespace CardBattle.Core
+{
+    public class TreeMapNodeButtonUI : MonoBehaviour
+    {
+        [SerializeField] private Button button;
+        [SerializeField] private TextMeshProUGUI titleText;
+        [SerializeField] private TextMeshProUGUI typeText;
+        [SerializeField] private TextMeshProUGUI stateText;
+        [SerializeField] private Image backgroundImage;
+        [SerializeField] private CanvasGroup canvasGroup;
+        [SerializeField] private GameObject selectedRoot;
+        [SerializeField] private GameObject completedRoot;
+        [SerializeField] private GameObject lockedRoot;
+        [SerializeField] private GameObject availableRoot;
+        [SerializeField] private GameObject currentRoot;
+
+        [Header("State Colors")]
+        [SerializeField] private Color lockedColor = new Color(0.25f, 0.25f, 0.28f, 1f);
+        [SerializeField] private Color availableColor = new Color(0.85f, 0.72f, 0.35f, 1f);
+        [SerializeField] private Color currentColor = new Color(0.35f, 0.65f, 0.9f, 1f);
+        [SerializeField] private Color completedColor = new Color(0.45f, 0.62f, 0.48f, 1f);
+
+        public string NodeId { get; private set; } = string.Empty;
+        public MapNodeData NodeData { get; private set; }
+        public MapNodeState CurrentState { get; private set; } = MapNodeState.Locked;
+
+        public event Action<string> OnNodeClicked;
+
+        private void Awake()
+        {
+            if (button != null)
+            {
+                button.onClick.RemoveListener(HandleButtonClicked);
+                button.onClick.AddListener(HandleButtonClicked);
+            }
+        }
+
+        public void Bind(MapNodeData nodeData)
+        {
+            NodeData = nodeData;
+            NodeId = nodeData != null ? nodeData.NodeId : string.Empty;
+
+            if (titleText != null)
+            {
+                titleText.text = nodeData != null ? nodeData.DisplayName : string.Empty;
+            }
+
+            if (typeText != null)
+            {
+                typeText.text = nodeData != null ? nodeData.NodeType.ToString() : string.Empty;
+            }
+        }
+
+        public void RefreshState(MapNodeState state, bool isSelected)
+        {
+            CurrentState = state;
+
+            if (stateText != null)
+                stateText.text = state.ToString();
+
+            if (selectedRoot != null)
+                selectedRoot.SetActive(isSelected);
+
+            if (lockedRoot != null)
+                lockedRoot.SetActive(state == MapNodeState.Locked);
+
+            if (availableRoot != null)
+                availableRoot.SetActive(state == MapNodeState.Available);
+
+            if (currentRoot != null)
+                currentRoot.SetActive(state == MapNodeState.Current);
+
+            if (completedRoot != null)
+                completedRoot.SetActive(state == MapNodeState.Completed);
+
+            Color background = state switch
+            {
+                MapNodeState.Locked => lockedColor,
+                MapNodeState.Available => availableColor,
+                MapNodeState.Current => currentColor,
+                MapNodeState.Completed => completedColor,
+                _ => lockedColor
+            };
+
+            if (backgroundImage != null)
+                backgroundImage.color = background;
+
+            float alpha = state switch
+            {
+                MapNodeState.Locked => 0.35f,
+                MapNodeState.Completed => 0.75f,
+                MapNodeState.Available => 1f,
+                MapNodeState.Current => 1f,
+                _ => 1f
+            };
+
+            if (canvasGroup != null)
+                canvasGroup.alpha = alpha;
+
+            bool interactable = state == MapNodeState.Available;
+            SetInteractable(interactable);
+        }
+
+        public void SetInteractable(bool value)
+        {
+            if (button != null)
+                button.interactable = value;
+        }
+
+        public void Clear()
+        {
+            NodeId = string.Empty;
+            NodeData = null;
+            CurrentState = MapNodeState.Locked;
+
+            if (titleText != null)
+                titleText.text = string.Empty;
+
+            if (typeText != null)
+                typeText.text = string.Empty;
+
+            if (stateText != null)
+                stateText.text = string.Empty;
+
+            if (selectedRoot != null)
+                selectedRoot.SetActive(false);
+
+            if (lockedRoot != null)
+                lockedRoot.SetActive(false);
+
+            if (availableRoot != null)
+                availableRoot.SetActive(false);
+
+            if (currentRoot != null)
+                currentRoot.SetActive(false);
+
+            if (completedRoot != null)
+                completedRoot.SetActive(false);
+
+            SetInteractable(false);
+        }
+
+        private void HandleButtonClicked()
+        {
+            if (string.IsNullOrWhiteSpace(NodeId))
+                return;
+
+            OnNodeClicked?.Invoke(NodeId);
+        }
+    }
+}
+```
+
+## FILE: TreeMapUIController.cs
+**Path:** `Assets/Scripts/Run/Map/UI/TreeMapUIController.cs`
+```csharp
+using System;
+using System.Collections.Generic;
+using TMPro;
+using UnityEngine;
+using UnityEngine.UI;
+
+namespace CardBattle.Core
+{
+    public class TreeMapUIController : MonoBehaviour
+    {
+        [Header("Map Source")]
+        [SerializeField] private MapRuntimeController mapRuntimeController;
+
+        [Header("Containers")]
+        [SerializeField] private RectTransform nodeContainer;
+        [SerializeField] private RectTransform lineContainer;
+
+        [Header("Prefabs")]
+        [SerializeField] private TreeMapNodeButtonUI nodeButtonPrefab;
+        [SerializeField] private TreeMapLineUI linePrefab;
+
+        [Header("Panel")]
+        [SerializeField] private GameObject panelRoot;
+        [SerializeField] private Button startBattleButton;
+        [SerializeField] private TextMeshProUGUI selectedNodeText;
+        [SerializeField] private TextMeshProUGUI statusText;
+
+        [Header("Layout")]
+        [SerializeField] private float nodePositionScale = 1f;
+
+        [Header("Line Style")]
+        [SerializeField] private Color lineColor = new Color(0.55f, 0.55f, 0.6f, 0.85f);
+        [SerializeField] private float lineThickness = 4f;
+
+        [Header("Options")]
+        [SerializeField] private bool initializeMapOnStart = true;
+        [SerializeField] private bool rebuildOnMapStateChanged = true;
+        [SerializeField] private bool verboseLogs = true;
+
+        private readonly Dictionary<string, TreeMapNodeButtonUI> nodeViews =
+            new Dictionary<string, TreeMapNodeButtonUI>(StringComparer.Ordinal);
+
+        private readonly List<TreeMapLineUI> lineViews = new List<TreeMapLineUI>();
+
+        public bool IsVisible { get; private set; }
+
+        public event Action<MapNodeData> OnStartBattleRequested;
+
+        private MapRuntimeController subscribedMapController;
+
+        private void Awake()
+        {
+            if (startBattleButton != null)
+            {
+                startBattleButton.onClick.RemoveListener(HandleStartBattleClicked);
+                startBattleButton.onClick.AddListener(HandleStartBattleClicked);
+            }
+        }
+
+        private void Start()
+        {
+            if (initializeMapOnStart && mapRuntimeController != null && !mapRuntimeController.HasInitialized)
+                mapRuntimeController.InitializeMap();
+
+            Rebuild();
+        }
+
+        private void OnEnable()
+        {
+            SubscribeMapController();
+        }
+
+        private void OnDisable()
+        {
+            UnsubscribeMapController();
+        }
+
+        public void Show()
+        {
+            if (panelRoot != null)
+                panelRoot.SetActive(true);
+
+            IsVisible = true;
+        }
+
+        public void Hide()
+        {
+            if (panelRoot != null)
+                panelRoot.SetActive(false);
+
+            IsVisible = false;
+        }
+
+        public void Rebuild()
+        {
+            ClearViews();
+
+            if (!TryGetMapController(out MapRuntimeController controller))
+                return;
+
+            if (!controller.HasInitialized || controller.ActData == null)
+            {
+                if (verboseLogs)
+                {
+                    Debug.LogWarning(
+                        "[TreeMapUIController] Cannot rebuild: map is not initialized or Act Data is missing.");
+                }
+
+                Refresh();
+                return;
+            }
+
+            IReadOnlyList<MapNodeData> nodes = controller.ActData.Nodes;
+            for (int i = 0; i < nodes.Count; i++)
+            {
+                MapNodeData node = nodes[i];
+                if (node == null || !node.HasValidNodeId)
+                    continue;
+
+                if (nodeButtonPrefab == null || nodeContainer == null)
+                {
+                    if (verboseLogs)
+                    {
+                        Debug.LogWarning(
+                            "[TreeMapUIController] Node button prefab or node container is missing.");
+                    }
+
+                    break;
+                }
+
+                TreeMapNodeButtonUI view = Instantiate(nodeButtonPrefab, nodeContainer);
+                RectTransform viewRect = view.transform as RectTransform;
+                if (viewRect != null)
+                {
+                    SetCenterAnchors(viewRect);
+                    viewRect.anchoredPosition = node.UiPosition * nodePositionScale;
+                }
+
+                view.Bind(node);
+                view.OnNodeClicked += HandleNodeClicked;
+                nodeViews[node.NodeId] = view;
+            }
+
+            BuildLines(controller.ActData);
+            Refresh();
+        }
+
+        public void Refresh()
+        {
+            if (!TryGetMapController(out MapRuntimeController controller))
+                return;
+
+            string selectedNodeId = controller.SelectedNodeId;
+
+            foreach (KeyValuePair<string, TreeMapNodeButtonUI> pair in nodeViews)
+            {
+                MapNodeState state = controller.GetNodeState(pair.Key);
+                bool isSelected = !string.IsNullOrWhiteSpace(selectedNodeId) &&
+                                  string.Equals(pair.Key, selectedNodeId, StringComparison.Ordinal);
+                pair.Value.RefreshState(state, isSelected);
+            }
+
+            RefreshSelectedNodeText(controller);
+            RefreshStartBattleButton(controller);
+            RefreshStatusText(controller);
+        }
+
+        public bool TryGetSelectedNode(out MapNodeData node)
+        {
+            node = null;
+
+            if (mapRuntimeController == null)
+                return false;
+
+            return mapRuntimeController.TryGetSelectedNode(out node);
+        }
+
+        private void BuildLines(MapActData actData)
+        {
+            if (linePrefab == null || lineContainer == null || actData == null)
+                return;
+
+            IReadOnlyList<MapNodeData> nodes = actData.Nodes;
+            for (int i = 0; i < nodes.Count; i++)
+            {
+                MapNodeData node = nodes[i];
+                if (node == null || node.ConnectedNodeIds == null)
+                    continue;
+
+                Vector2 start = node.UiPosition * nodePositionScale;
+
+                for (int j = 0; j < node.ConnectedNodeIds.Count; j++)
+                {
+                    string connectedId = node.ConnectedNodeIds[j];
+                    if (!actData.TryGetNode(connectedId, out MapNodeData connectedNode))
+                        continue;
+
+                    TreeMapLineUI line = Instantiate(linePrefab, lineContainer);
+                    RectTransform lineRect = line.transform as RectTransform;
+                    if (lineRect != null)
+                        SetCenterAnchors(lineRect);
+
+                    Vector2 end = connectedNode.UiPosition * nodePositionScale;
+                    line.Bind(start, end, lineColor, lineThickness);
+                    lineViews.Add(line);
+                }
+            }
+        }
+
+        private void RefreshSelectedNodeText(MapRuntimeController controller)
+        {
+            if (selectedNodeText == null)
+                return;
+
+            if (controller.TryGetSelectedNode(out MapNodeData node))
+            {
+                selectedNodeText.text =
+                    $"Selected: {node.DisplayName}\n" +
+                    $"Type: {node.NodeType}\n" +
+                    $"Encounter: {(node.HasEncounter ? node.EncounterId : "none")}";
+            }
+            else
+            {
+                selectedNodeText.text = "Select an available node.";
+            }
+        }
+
+        private void RefreshStartBattleButton(MapRuntimeController controller)
+        {
+            if (startBattleButton == null)
+                return;
+
+            bool canStart = controller.HasSelectedNode &&
+                            controller.TryGetSelectedNode(out MapNodeData node) &&
+                            node.HasEncounter;
+
+            startBattleButton.interactable = canStart;
+        }
+
+        private void RefreshStatusText(MapRuntimeController controller)
+        {
+            if (statusText == null || controller.CurrentMapState == null)
+                return;
+
+            RunMapState mapState = controller.CurrentMapState;
+            statusText.text =
+                $"Current: {mapState.CurrentNodeId}\n" +
+                $"Selected: {mapState.SelectedNodeId}\n" +
+                $"Available: {FormatNodeIdList(mapState.GetNodeIdsByState(MapNodeState.Available))}";
+        }
+
+        private void HandleNodeClicked(string nodeId)
+        {
+            if (!TryGetMapController(out MapRuntimeController controller))
+                return;
+
+            bool selected = controller.TrySelectNode(nodeId);
+            Refresh();
+
+            if (!selected && statusText != null)
+            {
+                statusText.text =
+                    $"Cannot select '{nodeId}'. Choose an available node.";
+            }
+
+            if (verboseLogs)
+            {
+                Debug.Log(
+                    $"[TreeMapUIController] TrySelectNode('{nodeId}') => {selected}");
+            }
+        }
+
+        private void HandleStartBattleClicked()
+        {
+            if (!TryGetSelectedNode(out MapNodeData node))
+            {
+                if (verboseLogs)
+                {
+                    Debug.LogWarning(
+                        "[TreeMapUIController] Start Battle clicked with no valid selected node.");
+                }
+
+                return;
+            }
+
+            if (!node.HasEncounter)
+            {
+                if (verboseLogs)
+                {
+                    Debug.LogWarning(
+                        $"[TreeMapUIController] Start Battle clicked but node '{node.NodeId}' has no encounter.");
+                }
+
+                return;
+            }
+
+            OnStartBattleRequested?.Invoke(node);
+
+            if (verboseLogs)
+            {
+                Debug.Log(
+                    $"[TreeMapUIController] Start battle requested for node={node.NodeId} | " +
+                    $"encounter={node.EncounterId}");
+            }
+        }
+
+        private void HandleMapInitialized(RunMapState _)
+        {
+            Rebuild();
+        }
+
+        private void HandleMapStateChanged()
+        {
+            if (rebuildOnMapStateChanged)
+                Refresh();
+        }
+
+        private void HandleNodeSelected(MapNodeData _)
+        {
+            Refresh();
+        }
+
+        private void HandleNodeStateChanged(string _, MapNodeState __)
+        {
+            if (rebuildOnMapStateChanged)
+                Refresh();
+        }
+
+        private void SubscribeMapController()
+        {
+            UnsubscribeMapController();
+
+            if (mapRuntimeController == null)
+                return;
+
+            subscribedMapController = mapRuntimeController;
+            subscribedMapController.OnMapInitialized += HandleMapInitialized;
+            subscribedMapController.OnMapStateChanged += HandleMapStateChanged;
+            subscribedMapController.OnNodeSelected += HandleNodeSelected;
+            subscribedMapController.OnNodeStateChanged += HandleNodeStateChanged;
+        }
+
+        private void UnsubscribeMapController()
+        {
+            if (subscribedMapController == null)
+                return;
+
+            subscribedMapController.OnMapInitialized -= HandleMapInitialized;
+            subscribedMapController.OnMapStateChanged -= HandleMapStateChanged;
+            subscribedMapController.OnNodeSelected -= HandleNodeSelected;
+            subscribedMapController.OnNodeStateChanged -= HandleNodeStateChanged;
+            subscribedMapController = null;
+        }
+
+        private void ClearViews()
+        {
+            foreach (KeyValuePair<string, TreeMapNodeButtonUI> pair in nodeViews)
+            {
+                if (pair.Value == null)
+                    continue;
+
+                pair.Value.OnNodeClicked -= HandleNodeClicked;
+                Destroy(pair.Value.gameObject);
+            }
+
+            nodeViews.Clear();
+
+            for (int i = 0; i < lineViews.Count; i++)
+            {
+                if (lineViews[i] != null)
+                    Destroy(lineViews[i].gameObject);
+            }
+
+            lineViews.Clear();
+        }
+
+        private bool TryGetMapController(out MapRuntimeController controller)
+        {
+            controller = mapRuntimeController;
+            if (controller != null)
+                return true;
+
+            if (verboseLogs)
+            {
+                Debug.LogWarning(
+                    "[TreeMapUIController] MapRuntimeController reference is missing.");
+            }
+
+            return false;
+        }
+
+        private static void SetCenterAnchors(RectTransform rect)
+        {
+            if (rect == null)
+                return;
+
+            rect.anchorMin = new Vector2(0.5f, 0.5f);
+            rect.anchorMax = new Vector2(0.5f, 0.5f);
+            rect.pivot = new Vector2(0.5f, 0.5f);
+        }
+
+        private static string FormatNodeIdList(List<string> nodeIds)
+        {
+            if (nodeIds == null || nodeIds.Count == 0)
+                return string.Empty;
+
+            return string.Join(", ", nodeIds);
         }
     }
 }
