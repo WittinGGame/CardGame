@@ -9,27 +9,35 @@
 9. RunManager (RunManager.cs)
 10. CardBattle_Test
   1. Systems
-    1. DeckController (DeckController.cs)
-    2. CardResolver (CardResolver.cs)
-    3. EnemyActionSystem (EnemyActionSystem.cs)
-    4. BattleTestBootstrap (BattleTestBootstrap.cs)
-    5. TargetSelectionSystem (TargetSelectionSystem.cs)
-    6. BattleActionRunner (BattleActionRunner.cs)
-    7. BattleAudio
-      1. CardAudio (CardSFXController)
-      2. CombatAudio (CombatSFXController.cs)
-      3. UIAudio (UISFXController)
-    8. BattleOutcomeController (BattleOutcomeController.cs)
-    9. BattleEndPresentationController (BattleEndPresentationController.cs)
-    10. BattleRunBridge (BattleRunBridge.cs)
-    11. RewardController (RewardController.cs)
-    12. EncounterCompletionController (EncounterCompletionController.cs)
-    13. EncounterDataDebugTest (EncounterDataDebugTest.cs)
-    14. RuntimeEncounterContext (RuntimeEncounterContext.cs)
-    15. EncounterEnemySceneBinder (EncounterEnemySceneBinder.cs)
-    16. EncounterFlowResetController (EncounterFlowResetController.cs)
-    17. MapRuntimeController (MapRuntimeController.cs)
-    18. TreeMapBattleFlowController (TreeMapBattleFlowController.cs)
+    1. 00_Run
+      1. BattleRunBridge (BattleRunBridge.cs)
+      2. RunEndController (RunEndController.cs)
+    2. 01_Map
+      1. MapRuntimeController (MapRuntimeController.cs)
+      2. TreeMapBattleFlowController (TreeMapBattleFlowController.cs)
+    3. 02_Encounter
+      1. RuntimeEncounterContext (RuntimeEncounterContext.cs)
+      2. EncounterEnemySceneBinder (EncounterEnemySceneBinder.cs)
+      3. EncounterCompletionController (EncounterCompletionController.cs)
+      4. EncounterFlowResetController (EncounterFlowResetController.cs)
+    4. 03_Battle
+      1. BattleTestBootstrap (BattleTestBootstrap.cs)
+      2. DeckController (DeckController.cs)
+      3. CardResolver (CardResolver.cs)
+      4. EnemyActionSystem (EnemyActionSystem.cs)
+      5. BattleActionRunner (BattleActionRunner.cs)
+      6. TargetSelectionSystem (TargetSelectionSystem.cs)
+      7. BattleOutcomeController (BattleOutcomeController.cs)
+      8. BattleEndPresentationController (BattleEndPresentationController.cs)
+    5. 04_Reward
+      1. RewardController (RewardController.cs)
+    6. 05_Audio
+      1. BattleAudio
+        1. CardAudio (CardSFXController)
+        2. CombatAudio (CombatSFXController.cs)
+        3. UIAudio (UISFXController)
+    7. 99_Debug
+      1. EncounterDataDebugTest (EncounterDataDebugTest.cs)
   2. Units
     1. Player (PlayerBattleUnit.cs)
     2. Enemy_01 (EnemyBattleUnit.cs)

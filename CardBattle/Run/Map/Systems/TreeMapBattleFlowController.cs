@@ -17,6 +17,9 @@ namespace CardBattle.Core
         [SerializeField] private EncounterCompletionController encounterCompletionController;
         [SerializeField] private EncounterFlowResetController encounterFlowResetController;
 
+        [Header("Run End")]
+        [SerializeField] private RunEndController runEndController;
+
         [Header("Options")]
         [SerializeField] private bool hideMapWhenBattleStarts = true;
         [SerializeField] private bool showMapAfterEncounterCompletion = true;
@@ -80,6 +83,13 @@ namespace CardBattle.Core
 
         private void HandleEncounterCompletionReady()
         {
+            MapNodeData completedNode = null;
+            if (mapRuntimeController != null &&
+                mapRuntimeController.TryGetSelectedNode(out MapNodeData selectedNode))
+            {
+                completedNode = selectedNode;
+            }
+
             if (completeSelectedNodeOnEncounterCompletion && mapRuntimeController != null)
             {
                 bool completed = mapRuntimeController.TryCompleteSelectedNode();
@@ -89,6 +99,30 @@ namespace CardBattle.Core
                     Debug.Log(
                         $"[TreeMapBattleFlow] TryCompleteSelectedNode => {completed}");
                 }
+            }
+
+            bool isBossNode = completedNode != null &&
+                              completedNode.NodeType == MapNodeType.Boss;
+
+            if (isBossNode)
+            {
+                if (runEndController != null)
+                {
+                    runEndController.TryCompleteRun(completedNode.NodeId);
+                }
+                else if (verboseLogs)
+                {
+                    Debug.LogWarning(
+                        "[TreeMapBattleFlow] Boss node completed, but RunEndController is missing.");
+                }
+
+                if (verboseLogs)
+                {
+                    Debug.Log(
+                        "[TreeMapBattleFlow] Boss node completed. Ending run.");
+                }
+
+                return;
             }
 
             if (prepareNextEncounterStateAfterCompletion && encounterFlowResetController != null)
@@ -111,7 +145,7 @@ namespace CardBattle.Core
             if (verboseLogs)
             {
                 Debug.Log(
-                    "[TreeMapBattleFlow] Encounter completed. Map updated and shown.");
+                    "[TreeMapBattleFlow] Encounter completed. Returning to map.");
             }
         }
 
