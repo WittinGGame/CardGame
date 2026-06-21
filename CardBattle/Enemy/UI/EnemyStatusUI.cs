@@ -24,9 +24,11 @@ namespace CardBattle.Core
 
         public void Refresh()
         {
-            if (targetEnemy == null)
+            if (targetEnemy == null ||
+                !targetEnemy.gameObject.activeInHierarchy)
             {
                 SetEmptyState();
+                gameObject.SetActive(false);
                 return;
             }
 

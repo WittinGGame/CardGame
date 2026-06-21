@@ -151,6 +151,8 @@ namespace CardBattle.Core
             if (registerBoundEnemiesToEnemyActionSystem)
                 enemyActionSystem.ReplaceRegisteredEnemies(boundEnemyScratch);
 
+            RefreshAllEnemyUIControllers(logAfterApply: true);
+
             HasAppliedEncounterEnemies = true;
             ApplyCount++;
             LastBoundEnemyCount = boundEnemyScratch.Count;
@@ -193,8 +195,26 @@ namespace CardBattle.Core
                 }
             }
 
+            RefreshAllEnemyUIControllers();
+
             if (verboseLogs)
                 Debug.Log("[EncounterEnemySceneBinder] Cleared applied encounter enemies.");
+        }
+
+        private void RefreshAllEnemyUIControllers(bool logAfterApply = false)
+        {
+            EnemyUIController[] controllers = FindObjectsByType<EnemyUIController>(
+                FindObjectsInactive.Include,
+                FindObjectsSortMode.None);
+
+            for (int i = 0; i < controllers.Length; i++)
+                controllers[i].RefreshNow();
+
+            if (verboseLogs && logAfterApply && controllers.Length > 0)
+            {
+                Debug.Log(
+                    "[EncounterEnemySceneBinder] Refreshed enemy UI after applying encounter.");
+            }
         }
 
         private bool ValidateSlotBindingsConfiguration(out string error)

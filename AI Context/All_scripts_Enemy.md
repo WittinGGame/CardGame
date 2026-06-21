@@ -1,7 +1,5 @@
 ## FILE: EnemyBehaviorType.cs
-
 **Path:** `Assets/Scripts/CardBattle/Enemy/Data/EnemyBehaviorType.cs`
-
 ```csharp
 namespace CardBattle.Core
 {
@@ -17,9 +15,7 @@ namespace CardBattle.Core
 ```
 
 ## FILE: EnemyData.cs
-
 **Path:** `Assets/Scripts/CardBattle/Enemy/Data/EnemyData.cs`
-
 ```csharp
 using UnityEngine;
 
@@ -56,9 +52,7 @@ namespace CardBattle.Core
 ```
 
 ## FILE: EnemyTargetHighlight.cs
-
 **Path:** `Assets/Scripts/CardBattle/Enemy/Interaction/EnemyTargetHighlight.cs`
-
 ```csharp
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -110,9 +104,7 @@ public class EnemyTargetHighlight : MonoBehaviour, IPointerEnterHandler, IPointe
 ```
 
 ## FILE: TargetableEnemy.cs
-
 **Path:** `Assets/Scripts/CardBattle/Enemy/Interaction/TargetableEnemy.cs`
-
 ```csharp
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -139,9 +131,7 @@ namespace CardBattle.Core
 ```
 
 ## FILE: EnemyBuffUI.cs
-
 **Path:** `Assets/Scripts/CardBattle/Enemy/UI/EnemyBuffUI.cs`
-
 ```csharp
 using UnityEngine;
 
@@ -162,11 +152,11 @@ namespace CardBattle.Core
         }
     }
 }
+```
 
-================================================================================
-FILE: EnemyIntentUI.cs
-PATH: Assets/Scripts/CardBattle/Enemy/UI/EnemyIntentUI.cs
-================================================================================
+## FILE: EnemyIntentUI.cs
+**Path:** `Assets/Scripts/CardBattle/Enemy/UI/EnemyIntentUI.cs`
+```csharp
 using TMPro;
 using UnityEngine;
 
@@ -190,7 +180,9 @@ namespace CardBattle.Core
 
         public void Refresh()
         {
-            if (target == null || !target.IsAlive)
+            if (target == null ||
+                !target.gameObject.activeInHierarchy ||
+                !target.IsAlive)
             {
                 if (intentRoot != null)
                     intentRoot.SetActive(false);
@@ -224,9 +216,7 @@ namespace CardBattle.Core
 ```
 
 ## FILE: EnemyStatusUI.cs
-
 **Path:** `Assets/Scripts/CardBattle/Enemy/UI/EnemyStatusUI.cs`
-
 ```csharp
 using TMPro;
 using UnityEngine;
@@ -254,9 +244,11 @@ namespace CardBattle.Core
 
         public void Refresh()
         {
-            if (targetEnemy == null)
+            if (targetEnemy == null ||
+                !targetEnemy.gameObject.activeInHierarchy)
             {
                 SetEmptyState();
+                gameObject.SetActive(false);
                 return;
             }
 
@@ -316,9 +308,7 @@ namespace CardBattle.Core
 ```
 
 ## FILE: EnemyUIController.cs
-
 **Path:** `Assets/Scripts/CardBattle/Enemy/UI/EnemyUIController.cs`
-
 ```csharp
 using UnityEngine;
 
@@ -338,6 +328,9 @@ namespace CardBattle.Core
         [SerializeField] private WorldToUIFollow hpFollow;
         [SerializeField] private WorldToUIFollow intentFollow;
         [SerializeField] private WorldToUIFollow buffFollow;
+
+        [Header("Options")]
+        [SerializeField] private bool verboseLogs;
 
         public EnemyBattleUnit Target => target;
         public WorldToUIFollow HpFollow => hpFollow;
@@ -375,6 +368,11 @@ namespace CardBattle.Core
             target = enemy;
             BindAll();
             SubscribeTargetEvents();
+            RefreshAll();
+        }
+
+        public void RefreshNow()
+        {
             RefreshAll();
         }
 
@@ -499,8 +497,16 @@ namespace CardBattle.Core
 
         private bool RefreshVisibility()
         {
-            if (target == null || !target.IsAlive)
+            if (target == null ||
+                !target.gameObject.activeInHierarchy ||
+                !target.IsAlive)
             {
+                if (verboseLogs && target != null && !target.gameObject.activeInHierarchy)
+                {
+                    Debug.Log(
+                        $"[EnemyUIController] Hidden because target is inactive: {target.name}");
+                }
+
                 HideAll();
                 return false;
             }
@@ -523,6 +529,8 @@ namespace CardBattle.Core
 
             if (buffUI != null)
                 buffUI.gameObject.SetActive(false);
+
+            SetFollowEnabled(false);
         }
 
         private void ShowAll()
@@ -535,6 +543,33 @@ namespace CardBattle.Core
 
             if (buffUI != null && !buffUI.gameObject.activeSelf)
                 buffUI.gameObject.SetActive(true);
+
+            SetFollowEnabled(true);
+        }
+
+        private void SetFollowEnabled(bool enabled)
+        {
+            SetFollowComponentEnabled(hpFollow, enabled);
+            SetFollowComponentEnabled(intentFollow, enabled);
+            SetFollowComponentEnabled(buffFollow, enabled);
+        }
+
+        private static void SetFollowComponentEnabled(WorldToUIFollow follow, bool enabled)
+        {
+            if (follow == null)
+                return;
+
+            follow.enabled = enabled;
+
+            if (enabled)
+            {
+                if (!follow.gameObject.activeSelf)
+                    follow.gameObject.SetActive(true);
+            }
+            else if (follow.gameObject.activeSelf)
+            {
+                follow.gameObject.SetActive(false);
+            }
         }
 
         // =========================
@@ -563,9 +598,7 @@ namespace CardBattle.Core
 ```
 
 ## FILE: EnemyUIManager.cs
-
 **Path:** `Assets/Scripts/CardBattle/Enemy/UI/EnemyUIManager.cs`
-
 ```csharp
 using System.Collections.Generic;
 using UnityEngine;
@@ -712,4 +745,3 @@ namespace CardBattle.Core
     }
 }
 ```
-

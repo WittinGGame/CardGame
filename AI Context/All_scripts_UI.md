@@ -1384,8 +1384,16 @@ namespace CardBattle.Core
 
         private void LateUpdate()
         {
-            if (target == null || uiRectTransform == null || parentCanvas == null)
+            if (target == null ||
+                !target.gameObject.activeInHierarchy ||
+                uiRectTransform == null ||
+                parentCanvas == null)
+            {
+                if (uiRectTransform != null && uiRectTransform.gameObject.activeSelf)
+                    uiRectTransform.gameObject.SetActive(false);
+
                 return;
+            }
 
             if (targetCamera == null)
                 targetCamera = Camera.main;

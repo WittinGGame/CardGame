@@ -147,9 +147,15 @@ namespace CardBattle.Core
             {
                 if (verboseLogs)
                 {
+                    int catalogCount = encounterCatalog.Encounters != null
+                        ? encounterCatalog.Encounters.Count
+                        : 0;
+
                     Debug.LogWarning(
                         $"[RuntimeEncounterContext] Cannot select encounter: " +
-                        $"Encounter ID '{encounterId}' was not found in catalog.");
+                        $"Encounter ID '{encounterId}' was not found in catalog " +
+                        $"'{encounterCatalog.name}' ({catalogCount} entries). " +
+                        "Check MapNodeData.encounterId typos and MainEncounterCatalog registration.");
                 }
 
                 return false;

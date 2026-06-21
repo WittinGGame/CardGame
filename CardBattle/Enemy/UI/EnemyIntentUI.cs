@@ -21,7 +21,9 @@ namespace CardBattle.Core
 
         public void Refresh()
         {
-            if (target == null || !target.IsAlive)
+            if (target == null ||
+                !target.gameObject.activeInHierarchy ||
+                !target.IsAlive)
             {
                 if (intentRoot != null)
                     intentRoot.SetActive(false);

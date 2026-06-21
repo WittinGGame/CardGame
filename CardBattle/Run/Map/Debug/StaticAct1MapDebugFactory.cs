@@ -9,7 +9,7 @@ namespace CardBattle.Core
     /// </summary>
     public static class StaticAct1MapDebugFactory
     {
-        public const string DefaultAssetPath = "Assets/Data/Map/Act1_Map.asset";
+        public const string DefaultAssetPath = "Assets/GameData/Map/Act1_Map.asset";
 
         public static MapActData CreateAct1Map()
         {
@@ -23,16 +23,16 @@ namespace CardBattle.Core
             {
                 CreateNode("start", "Start", MapNodeType.Start, string.Empty,
                     new[] { "act1_normal_a", "act1_normal_b" }, new Vector2(0f, 0f)),
-                CreateNode("act1_normal_a", "Normal Battle A", MapNodeType.NormalBattle, "act1_normal_01",
-                    new[] { "act1_normal_c", "act1_elite_a" }, new Vector2(-1f, 1f)),
-                CreateNode("act1_normal_b", "Normal Battle B", MapNodeType.NormalBattle, "act1_normal_01",
-                    new[] { "act1_normal_c" }, new Vector2(1f, 1f)),
-                CreateNode("act1_normal_c", "Normal Battle C", MapNodeType.NormalBattle, "act1_normal_01",
-                    new[] { "act1_boss" }, new Vector2(0f, 2f)),
-                CreateNode("act1_elite_a", "Elite Battle A", MapNodeType.EliteBattle, "act1_normal_01",
-                    new[] { "act1_boss" }, new Vector2(-1f, 2f)),
-                CreateNode("act1_boss", "Boss", MapNodeType.Boss, "act1_normal_01",
-                    Array.Empty<string>(), new Vector2(0f, 3f))
+                CreateNode("act1_normal_a", "Patrol A", MapNodeType.NormalBattle, "act1_normal_01",
+                    new[] { "act1_normal_c", "act1_elite_a" }, new Vector2(-160f, 120f)),
+                CreateNode("act1_normal_b", "Patrol B", MapNodeType.NormalBattle, "act1_normal_02",
+                    new[] { "act1_normal_c" }, new Vector2(160f, 120f)),
+                CreateNode("act1_normal_c", "Crossroad Patrol", MapNodeType.NormalBattle, "act1_normal_03",
+                    new[] { "act1_boss" }, new Vector2(0f, 260f)),
+                CreateNode("act1_elite_a", "Elite Guard", MapNodeType.EliteBattle, "act1_elite_01",
+                    new[] { "act1_boss" }, new Vector2(-180f, 260f)),
+                CreateNode("act1_boss", "Gatekeeper", MapNodeType.Boss, "act1_boss_01",
+                    Array.Empty<string>(), new Vector2(0f, 420f))
             };
 
             SetPrivateField(act, "nodes", nodes);

@@ -17,6 +17,9 @@ namespace CardBattle.Core
         [SerializeField] private WorldToUIFollow intentFollow;
         [SerializeField] private WorldToUIFollow buffFollow;
 
+        [Header("Options")]
+        [SerializeField] private bool verboseLogs;
+
         public EnemyBattleUnit Target => target;
         public WorldToUIFollow HpFollow => hpFollow;
         public WorldToUIFollow IntentFollow => intentFollow;
@@ -53,6 +56,11 @@ namespace CardBattle.Core
             target = enemy;
             BindAll();
             SubscribeTargetEvents();
+            RefreshAll();
+        }
+
+        public void RefreshNow()
+        {
             RefreshAll();
         }
 
@@ -177,8 +185,16 @@ namespace CardBattle.Core
 
         private bool RefreshVisibility()
         {
-            if (target == null || !target.IsAlive)
+            if (target == null ||
+                !target.gameObject.activeInHierarchy ||
+                !target.IsAlive)
             {
+                if (verboseLogs && target != null && !target.gameObject.activeInHierarchy)
+                {
+                    Debug.Log(
+                        $"[EnemyUIController] Hidden because target is inactive: {target.name}");
+                }
+
                 HideAll();
                 return false;
             }
@@ -201,6 +217,8 @@ namespace CardBattle.Core
 
             if (buffUI != null)
                 buffUI.gameObject.SetActive(false);
+
+            SetFollowEnabled(false);
         }
 
         private void ShowAll()
@@ -213,6 +231,33 @@ namespace CardBattle.Core
 
             if (buffUI != null && !buffUI.gameObject.activeSelf)
                 buffUI.gameObject.SetActive(true);
+
+            SetFollowEnabled(true);
+        }
+
+        private void SetFollowEnabled(bool enabled)
+        {
+            SetFollowComponentEnabled(hpFollow, enabled);
+            SetFollowComponentEnabled(intentFollow, enabled);
+            SetFollowComponentEnabled(buffFollow, enabled);
+        }
+
+        private static void SetFollowComponentEnabled(WorldToUIFollow follow, bool enabled)
+        {
+            if (follow == null)
+                return;
+
+            follow.enabled = enabled;
+
+            if (enabled)
+            {
+                if (!follow.gameObject.activeSelf)
+                    follow.gameObject.SetActive(true);
+            }
+            else if (follow.gameObject.activeSelf)
+            {
+                follow.gameObject.SetActive(false);
+            }
         }
 
         // =========================
