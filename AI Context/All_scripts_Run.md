@@ -382,6 +382,24 @@ namespace CardBattle.Core
             return CurrentRun.Clone();
         }
 
+        public bool RestoreRun(RunState restoredRun)
+        {
+            if (restoredRun == null)
+                return false;
+
+            CurrentRun = restoredRun.Clone();
+
+            if (CurrentRun.isActive)
+                OnRunStarted?.Invoke(CurrentRun);
+            else
+                NotifyRunChanged();
+
+            Debug.Log(
+                $"[RunManager] Restored run. Active={HasActiveRun} | Class={CurrentRun.playerClassId}");
+
+            return true;
+        }
+
         private void NotifyRunChanged()
         {
             if (CurrentRun == null)
@@ -2889,6 +2907,10 @@ namespace CardBattle.Core
         [Header("Run")]
         [SerializeField] private RunManager runManager;
 
+        [Header("Save")]
+        [SerializeField] private ActiveRunSaveService activeRunSaveService;
+        [SerializeField] private ActiveRunAutoSaveController activeRunAutoSaveController;
+
         [Header("Gameplay")]
         [SerializeField] private MapRuntimeController mapRuntimeController;
         [SerializeField] private TreeMapUIController treeMapUIController;
@@ -2901,6 +2923,11 @@ namespace CardBattle.Core
         [SerializeField] private GameObject gameplayRoot;
         [SerializeField] private Button continueButton;
         [SerializeField] private TextMeshProUGUI selectedClassText;
+
+        [Header("New Run Confirmation")]
+        [SerializeField] private GameObject newRunConfirmPanel;
+        [SerializeField] private Button confirmNewRunButton;
+        [SerializeField] private Button cancelNewRunButton;
 
         [Header("Starter Run Settings")]
         [SerializeField] private string defaultClassId = "knight";
@@ -2930,13 +2957,30 @@ namespace CardBattle.Core
 
             SetPanelActive(gameplayRoot, false);
             SetPanelActive(characterSelectPanel, false);
+            SetPanelActive(newRunConfirmPanel, false);
+
+            WireNewRunConfirmButtons();
         }
 
         private void Start()
         {
             SelectKnight();
-            SetContinueButtonEnabled(false);
             ShowMainMenu();
+        }
+
+        private void WireNewRunConfirmButtons()
+        {
+            if (confirmNewRunButton != null)
+            {
+                confirmNewRunButton.onClick.RemoveListener(OnClickConfirmNewRun);
+                confirmNewRunButton.onClick.AddListener(OnClickConfirmNewRun);
+            }
+
+            if (cancelNewRunButton != null)
+            {
+                cancelNewRunButton.onClick.RemoveListener(OnClickCancelNewRun);
+                cancelNewRunButton.onClick.AddListener(OnClickCancelNewRun);
+            }
         }
 
         private void OnEnable()
@@ -2959,11 +3003,12 @@ namespace CardBattle.Core
             SetPanelActive(mainMenuPanel, true);
             SetPanelActive(characterSelectPanel, false);
             SetPanelActive(gameplayRoot, false);
+            SetPanelActive(newRunConfirmPanel, false);
 
             if (treeMapUIController != null)
                 treeMapUIController.Hide();
 
-            SetContinueButtonEnabled(false);
+            RefreshContinueButtonState();
 
             if (verboseLogs)
                 Debug.Log("[MainFlow] Showing Main Menu.");
@@ -3083,7 +3128,50 @@ namespace CardBattle.Core
 
         public void OnClickNewRun()
         {
+            if (activeRunSaveService != null && activeRunSaveService.HasActiveRunSave())
+            {
+                SetPanelActive(newRunConfirmPanel, true);
+
+                if (verboseLogs)
+                    Debug.Log("[MainFlow] New Run confirmation shown.");
+
+                return;
+            }
+
             ShowCharacterSelect();
+        }
+
+        public void OnClickConfirmNewRun()
+        {
+            SetPanelActive(newRunConfirmPanel, false);
+
+            if (activeRunAutoSaveController != null)
+            {
+                activeRunAutoSaveController.DeleteActiveSave("NewRunConfirmed");
+            }
+            else if (activeRunSaveService != null)
+            {
+                activeRunSaveService.DeleteSave();
+            }
+
+            RunManager manager = ResolveRunManager();
+            if (manager != null && manager.HasActiveRun)
+                manager.ClearRun();
+
+            RefreshContinueButtonState();
+            ShowCharacterSelect();
+
+            if (verboseLogs)
+                Debug.Log("[MainFlow] New Run confirmed. Existing save cleared.");
+        }
+
+        public void OnClickCancelNewRun()
+        {
+            SetPanelActive(newRunConfirmPanel, false);
+            RefreshContinueButtonState();
+
+            if (verboseLogs)
+                Debug.Log("[MainFlow] New Run confirmation cancelled.");
         }
 
         public void OnClickBackFromCharacterSelect()
@@ -3104,6 +3192,68 @@ namespace CardBattle.Core
         public void OnClickBackToMain()
         {
             BackToMainMenu();
+        }
+
+        public void OnClickContinueRun()
+        {
+            if (activeRunSaveService == null)
+            {
+                Debug.LogError("[MainFlow] Cannot continue: ActiveRunSaveService is missing.");
+                return;
+            }
+
+            if (!activeRunSaveService.TryLoad(out ActiveRunSaveData saveData))
+            {
+                Debug.LogWarning("[MainFlow] Cannot continue: no valid active run save found.");
+                RefreshContinueButtonState();
+                return;
+            }
+
+            RunManager manager = ResolveRunManager();
+            if (manager == null)
+            {
+                Debug.LogError("[MainFlow] Cannot continue: RunManager is missing.");
+                return;
+            }
+
+            if (!manager.RestoreRun(saveData.runState))
+            {
+                Debug.LogError("[MainFlow] Cannot continue: RunManager.RestoreRun failed.");
+                return;
+            }
+
+            if (mapRuntimeController == null)
+            {
+                Debug.LogError("[MainFlow] Cannot continue: MapRuntimeController is missing.");
+                return;
+            }
+
+            if (saveData.mapState == null || !mapRuntimeController.RestoreMapState(saveData.mapState))
+            {
+                Debug.LogError("[MainFlow] Cannot continue: map state restore failed.");
+                return;
+            }
+
+            ResetMainFlowForNewRun();
+
+            SetPanelActive(mainMenuPanel, false);
+            SetPanelActive(characterSelectPanel, false);
+            SetPanelActive(gameplayRoot, true);
+
+            if (treeMapUIController != null)
+            {
+                treeMapUIController.Show();
+                treeMapUIController.Rebuild();
+            }
+
+            if (verboseLogs)
+            {
+                RunState run = manager.CurrentRun;
+                int deckCount = run?.currentDeck != null ? run.currentDeck.Count : 0;
+                Debug.Log(
+                    $"[MainFlow] Continued active run. Class={run?.playerClassId} | " +
+                    $"HP={run?.currentHp}/{run?.maxHp} | Deck={deckCount}");
+            }
         }
 
         private List<RunCardRecord> BuildStarterDeckRecords()
@@ -3158,10 +3308,17 @@ namespace CardBattle.Core
             subscribedRunEndController = null;
         }
 
-        private void SetContinueButtonEnabled(bool enabled)
+        private void RefreshContinueButtonState()
         {
+            bool hasSave =
+                activeRunSaveService != null &&
+                activeRunSaveService.HasActiveRunSave();
+
             if (continueButton != null)
-                continueButton.interactable = enabled;
+            {
+                continueButton.gameObject.SetActive(hasSave);
+                continueButton.interactable = hasSave;
+            }
         }
 
         private static void SetPanelActive(GameObject panel, bool active)
@@ -5725,11 +5882,15 @@ namespace CardBattle.Core
     [Serializable]
     public class RunMapNodeState
     {
-        [UnityEngine.SerializeField] private string nodeId;
-        [UnityEngine.SerializeField] private MapNodeState state;
+        public string nodeId;
+        public MapNodeState state;
 
         public string NodeId => nodeId;
         public MapNodeState State => state;
+
+        public RunMapNodeState()
+        {
+        }
 
         public RunMapNodeState(string nodeId, MapNodeState state)
         {
@@ -5761,10 +5922,10 @@ namespace CardBattle.Core
     [Serializable]
     public class RunMapState
     {
-        [UnityEngine.SerializeField] private string actId = string.Empty;
-        [UnityEngine.SerializeField] private string currentNodeId = string.Empty;
-        [UnityEngine.SerializeField] private string selectedNodeId = string.Empty;
-        [UnityEngine.SerializeField] private List<RunMapNodeState> nodeStates = new List<RunMapNodeState>();
+        public string actId = string.Empty;
+        public string currentNodeId = string.Empty;
+        public string selectedNodeId = string.Empty;
+        public List<RunMapNodeState> nodeStates = new List<RunMapNodeState>();
 
         public string ActId => actId;
         public string CurrentNodeId => currentNodeId;
@@ -5952,6 +6113,17 @@ namespace CardBattle.Core
 
         public string SelectedNodeId =>
             CurrentMapState != null ? CurrentMapState.SelectedNodeId : string.Empty;
+
+        public string CurrentActId
+        {
+            get
+            {
+                if (CurrentMapState != null && !string.IsNullOrWhiteSpace(CurrentMapState.ActId))
+                    return CurrentMapState.ActId;
+
+                return actData != null ? actData.ActId : string.Empty;
+            }
+        }
 
         public bool HasSelectedNode =>
             CurrentMapState != null &&
@@ -6261,6 +6433,60 @@ namespace CardBattle.Core
             }
 
             return state;
+        }
+
+        public RunMapState GetMapSnapshot()
+        {
+            if (CurrentMapState == null)
+                return null;
+
+            RunMapState snapshot = CurrentMapState.Clone();
+
+            if (verboseLogs)
+            {
+                Debug.Log(
+                    $"[MapRuntimeController] Map state snapshot created. Act={snapshot.ActId}");
+            }
+
+            return snapshot;
+        }
+
+        public bool RestoreMapState(RunMapState restoredState)
+        {
+            if (restoredState == null)
+            {
+                LogError("Cannot restore map: restored state is null.");
+                return false;
+            }
+
+            if (actData == null)
+            {
+                LogError("Cannot restore map: Act Data is missing.");
+                return false;
+            }
+
+            if (!string.IsNullOrWhiteSpace(restoredState.ActId) &&
+                !string.Equals(restoredState.ActId, actData.ActId, StringComparison.Ordinal))
+            {
+                LogError(
+                    $"Cannot restore map: act mismatch saved={restoredState.ActId} " +
+                    $"current={actData.ActId}");
+                return false;
+            }
+
+            CurrentMapState = restoredState.Clone();
+            HasInitialized = true;
+
+            OnMapInitialized?.Invoke(CurrentMapState);
+            OnMapStateChanged?.Invoke();
+
+            if (verboseLogs)
+            {
+                Debug.Log(
+                    $"[MapRuntimeController] Map state restored. Act={CurrentMapState.ActId}");
+            }
+
+            return true;
         }
 
         public void DebugPrintMapState()
@@ -7140,6 +7366,450 @@ namespace CardBattle.Core
                 return string.Empty;
 
             return string.Join(", ", nodeIds);
+        }
+    }
+}
+```
+
+## FILE: ActiveRunAutoSaveController.cs
+**Path:** `Assets/Scripts/Run/Save/ActiveRunAutoSaveController.cs`
+```csharp
+using System.Collections;
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    public class ActiveRunAutoSaveController : MonoBehaviour
+    {
+        [Header("Save")]
+        [SerializeField] private ActiveRunSaveService saveService;
+
+        [Header("Run")]
+        [SerializeField] private RunManager runManager;
+
+        [Header("Map")]
+        [SerializeField] private MapRuntimeController mapRuntimeController;
+
+        [Header("Flow")]
+        [SerializeField] private EncounterCompletionController encounterCompletionController;
+        [SerializeField] private RunEndController runEndController;
+
+        [Header("Options")]
+        [SerializeField] private bool saveOnRunStarted;
+        [SerializeField] private bool saveOnEncounterCompleted = true;
+        [SerializeField] private bool deleteSaveOnRunEnded = true;
+        [SerializeField] private bool verboseLogs = true;
+
+        private RunManager subscribedRunManager;
+        private EncounterCompletionController subscribedEncounterCompletion;
+        private RunEndController subscribedRunEnd;
+
+        private void OnEnable()
+        {
+            SubscribeRunManager();
+            SubscribeEncounterCompletion();
+            SubscribeRunEnd();
+        }
+
+        private void OnDisable()
+        {
+            UnsubscribeRunManager();
+            UnsubscribeEncounterCompletion();
+            UnsubscribeRunEnd();
+        }
+
+        private void OnDestroy()
+        {
+            UnsubscribeRunManager();
+            UnsubscribeEncounterCompletion();
+            UnsubscribeRunEnd();
+        }
+
+        public bool SaveNow(string reason)
+        {
+            RunManager manager = ResolveRunManager();
+            if (manager == null || !manager.HasActiveRun)
+            {
+                if (verboseLogs)
+                {
+                    Debug.LogWarning(
+                        $"[ActiveRunAutoSave] Save skipped. Reason={reason} | No active run.");
+                }
+
+                return false;
+            }
+
+            if (saveService == null)
+            {
+                if (verboseLogs)
+                {
+                    Debug.LogWarning(
+                        $"[ActiveRunAutoSave] Save skipped. Reason={reason} | Save service missing.");
+                }
+
+                return false;
+            }
+
+            if (mapRuntimeController == null || !mapRuntimeController.HasInitialized)
+            {
+                if (verboseLogs)
+                {
+                    Debug.LogWarning(
+                        $"[ActiveRunAutoSave] Save skipped. Reason={reason} | Map not initialized.");
+                }
+
+                return false;
+            }
+
+            RunState runSnapshot = manager.GetSnapshot();
+            RunMapState mapSnapshot = mapRuntimeController.GetMapSnapshot();
+            if (runSnapshot == null || mapSnapshot == null)
+            {
+                if (verboseLogs)
+                {
+                    Debug.LogWarning(
+                        $"[ActiveRunAutoSave] Save skipped. Reason={reason} | Snapshot missing.");
+                }
+
+                return false;
+            }
+
+            ActiveRunSaveData saveData = ActiveRunSaveData.Create(
+                runSnapshot,
+                mapSnapshot,
+                mapRuntimeController.CurrentActId,
+                mapRuntimeController.SelectedNodeId);
+
+            bool success = saveService.TrySave(saveData);
+
+            if (verboseLogs)
+            {
+                Debug.Log(
+                    $"[ActiveRunAutoSave] Save requested. Reason={reason} | Success={success}");
+            }
+
+            return success;
+        }
+
+        public bool DeleteActiveSave(string reason)
+        {
+            if (saveService == null)
+            {
+                if (verboseLogs)
+                {
+                    Debug.LogWarning(
+                        $"[ActiveRunAutoSave] Delete skipped. Reason={reason} | Save service missing.");
+                }
+
+                return false;
+            }
+
+            bool deleted = saveService.DeleteSave();
+
+            if (verboseLogs)
+            {
+                Debug.Log(
+                    $"[ActiveRunAutoSave] Delete requested. Reason={reason} | Success={deleted}");
+            }
+
+            return deleted;
+        }
+
+        private void HandleRunStarted(RunState _)
+        {
+            if (!saveOnRunStarted)
+                return;
+
+            SaveNow("RunStarted");
+        }
+
+        private void HandleEncounterCompletionReady()
+        {
+            if (!saveOnEncounterCompleted)
+                return;
+
+            StartCoroutine(SaveAfterEncounterCompletionRoutine());
+        }
+
+        private IEnumerator SaveAfterEncounterCompletionRoutine()
+        {
+            yield return null;
+
+            if (runEndController != null && runEndController.IsRunEnded)
+                yield break;
+
+            RunManager manager = ResolveRunManager();
+            if (manager == null || !manager.HasActiveRun)
+                yield break;
+
+            SaveNow("EncounterCompleted");
+        }
+
+        private void HandleRunEnded(RunEndType endType)
+        {
+            if (!deleteSaveOnRunEnded)
+                return;
+
+            DeleteActiveSave($"RunEnded:{endType}");
+        }
+
+        private void SubscribeRunManager()
+        {
+            UnsubscribeRunManager();
+
+            RunManager manager = ResolveRunManager();
+            if (manager == null)
+                return;
+
+            subscribedRunManager = manager;
+            subscribedRunManager.OnRunStarted += HandleRunStarted;
+        }
+
+        private void UnsubscribeRunManager()
+        {
+            if (subscribedRunManager == null)
+                return;
+
+            subscribedRunManager.OnRunStarted -= HandleRunStarted;
+            subscribedRunManager = null;
+        }
+
+        private void SubscribeEncounterCompletion()
+        {
+            UnsubscribeEncounterCompletion();
+
+            if (encounterCompletionController == null)
+                return;
+
+            subscribedEncounterCompletion = encounterCompletionController;
+            subscribedEncounterCompletion.OnEncounterCompletionReady +=
+                HandleEncounterCompletionReady;
+        }
+
+        private void UnsubscribeEncounterCompletion()
+        {
+            if (subscribedEncounterCompletion == null)
+                return;
+
+            subscribedEncounterCompletion.OnEncounterCompletionReady -=
+                HandleEncounterCompletionReady;
+            subscribedEncounterCompletion = null;
+        }
+
+        private void SubscribeRunEnd()
+        {
+            UnsubscribeRunEnd();
+
+            if (runEndController == null)
+                return;
+
+            subscribedRunEnd = runEndController;
+            subscribedRunEnd.OnRunEnded += HandleRunEnded;
+        }
+
+        private void UnsubscribeRunEnd()
+        {
+            if (subscribedRunEnd == null)
+                return;
+
+            subscribedRunEnd.OnRunEnded -= HandleRunEnded;
+            subscribedRunEnd = null;
+        }
+
+        private RunManager ResolveRunManager()
+        {
+            if (runManager != null)
+                return runManager;
+
+            return RunManager.Instance;
+        }
+    }
+}
+```
+
+## FILE: ActiveRunSaveData.cs
+**Path:** `Assets/Scripts/Run/Save/ActiveRunSaveData.cs`
+```csharp
+using System;
+
+namespace CardBattle.Core
+{
+    [Serializable]
+    public class ActiveRunSaveData
+    {
+        public int schemaVersion = 1;
+        public string savedAtUtc = string.Empty;
+        public RunState runState;
+        public RunMapState mapState;
+        public string currentActId = string.Empty;
+        public string lastSelectedNodeId = string.Empty;
+
+        public static ActiveRunSaveData Create(
+            RunState run,
+            RunMapState map,
+            string actId,
+            string selectedNodeId)
+        {
+            return new ActiveRunSaveData
+            {
+                schemaVersion = 1,
+                savedAtUtc = DateTime.UtcNow.ToString("o"),
+                runState = run != null ? run.Clone() : null,
+                mapState = map != null ? map.Clone() : null,
+                currentActId = actId ?? string.Empty,
+                lastSelectedNodeId = selectedNodeId ?? string.Empty
+            };
+        }
+
+        public bool IsValidForContinue()
+        {
+            return runState != null && runState.isActive;
+        }
+    }
+}
+```
+
+## FILE: ActiveRunSaveService.cs
+**Path:** `Assets/Scripts/Run/Save/ActiveRunSaveService.cs`
+```csharp
+using System.IO;
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    public class ActiveRunSaveService : MonoBehaviour
+    {
+        [SerializeField] private string saveFileName = "active_run.json";
+        [SerializeField] private bool verboseLogs = true;
+
+        public string SavePath =>
+            string.IsNullOrWhiteSpace(saveFileName)
+                ? string.Empty
+                : Path.Combine(Application.persistentDataPath, saveFileName);
+
+        public bool HasActiveRunSave()
+        {
+            string path = SavePath;
+            return !string.IsNullOrEmpty(path) && File.Exists(path);
+        }
+
+        public bool TrySave(ActiveRunSaveData saveData)
+        {
+            if (saveData == null)
+            {
+                if (verboseLogs)
+                    Debug.LogWarning("[ActiveRunSave] Cannot save: save data is null.");
+
+                return false;
+            }
+
+            string path = SavePath;
+            if (string.IsNullOrEmpty(path))
+            {
+                if (verboseLogs)
+                    Debug.LogWarning("[ActiveRunSave] Cannot save: save path is invalid.");
+
+                return false;
+            }
+
+            try
+            {
+                string directory = Path.GetDirectoryName(path);
+                if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+                    Directory.CreateDirectory(directory);
+
+                string json = JsonUtility.ToJson(saveData, true);
+                File.WriteAllText(path, json);
+
+                if (verboseLogs)
+                    Debug.Log($"[ActiveRunSave] Saved active run: {path}");
+
+                return true;
+            }
+            catch (System.Exception exception)
+            {
+                Debug.LogError($"[ActiveRunSave] Save failed: {exception.Message}");
+                return false;
+            }
+        }
+
+        public bool TryLoad(out ActiveRunSaveData saveData)
+        {
+            saveData = null;
+            string path = SavePath;
+
+            if (string.IsNullOrEmpty(path) || !File.Exists(path))
+            {
+                if (verboseLogs)
+                    Debug.Log("[ActiveRunSave] No active run save found.");
+
+                return false;
+            }
+
+            try
+            {
+                string json = File.ReadAllText(path);
+                if (string.IsNullOrWhiteSpace(json))
+                {
+                    if (verboseLogs)
+                        Debug.LogWarning("[ActiveRunSave] Save file is empty.");
+
+                    return false;
+                }
+
+                saveData = JsonUtility.FromJson<ActiveRunSaveData>(json);
+                if (saveData == null || !saveData.IsValidForContinue())
+                {
+                    if (verboseLogs)
+                        Debug.LogWarning("[ActiveRunSave] Loaded save data is invalid.");
+
+                    saveData = null;
+                    return false;
+                }
+
+                if (verboseLogs)
+                    Debug.Log($"[ActiveRunSave] Loaded active run: {path}");
+
+                return true;
+            }
+            catch (System.Exception exception)
+            {
+                Debug.LogError($"[ActiveRunSave] Load failed: {exception.Message}");
+                saveData = null;
+                return false;
+            }
+        }
+        [ContextMenu("Debug Delete Active Run Save")]
+        private void DebugDeleteActiveRunSave()
+        {
+            DeleteSave();
+        }
+
+        public bool DeleteSave()
+        {
+            string path = SavePath;
+            if (string.IsNullOrEmpty(path) || !File.Exists(path))
+            {
+                if (verboseLogs)
+                    Debug.Log("[ActiveRunSave] No active run save found.");
+
+                return false;
+            }
+
+            try
+            {
+                File.Delete(path);
+
+                if (verboseLogs)
+                    Debug.Log("[ActiveRunSave] Deleted active run save.");
+
+                return true;
+            }
+            catch (System.Exception exception)
+            {
+                Debug.LogError($"[ActiveRunSave] Delete failed: {exception.Message}");
+                return false;
+            }
         }
     }
 }

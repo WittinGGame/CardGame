@@ -166,6 +166,24 @@ namespace CardBattle.Core
             return CurrentRun.Clone();
         }
 
+        public bool RestoreRun(RunState restoredRun)
+        {
+            if (restoredRun == null)
+                return false;
+
+            CurrentRun = restoredRun.Clone();
+
+            if (CurrentRun.isActive)
+                OnRunStarted?.Invoke(CurrentRun);
+            else
+                NotifyRunChanged();
+
+            Debug.Log(
+                $"[RunManager] Restored run. Active={HasActiveRun} | Class={CurrentRun.playerClassId}");
+
+            return true;
+        }
+
         private void NotifyRunChanged()
         {
             if (CurrentRun == null)

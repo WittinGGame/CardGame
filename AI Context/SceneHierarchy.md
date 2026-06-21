@@ -10,9 +10,11 @@
 10. CardBattle_Test
   1. Systems
     1. 00_Run
-      1. MainFlowController (MainFlowController.cs)
-      2. BattleRunBridge (BattleRunBridge.cs)
-      3. RunEndController (RunEndController.cs)
+      1. ActiveRunSaveService (ActiveRunSaveService.cs)
+      2. ActiveRunAutoSaveController (ActiveRunAutoSaveController.cs)
+      3. MainFlowController (MainFlowController.cs)
+      4. BattleRunBridge (BattleRunBridge.cs)
+      5. RunEndController (RunEndController.cs)
     2. 01_Map
       1. MapRuntimeController (MapRuntimeController.cs)
       2. TreeMapBattleFlowController (TreeMapBattleFlowController.cs)
@@ -104,6 +106,10 @@
         2. StartRunButton
         3. BackButton
         4. SelectedClassText
+      3. NewGameConfirmPanel
+        1. Des
+        2. Cancel
+        3. Confirm
 12. BattleFloatingTextSpawner
 13. BattlePresentationController
 14. RunPersistenceDebugTest

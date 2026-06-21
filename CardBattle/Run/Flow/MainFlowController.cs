@@ -11,6 +11,10 @@ namespace CardBattle.Core
         [Header("Run")]
         [SerializeField] private RunManager runManager;
 
+        [Header("Save")]
+        [SerializeField] private ActiveRunSaveService activeRunSaveService;
+        [SerializeField] private ActiveRunAutoSaveController activeRunAutoSaveController;
+
         [Header("Gameplay")]
         [SerializeField] private MapRuntimeController mapRuntimeController;
         [SerializeField] private TreeMapUIController treeMapUIController;
@@ -23,6 +27,11 @@ namespace CardBattle.Core
         [SerializeField] private GameObject gameplayRoot;
         [SerializeField] private Button continueButton;
         [SerializeField] private TextMeshProUGUI selectedClassText;
+
+        [Header("New Run Confirmation")]
+        [SerializeField] private GameObject newRunConfirmPanel;
+        [SerializeField] private Button confirmNewRunButton;
+        [SerializeField] private Button cancelNewRunButton;
 
         [Header("Starter Run Settings")]
         [SerializeField] private string defaultClassId = "knight";
@@ -52,13 +61,30 @@ namespace CardBattle.Core
 
             SetPanelActive(gameplayRoot, false);
             SetPanelActive(characterSelectPanel, false);
+            SetPanelActive(newRunConfirmPanel, false);
+
+            WireNewRunConfirmButtons();
         }
 
         private void Start()
         {
             SelectKnight();
-            SetContinueButtonEnabled(false);
             ShowMainMenu();
+        }
+
+        private void WireNewRunConfirmButtons()
+        {
+            if (confirmNewRunButton != null)
+            {
+                confirmNewRunButton.onClick.RemoveListener(OnClickConfirmNewRun);
+                confirmNewRunButton.onClick.AddListener(OnClickConfirmNewRun);
+            }
+
+            if (cancelNewRunButton != null)
+            {
+                cancelNewRunButton.onClick.RemoveListener(OnClickCancelNewRun);
+                cancelNewRunButton.onClick.AddListener(OnClickCancelNewRun);
+            }
         }
 
         private void OnEnable()
@@ -81,11 +107,12 @@ namespace CardBattle.Core
             SetPanelActive(mainMenuPanel, true);
             SetPanelActive(characterSelectPanel, false);
             SetPanelActive(gameplayRoot, false);
+            SetPanelActive(newRunConfirmPanel, false);
 
             if (treeMapUIController != null)
                 treeMapUIController.Hide();
 
-            SetContinueButtonEnabled(false);
+            RefreshContinueButtonState();
 
             if (verboseLogs)
                 Debug.Log("[MainFlow] Showing Main Menu.");
@@ -205,7 +232,50 @@ namespace CardBattle.Core
 
         public void OnClickNewRun()
         {
+            if (activeRunSaveService != null && activeRunSaveService.HasActiveRunSave())
+            {
+                SetPanelActive(newRunConfirmPanel, true);
+
+                if (verboseLogs)
+                    Debug.Log("[MainFlow] New Run confirmation shown.");
+
+                return;
+            }
+
             ShowCharacterSelect();
+        }
+
+        public void OnClickConfirmNewRun()
+        {
+            SetPanelActive(newRunConfirmPanel, false);
+
+            if (activeRunAutoSaveController != null)
+            {
+                activeRunAutoSaveController.DeleteActiveSave("NewRunConfirmed");
+            }
+            else if (activeRunSaveService != null)
+            {
+                activeRunSaveService.DeleteSave();
+            }
+
+            RunManager manager = ResolveRunManager();
+            if (manager != null && manager.HasActiveRun)
+                manager.ClearRun();
+
+            RefreshContinueButtonState();
+            ShowCharacterSelect();
+
+            if (verboseLogs)
+                Debug.Log("[MainFlow] New Run confirmed. Existing save cleared.");
+        }
+
+        public void OnClickCancelNewRun()
+        {
+            SetPanelActive(newRunConfirmPanel, false);
+            RefreshContinueButtonState();
+
+            if (verboseLogs)
+                Debug.Log("[MainFlow] New Run confirmation cancelled.");
         }
 
         public void OnClickBackFromCharacterSelect()
@@ -226,6 +296,68 @@ namespace CardBattle.Core
         public void OnClickBackToMain()
         {
             BackToMainMenu();
+        }
+
+        public void OnClickContinueRun()
+        {
+            if (activeRunSaveService == null)
+            {
+                Debug.LogError("[MainFlow] Cannot continue: ActiveRunSaveService is missing.");
+                return;
+            }
+
+            if (!activeRunSaveService.TryLoad(out ActiveRunSaveData saveData))
+            {
+                Debug.LogWarning("[MainFlow] Cannot continue: no valid active run save found.");
+                RefreshContinueButtonState();
+                return;
+            }
+
+            RunManager manager = ResolveRunManager();
+            if (manager == null)
+            {
+                Debug.LogError("[MainFlow] Cannot continue: RunManager is missing.");
+                return;
+            }
+
+            if (!manager.RestoreRun(saveData.runState))
+            {
+                Debug.LogError("[MainFlow] Cannot continue: RunManager.RestoreRun failed.");
+                return;
+            }
+
+            if (mapRuntimeController == null)
+            {
+                Debug.LogError("[MainFlow] Cannot continue: MapRuntimeController is missing.");
+                return;
+            }
+
+            if (saveData.mapState == null || !mapRuntimeController.RestoreMapState(saveData.mapState))
+            {
+                Debug.LogError("[MainFlow] Cannot continue: map state restore failed.");
+                return;
+            }
+
+            ResetMainFlowForNewRun();
+
+            SetPanelActive(mainMenuPanel, false);
+            SetPanelActive(characterSelectPanel, false);
+            SetPanelActive(gameplayRoot, true);
+
+            if (treeMapUIController != null)
+            {
+                treeMapUIController.Show();
+                treeMapUIController.Rebuild();
+            }
+
+            if (verboseLogs)
+            {
+                RunState run = manager.CurrentRun;
+                int deckCount = run?.currentDeck != null ? run.currentDeck.Count : 0;
+                Debug.Log(
+                    $"[MainFlow] Continued active run. Class={run?.playerClassId} | " +
+                    $"HP={run?.currentHp}/{run?.maxHp} | Deck={deckCount}");
+            }
         }
 
         private List<RunCardRecord> BuildStarterDeckRecords()
@@ -280,10 +412,17 @@ namespace CardBattle.Core
             subscribedRunEndController = null;
         }
 
-        private void SetContinueButtonEnabled(bool enabled)
+        private void RefreshContinueButtonState()
         {
+            bool hasSave =
+                activeRunSaveService != null &&
+                activeRunSaveService.HasActiveRunSave();
+
             if (continueButton != null)
-                continueButton.interactable = enabled;
+            {
+                continueButton.gameObject.SetActive(hasSave);
+                continueButton.interactable = hasSave;
+            }
         }
 
         private static void SetPanelActive(GameObject panel, bool active)

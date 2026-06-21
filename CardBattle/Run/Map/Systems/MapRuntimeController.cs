@@ -28,6 +28,17 @@ namespace CardBattle.Core
         public string SelectedNodeId =>
             CurrentMapState != null ? CurrentMapState.SelectedNodeId : string.Empty;
 
+        public string CurrentActId
+        {
+            get
+            {
+                if (CurrentMapState != null && !string.IsNullOrWhiteSpace(CurrentMapState.ActId))
+                    return CurrentMapState.ActId;
+
+                return actData != null ? actData.ActId : string.Empty;
+            }
+        }
+
         public bool HasSelectedNode =>
             CurrentMapState != null &&
             !string.IsNullOrWhiteSpace(CurrentMapState.SelectedNodeId);
@@ -336,6 +347,60 @@ namespace CardBattle.Core
             }
 
             return state;
+        }
+
+        public RunMapState GetMapSnapshot()
+        {
+            if (CurrentMapState == null)
+                return null;
+
+            RunMapState snapshot = CurrentMapState.Clone();
+
+            if (verboseLogs)
+            {
+                Debug.Log(
+                    $"[MapRuntimeController] Map state snapshot created. Act={snapshot.ActId}");
+            }
+
+            return snapshot;
+        }
+
+        public bool RestoreMapState(RunMapState restoredState)
+        {
+            if (restoredState == null)
+            {
+                LogError("Cannot restore map: restored state is null.");
+                return false;
+            }
+
+            if (actData == null)
+            {
+                LogError("Cannot restore map: Act Data is missing.");
+                return false;
+            }
+
+            if (!string.IsNullOrWhiteSpace(restoredState.ActId) &&
+                !string.Equals(restoredState.ActId, actData.ActId, StringComparison.Ordinal))
+            {
+                LogError(
+                    $"Cannot restore map: act mismatch saved={restoredState.ActId} " +
+                    $"current={actData.ActId}");
+                return false;
+            }
+
+            CurrentMapState = restoredState.Clone();
+            HasInitialized = true;
+
+            OnMapInitialized?.Invoke(CurrentMapState);
+            OnMapStateChanged?.Invoke();
+
+            if (verboseLogs)
+            {
+                Debug.Log(
+                    $"[MapRuntimeController] Map state restored. Act={CurrentMapState.ActId}");
+            }
+
+            return true;
         }
 
         public void DebugPrintMapState()

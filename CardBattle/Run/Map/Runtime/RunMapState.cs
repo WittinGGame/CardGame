@@ -6,10 +6,10 @@ namespace CardBattle.Core
     [Serializable]
     public class RunMapState
     {
-        [UnityEngine.SerializeField] private string actId = string.Empty;
-        [UnityEngine.SerializeField] private string currentNodeId = string.Empty;
-        [UnityEngine.SerializeField] private string selectedNodeId = string.Empty;
-        [UnityEngine.SerializeField] private List<RunMapNodeState> nodeStates = new List<RunMapNodeState>();
+        public string actId = string.Empty;
+        public string currentNodeId = string.Empty;
+        public string selectedNodeId = string.Empty;
+        public List<RunMapNodeState> nodeStates = new List<RunMapNodeState>();
 
         public string ActId => actId;
         public string CurrentNodeId => currentNodeId;

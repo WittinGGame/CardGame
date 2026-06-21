@@ -5,11 +5,15 @@ namespace CardBattle.Core
     [Serializable]
     public class RunMapNodeState
     {
-        [UnityEngine.SerializeField] private string nodeId;
-        [UnityEngine.SerializeField] private MapNodeState state;
+        public string nodeId;
+        public MapNodeState state;
 
         public string NodeId => nodeId;
         public MapNodeState State => state;
+
+        public RunMapNodeState()
+        {
+        }
 
         public RunMapNodeState(string nodeId, MapNodeState state)
         {
