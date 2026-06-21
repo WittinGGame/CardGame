@@ -10,8 +10,9 @@
 10. CardBattle_Test
   1. Systems
     1. 00_Run
-      1. BattleRunBridge (BattleRunBridge.cs)
-      2. RunEndController (RunEndController.cs)
+      1. MainFlowController (MainFlowController.cs)
+      2. BattleRunBridge (BattleRunBridge.cs)
+      3. RunEndController (RunEndController.cs)
     2. 01_Map
       1. MapRuntimeController (MapRuntimeController.cs)
       2. TreeMapBattleFlowController (TreeMapBattleFlowController.cs)
@@ -51,27 +52,59 @@
     3. Enemy_02 (EnemyBattleUnit.cs)
   3. Environment
 11. UI_Canvas
-  1. BG
-  2. HandUI
-    1. HandPanel
-  3. BattleHUD
-    1. PlayerHp
-    2. EndTurnButton
-    3. DeckPlayer
-    4. Graveyard
-    5. PlayerAP
-  4. EnemyUIContainer
-  5. RewardUI
-    1. RewardPanel
-      1. DimBackground
-      2. Title
-      3. GoldRoot
-        1. GoldAmountText
-      4. ChoiceContainer
-      5. NoChoicesRoot
-      6. ResultText
-      7. SkipButton
-      8. ContinueButton
+  1. BattleUI
+    1. HandUI
+      1. HandPanel
+    2. BattleHUD
+      1. BG
+      2. PlayerHp
+      3. EndTurnButton
+      4. DeckPlayer
+      5. Graveyard
+      6. PlayerAP
+      7. Buff
+    3. BattleVFX
+      1. GraveyardVFXContainer
+      2. GraveyardToDeckVFXController
+      3. FloatingTextContainer
+    4. TreeMapUI
+      1. MapPanel
+        1. LineContainer
+        2. NodeContainer
+        3. SelectedNodeInfoText
+        4. StatusText
+        5. StartBattleButton
+    5. RewardUI
+      1. RewardPanel
+        1. DimBackground
+        2. Title
+        3. GoldRoot
+          1. GoldAmountText
+        4. ChoiceContainer
+        5. NoChoicesRoot
+        6. ResultText
+        7. SkipButton
+        8. ContinueButton
+    6. RunEndUI
+      1. RunCompletePanel
+        1. Title
+        2. SummaryText
+        3. BackToMainButton
+      2. RunFailedPanel
+        1. Title
+        2. SummaryText
+        3. BackToMainButton
+    7. MainFlowUI
+      1. MainMenuPanel
+        1. NewRunButton
+        2. ContinueButton
+        3. GameName
+      2. CharacterSelectPanel
+        1. KnightButton
+        2. StartRunButton
+        3. BackButton
+        4. SelectedClassText
 12. BattleFloatingTextSpawner
 13. BattlePresentationController
+14. RunPersistenceDebugTest
 

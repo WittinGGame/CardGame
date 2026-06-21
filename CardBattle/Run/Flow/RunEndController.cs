@@ -29,6 +29,7 @@ namespace CardBattle.Core
         public event Action OnRunCompleted;
         public event Action OnRunFailed;
         public event Action<RunEndType> OnRunEnded;
+        public event Action OnBackToMainRequested;
 
         private BattleEndPresentationController subscribedPresentationController;
 
@@ -148,11 +149,22 @@ namespace CardBattle.Core
             LastRunEndType = RunEndType.None;
             LastRunEndReason = string.Empty;
 
-            SetPanelActive(runCompletePanel, false);
-            SetPanelActive(runFailedPanel, false);
+            HideRunEndPanels();
 
             if (verboseLogs)
                 Debug.Log("[RunEnd] Run end state reset for new run.");
+        }
+
+        public void HideRunEndPanels()
+        {
+            SetPanelActive(runCompletePanel, false);
+            SetPanelActive(runFailedPanel, false);
+        }
+
+        public void RequestBackToMain()
+        {
+            HideRunEndPanels();
+            OnBackToMainRequested?.Invoke();
         }
 
         private void HandleBattleEndPresentationReady(BattleOutcome outcome)
