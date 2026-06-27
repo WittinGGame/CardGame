@@ -76,7 +76,25 @@
         3. SelectedNodeInfoText
         4. StatusText
         5. StartBattleButton
-    5. RewardUI
+    5. RunTopBarController
+      1. RunTopBarUI
+        1. GoldText
+          1. GoldLabelText
+          2. GoldCountText
+        2. DeckButton
+          1. DeckLabelText
+          2. DeckCountText
+        3. RunTopBarController
+          1. RunDeckPanel
+            1. DimBackground
+            2. Panel
+              1. TitleText
+              2. ScrollView
+                1. Viewport
+                  1. Content
+              3. EmptyText
+              4. CloseButton
+    6. RewardUI
       1. RewardPanel
         1. DimBackground
         2. Title
@@ -87,7 +105,7 @@
         6. ResultText
         7. SkipButton
         8. ContinueButton
-    6. RunEndUI
+    7. RunEndUI
       1. RunCompletePanel
         1. Title
         2. SummaryText
@@ -96,7 +114,7 @@
         1. Title
         2. SummaryText
         3. BackToMainButton
-    7. MainFlowUI
+    8. MainFlowUI
       1. MainMenuPanel
         1. NewRunButton
         2. ContinueButton
