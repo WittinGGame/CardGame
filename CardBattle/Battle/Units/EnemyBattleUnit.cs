@@ -64,6 +64,7 @@ namespace CardBattle.Core
         {
             enemyData = data;
             ApplyEnemyData();
+            ClearStatuses();
             _hasAttackedThisPlayerRound = false;
             attackInProgress = false;
             NotifyStateChanged();
@@ -263,7 +264,7 @@ namespace CardBattle.Core
             bool wasAliveBeforeHit = pendingTarget.IsAlive;
             int blockBeforeHit = pendingTarget.CurrentBlock;
 
-            int hpDamage = pendingTarget.TakeDamage(damage);
+            int hpDamage = pendingTarget.TakeAttackDamage(this, damage);
             bool blockedAnyDamage = blockBeforeHit > pendingTarget.CurrentBlock;
 
             if (blockedAnyDamage)

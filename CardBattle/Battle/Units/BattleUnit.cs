@@ -7,12 +7,14 @@ namespace CardBattle.Core
     {
         [SerializeField] protected int maxHp = 10;
         [SerializeField] protected int currentHp;
+        [SerializeField] private StatusController statusController;
         protected int currentBlock;
 
         public int MaxHp => maxHp;
         public int CurrentHp => currentHp;
         public int CurrentBlock => currentBlock;
         public bool IsAlive => currentHp > 0;
+        public StatusController StatusController => statusController;
 
         public event Action<int, int> OnHpChangedEvent;
         public event Action<int> OnBlockChangedEvent;
@@ -24,6 +26,14 @@ namespace CardBattle.Core
 
         protected virtual void Awake()
         {
+            if (statusController == null)
+                statusController = GetComponent<StatusController>();
+
+            if (statusController == null)
+                statusController = gameObject.AddComponent<StatusController>();
+
+            statusController.SetOwner(this);
+
             if (currentHp <= 0)
                 currentHp = maxHp;
 
@@ -124,9 +134,51 @@ namespace CardBattle.Core
         {
             maxHp = Mathf.Max(1, newMaxHp);
             currentHp = Mathf.Clamp(newCurrentHp, 0, maxHp);
+            ClearStatuses();
 
             OnHpChanged();
             NotifyHpChanged();
+        }
+
+        public virtual void ApplyStatus(StatusEffectType type, int amount, StatusDurationType durationType, int duration)
+        {
+            statusController?.AddStatus(type, amount, durationType, duration);
+        }
+
+        public virtual void ClearStatuses()
+        {
+            statusController?.ClearAllStatuses();
+        }
+
+        public virtual void TickStatusTurnDuration()
+        {
+            statusController?.TickTurnDurationStatuses();
+        }
+
+        public virtual int CalculateOutgoingAttackDamage(int baseDamage, bool consumeOnUse = true)
+        {
+            if (statusController == null)
+                return Mathf.Max(0, baseDamage);
+
+            return statusController.ModifyOutgoingAttackDamage(baseDamage, consumeOnUse);
+        }
+
+        public virtual int CalculateIncomingAttackDamage(int incomingDamage)
+        {
+            if (statusController == null)
+                return Mathf.Max(0, incomingDamage);
+
+            return statusController.ModifyIncomingAttackDamage(incomingDamage);
+        }
+
+        public virtual int TakeAttackDamage(BattleUnit attacker, int baseDamage)
+        {
+            int outgoingDamage = baseDamage;
+            if (attacker != null)
+                outgoingDamage = attacker.CalculateOutgoingAttackDamage(baseDamage, true);
+
+            int finalDamage = CalculateIncomingAttackDamage(outgoingDamage);
+            return TakeDamage(finalDamage);
         }
 
         protected virtual void OnHpChanged() { }

@@ -101,7 +101,7 @@ namespace CardBattle.Core
             var total = data.AttackDamage + bonus;
             bool wasAliveBeforeHit = target.IsAlive;
 
-            int hpDamage = target.TakeDamage(total);
+            int hpDamage = target.TakeAttackDamage(context.Player, total);
 
             if (wasAliveBeforeHit)
             {

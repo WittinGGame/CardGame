@@ -30,7 +30,7 @@ namespace CardBattle.Core
                     continue;
 
                 bool wasAliveBeforeHit = target.IsAlive;
-                int hpDamage = target.TakeDamage(totalDamage);
+                int hpDamage = target.TakeAttackDamage(context.Player, totalDamage);
 
                 if (wasAliveBeforeHit)
                 {

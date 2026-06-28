@@ -71,9 +71,7 @@ namespace CardBattle.Core
 ```
 
 ## FILE: CardType.cs
-
 **Path:** `Assets/Scripts/CardBattle/Cards/Data/CardType.cs`
-
 ```csharp
 namespace CardBattle.Core
 {
@@ -136,9 +134,7 @@ namespace CardBattle.Core
 ```
 
 ## FILE: DealDamageEffectData.cs
-
 **Path:** `Assets/Scripts/CardBattle/Cards/Effects/DealDamageEffectData.cs`
-
 ```csharp
 using UnityEngine;
 
@@ -172,7 +168,7 @@ namespace CardBattle.Core
                     continue;
 
                 bool wasAliveBeforeHit = target.IsAlive;
-                int hpDamage = target.TakeDamage(totalDamage);
+                int hpDamage = target.TakeAttackDamage(context.Player, totalDamage);
 
                 if (wasAliveBeforeHit)
                 {
@@ -433,7 +429,7 @@ namespace CardBattle.Core
             var total = data.AttackDamage + bonus;
             bool wasAliveBeforeHit = target.IsAlive;
 
-            int hpDamage = target.TakeDamage(total);
+            int hpDamage = target.TakeAttackDamage(context.Player, total);
 
             if (wasAliveBeforeHit)
             {

@@ -1616,12 +1616,14 @@ namespace CardBattle.Core
     {
         [SerializeField] protected int maxHp = 10;
         [SerializeField] protected int currentHp;
+        [SerializeField] private StatusController statusController;
         protected int currentBlock;
 
         public int MaxHp => maxHp;
         public int CurrentHp => currentHp;
         public int CurrentBlock => currentBlock;
         public bool IsAlive => currentHp > 0;
+        public StatusController StatusController => statusController;
 
         public event Action<int, int> OnHpChangedEvent;
         public event Action<int> OnBlockChangedEvent;
@@ -1633,6 +1635,14 @@ namespace CardBattle.Core
 
         protected virtual void Awake()
         {
+            if (statusController == null)
+                statusController = GetComponent<StatusController>();
+
+            if (statusController == null)
+                statusController = gameObject.AddComponent<StatusController>();
+
+            statusController.SetOwner(this);
+
             if (currentHp <= 0)
                 currentHp = maxHp;
 
@@ -1733,9 +1743,51 @@ namespace CardBattle.Core
         {
             maxHp = Mathf.Max(1, newMaxHp);
             currentHp = Mathf.Clamp(newCurrentHp, 0, maxHp);
+            ClearStatuses();
 
             OnHpChanged();
             NotifyHpChanged();
+        }
+
+        public virtual void ApplyStatus(StatusEffectType type, int amount, StatusDurationType durationType, int duration)
+        {
+            statusController?.AddStatus(type, amount, durationType, duration);
+        }
+
+        public virtual void ClearStatuses()
+        {
+            statusController?.ClearAllStatuses();
+        }
+
+        public virtual void TickStatusTurnDuration()
+        {
+            statusController?.TickTurnDurationStatuses();
+        }
+
+        public virtual int CalculateOutgoingAttackDamage(int baseDamage, bool consumeOnUse = true)
+        {
+            if (statusController == null)
+                return Mathf.Max(0, baseDamage);
+
+            return statusController.ModifyOutgoingAttackDamage(baseDamage, consumeOnUse);
+        }
+
+        public virtual int CalculateIncomingAttackDamage(int incomingDamage)
+        {
+            if (statusController == null)
+                return Mathf.Max(0, incomingDamage);
+
+            return statusController.ModifyIncomingAttackDamage(incomingDamage);
+        }
+
+        public virtual int TakeAttackDamage(BattleUnit attacker, int baseDamage)
+        {
+            int outgoingDamage = baseDamage;
+            if (attacker != null)
+                outgoingDamage = attacker.CalculateOutgoingAttackDamage(baseDamage, true);
+
+            int finalDamage = CalculateIncomingAttackDamage(outgoingDamage);
+            return TakeDamage(finalDamage);
         }
 
         protected virtual void OnHpChanged() { }
@@ -1818,6 +1870,7 @@ namespace CardBattle.Core
         {
             enemyData = data;
             ApplyEnemyData();
+            ClearStatuses();
             _hasAttackedThisPlayerRound = false;
             attackInProgress = false;
             NotifyStateChanged();
@@ -2017,7 +2070,7 @@ namespace CardBattle.Core
             bool wasAliveBeforeHit = pendingTarget.IsAlive;
             int blockBeforeHit = pendingTarget.CurrentBlock;
 
-            int hpDamage = pendingTarget.TakeDamage(damage);
+            int hpDamage = pendingTarget.TakeAttackDamage(this, damage);
             bool blockedAnyDamage = blockBeforeHit > pendingTarget.CurrentBlock;
 
             if (blockedAnyDamage)
@@ -2209,6 +2262,7 @@ namespace CardBattle.Core
             CurrentAp = 0;
             _pendingAttackBonus = 0;
             ClearBlock();
+            ClearStatuses();
             OnDebugBuffChanged?.Invoke(DebugBuffCount);
             NotifyApChanged();
             NotifyTurnStateChanged();
@@ -2858,6 +2912,368 @@ namespace CardBattle.Core
             }
 
             OnBattleEnded?.Invoke(outcome);
+        }
+    }
+}
+```
+
+## FILE: StatusController.cs
+**Path:** `Assets/Scripts/CardBattle/Battle/Status/StatusController.cs`
+```csharp
+using System;
+using System.Collections.Generic;
+using System.Text;
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    public class StatusController : MonoBehaviour
+    {
+        [SerializeField] private BattleUnit owner;
+        [SerializeField] private float weakDamageMultiplier = 0.75f;
+        [SerializeField] private float vulnerableDamageMultiplier = 1.5f;
+        [SerializeField] private List<StatusInstance> statuses = new();
+
+        public event Action OnStatusesChanged;
+
+        public void SetOwner(BattleUnit value)
+        {
+            owner = value;
+        }
+
+        public void AddStatus(StatusEffectType type, int amount, StatusDurationType durationType, int duration)
+        {
+            if (amount <= 0 && type != StatusEffectType.Weak && type != StatusEffectType.Vulnerable)
+                return;
+
+            var existing = FindStatus(type);
+            if (existing != null)
+            {
+                if (amount > 0)
+                    existing.AddAmount(amount);
+
+                if (durationType != StatusDurationType.Encounter)
+                    existing.SetRemainingDurationToMax(duration);
+            }
+            else
+            {
+                statuses.Add(new StatusInstance(type, amount, durationType, duration));
+            }
+
+            RemoveExpiredStatuses();
+            NotifyChanged();
+        }
+
+        public void ClearAllStatuses()
+        {
+            if (statuses.Count == 0)
+                return;
+
+            statuses.Clear();
+            NotifyChanged();
+        }
+
+        public bool HasStatus(StatusEffectType type)
+        {
+            return GetTotalAmount(type) > 0 || FindStatus(type) != null;
+        }
+
+        public int GetTotalAmount(StatusEffectType type)
+        {
+            int total = 0;
+            for (int i = 0; i < statuses.Count; i++)
+            {
+                var status = statuses[i];
+                if (status.Type == type && !status.IsExpired)
+                    total += status.Amount;
+            }
+
+            return total;
+        }
+
+        public int ModifyOutgoingAttackDamage(int baseDamage, bool consumeOnUse)
+        {
+            int damage = baseDamage + GetTotalAmount(StatusEffectType.Strength);
+
+            int nextAttackBonus = GetTotalAmount(StatusEffectType.NextAttackBonus);
+            if (nextAttackBonus > 0)
+            {
+                damage += nextAttackBonus;
+
+                if (consumeOnUse)
+                {
+                    for (int i = statuses.Count - 1; i >= 0; i--)
+                    {
+                        var status = statuses[i];
+                        if (status.Type != StatusEffectType.NextAttackBonus)
+                            continue;
+
+                        status.ConsumeUse();
+                    }
+                }
+            }
+
+            if (HasActiveStatus(StatusEffectType.Weak))
+                damage = Mathf.FloorToInt(damage * weakDamageMultiplier);
+
+            RemoveExpiredStatuses();
+            NotifyChanged();
+            return Mathf.Max(0, damage);
+        }
+
+        public int ModifyIncomingAttackDamage(int incomingDamage)
+        {
+            int damage = incomingDamage;
+
+            if (HasActiveStatus(StatusEffectType.Vulnerable))
+                damage = Mathf.CeilToInt(damage * vulnerableDamageMultiplier);
+
+            return Mathf.Max(0, damage);
+        }
+
+        public void TickTurnDurationStatuses()
+        {
+            for (int i = 0; i < statuses.Count; i++)
+                statuses[i].TickTurn();
+
+            RemoveExpiredStatuses();
+            NotifyChanged();
+        }
+
+        public string BuildDebugText()
+        {
+            if (statuses.Count == 0)
+                return "(none)";
+
+            var builder = new StringBuilder();
+            for (int i = 0; i < statuses.Count; i++)
+            {
+                if (i > 0)
+                    builder.Append(", ");
+
+                builder.Append(statuses[i].ToShortText());
+            }
+
+            return builder.ToString();
+        }
+
+        private StatusInstance FindStatus(StatusEffectType type)
+        {
+            for (int i = 0; i < statuses.Count; i++)
+            {
+                var status = statuses[i];
+                if (status.Type == type && !status.IsExpired)
+                    return status;
+            }
+
+            return null;
+        }
+
+        private bool HasActiveStatus(StatusEffectType type)
+        {
+            for (int i = 0; i < statuses.Count; i++)
+            {
+                var status = statuses[i];
+                if (status.Type == type && !status.IsExpired)
+                    return true;
+            }
+
+            return false;
+        }
+
+        private void RemoveExpiredStatuses()
+        {
+            for (int i = statuses.Count - 1; i >= 0; i--)
+            {
+                if (statuses[i].IsExpired)
+                    statuses.RemoveAt(i);
+            }
+        }
+
+        private void NotifyChanged()
+        {
+            OnStatusesChanged?.Invoke();
+        }
+    }
+}
+```
+
+## FILE: StatusDurationType.cs
+**Path:** `Assets/Scripts/CardBattle/Battle/Status/StatusDurationType.cs`
+```csharp
+namespace CardBattle.Core
+{
+    public enum StatusDurationType
+    {
+        Encounter,
+        Turn,
+        UseCount
+    }
+}
+```
+
+## FILE: StatusEffectType.cs
+**Path:** `Assets/Scripts/CardBattle/Battle/Status/StatusEffectType.cs`
+```csharp
+namespace CardBattle.Core
+{
+    public enum StatusEffectType
+    {
+        Strength,
+        Weak,
+        Vulnerable,
+        NextAttackBonus
+    }
+}
+```
+
+## FILE: StatusInstance.cs
+**Path:** `Assets/Scripts/CardBattle/Battle/Status/StatusInstance.cs`
+```csharp
+using System;
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    [Serializable]
+    public class StatusInstance
+    {
+        [SerializeField] private StatusEffectType type;
+        [SerializeField] private int amount;
+        [SerializeField] private StatusDurationType durationType;
+        [SerializeField] private int remainingDuration;
+
+        public StatusEffectType Type => type;
+        public int Amount => amount;
+        public StatusDurationType DurationType => durationType;
+        public int RemainingDuration => remainingDuration;
+
+        public StatusInstance(StatusEffectType type, int amount, StatusDurationType durationType, int duration)
+        {
+            this.type = type;
+            this.amount = amount;
+            this.durationType = durationType;
+            remainingDuration = duration;
+        }
+
+        public void AddAmount(int value)
+        {
+            amount += value;
+        }
+
+        public void SetRemainingDurationToMax(int value)
+        {
+            remainingDuration = Mathf.Max(remainingDuration, value);
+        }
+
+        public void TickTurn()
+        {
+            if (durationType != StatusDurationType.Turn)
+                return;
+
+            remainingDuration--;
+        }
+
+        public void ConsumeUse()
+        {
+            if (durationType != StatusDurationType.UseCount)
+                return;
+
+            remainingDuration--;
+        }
+
+        public bool IsExpired =>
+            durationType == StatusDurationType.Turn && remainingDuration <= 0
+            || durationType == StatusDurationType.UseCount && remainingDuration <= 0;
+
+        public string ToShortText()
+        {
+            return durationType switch
+            {
+                StatusDurationType.Encounter => $"{type} {amount}",
+                StatusDurationType.Turn => $"{type} {amount} ({remainingDuration}T)",
+                StatusDurationType.UseCount => $"{type} {amount} ({remainingDuration}U)",
+                _ => $"{type} {amount}"
+            };
+        }
+    }
+}
+```
+
+## FILE: StatusDebugTest.cs
+**Path:** `Assets/Scripts/CardBattle/Battle/Status/Debug/StatusDebugTest.cs`
+```csharp
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    public class StatusDebugTest : MonoBehaviour
+    {
+        [SerializeField] private BattleUnit attacker;
+        [SerializeField] private BattleUnit defender;
+        [SerializeField] private int testDamage = 10;
+
+        [ContextMenu("Add Strength +3 to Attacker")]
+        private void AddStrengthToAttacker()
+        {
+            attacker?.ApplyStatus(StatusEffectType.Strength, 3, StatusDurationType.Encounter, 0);
+        }
+
+        [ContextMenu("Add Weak 2 Turns to Attacker")]
+        private void AddWeakToAttacker()
+        {
+            attacker?.ApplyStatus(StatusEffectType.Weak, 1, StatusDurationType.Turn, 2);
+        }
+
+        [ContextMenu("Add NextAttackBonus +5 to Attacker")]
+        private void AddNextAttackBonusToAttacker()
+        {
+            attacker?.ApplyStatus(StatusEffectType.NextAttackBonus, 5, StatusDurationType.UseCount, 1);
+        }
+
+        [ContextMenu("Add Vulnerable 2 Turns to Defender")]
+        private void AddVulnerableToDefender()
+        {
+            defender?.ApplyStatus(StatusEffectType.Vulnerable, 1, StatusDurationType.Turn, 2);
+        }
+
+        [ContextMenu("Deal Test Attack Damage")]
+        private void DealTestAttackDamage()
+        {
+            if (defender == null)
+                return;
+
+            int finalDamage = defender.TakeAttackDamage(attacker, testDamage);
+            Debug.Log($"StatusDebugTest: base={testDamage}, final HP damage={finalDamage}");
+        }
+
+        [ContextMenu("Tick Turn Duration")]
+        private void TickTurnDuration()
+        {
+            attacker?.TickStatusTurnDuration();
+            defender?.TickStatusTurnDuration();
+        }
+
+        [ContextMenu("Clear All")]
+        private void ClearAll()
+        {
+            attacker?.ClearStatuses();
+            defender?.ClearStatuses();
+        }
+
+        [ContextMenu("Print")]
+        private void Print()
+        {
+            string attackerText = attacker?.StatusController != null
+                ? attacker.StatusController.BuildDebugText()
+                : "(no attacker)";
+
+            string defenderText = defender?.StatusController != null
+                ? defender.StatusController.BuildDebugText()
+                : "(no defender)";
+
+            Debug.Log($"StatusDebugTest Attacker: {attackerText}");
+            Debug.Log($"StatusDebugTest Defender: {defenderText}");
         }
     }
 }

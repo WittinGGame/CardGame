@@ -158,6 +158,7 @@ namespace CardBattle.Core
             CurrentAp = 0;
             _pendingAttackBonus = 0;
             ClearBlock();
+            ClearStatuses();
             OnDebugBuffChanged?.Invoke(DebugBuffCount);
             NotifyApChanged();
             NotifyTurnStateChanged();

@@ -41,9 +41,11 @@
         3. UIAudio (UISFXController)
     7. 99_Debug
       1. EncounterDataDebugTest (EncounterDataDebugTest.cs)
+      2. MapActAuthoringDebugReporter (MapActAuthoringDebugReporter.cs)
+      3. StatusDebugTest (StatusDebugTest.cs)
   2. Units
-    1. Player (PlayerBattleUnit.cs)
-    2. Enemy_01 (EnemyBattleUnit.cs)
+    1. Player (PlayerBattleUnit.cs)(StatusController.cs)
+    2. Enemy_01 (EnemyBattleUnit.cs)(StatusController.cs)
       1. Model (Animator, BattleUnitView.cs)
       2. TargetCollider (Box Collider, TargetableEnemy.cs, EnemyTargetHighlight)
       3. UIAnchor_HP
@@ -51,7 +53,13 @@
       5. UIAnchor_Buff
       6. EnemyHighlight
       7. AttackAudio (CombatSFXController.cs)
-    3. Enemy_02 (EnemyBattleUnit.cs)
+    3. Enemy_02 (EnemyBattleUnit.cs)(StatusController.cs)
+      1. Model (Animator, BattleUnitView.cs)
+      2. TargetCollider (Box Collider, TargetableEnemy.cs, EnemyTargetHighlight)
+      3. UIAnchor_HP
+      4. UIAnchor_Intent
+      5. UIAnchor_Buff
+      6. EnemyHighlight
   3. Environment
 11. UI_Canvas
   1. BattleUI
