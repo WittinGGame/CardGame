@@ -4,6 +4,7 @@ namespace CardBattle.Core
     {
         Encounter,
         Turn,
-        UseCount
+        UseCount,
+        OwnerAction
     }
 }

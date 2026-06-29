@@ -20,6 +20,12 @@ namespace CardBattle.Core
             attacker?.ApplyStatus(StatusEffectType.Weak, 1, StatusDurationType.Turn, 2);
         }
 
+        [ContextMenu("Add Weak 1 Turn to Attacker (skip first tick)")]
+        private void AddWeakToAttackerWithSkip()
+        {
+            attacker?.ApplyStatus(StatusEffectType.Weak, 1, StatusDurationType.Turn, 1, skipNextTurnTick: true);
+        }
+
         [ContextMenu("Add NextAttackBonus +5 to Attacker")]
         private void AddNextAttackBonusToAttacker()
         {
@@ -30,6 +36,35 @@ namespace CardBattle.Core
         private void AddVulnerableToDefender()
         {
             defender?.ApplyStatus(StatusEffectType.Vulnerable, 1, StatusDurationType.Turn, 2);
+        }
+
+        [ContextMenu("Status Test/Attacker Add Strength +2 OwnerAction")]
+        private void AddStrengthOwnerAction()
+        {
+            attacker?.ApplyStatus(StatusEffectType.Strength, 2, StatusDurationType.OwnerAction, 1);
+            DebugPrint();
+        }
+
+        [ContextMenu("Status Test/Tick Attacker OwnerAction")]
+        private void TickAttackerOwnerAction()
+        {
+            attacker?.TickStatusOwnerActionDuration();
+            DebugPrint();
+        }
+
+        [ContextMenu("Status Test/Tick Defender OwnerAction")]
+        private void TickDefenderOwnerAction()
+        {
+            defender?.TickStatusOwnerActionDuration();
+            DebugPrint();
+        }
+
+        [ContextMenu("Status Test/Tick Both OwnerAction")]
+        private void TickBothOwnerAction()
+        {
+            attacker?.TickStatusOwnerActionDuration();
+            defender?.TickStatusOwnerActionDuration();
+            DebugPrint();
         }
 
         [ContextMenu("Deal Test Attack Damage")]
@@ -58,6 +93,11 @@ namespace CardBattle.Core
 
         [ContextMenu("Print")]
         private void Print()
+        {
+            DebugPrint();
+        }
+
+        private void DebugPrint()
         {
             string attackerText = attacker?.StatusController != null
                 ? attacker.StatusController.BuildDebugText()

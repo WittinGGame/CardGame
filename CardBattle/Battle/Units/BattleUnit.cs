@@ -142,7 +142,20 @@ namespace CardBattle.Core
 
         public virtual void ApplyStatus(StatusEffectType type, int amount, StatusDurationType durationType, int duration)
         {
-            statusController?.AddStatus(type, amount, durationType, duration);
+            ApplyStatus(type, amount, durationType, duration, false);
+        }
+
+        public virtual void ApplyStatus(
+            StatusEffectType type,
+            int amount,
+            StatusDurationType durationType,
+            int duration,
+            bool skipNextTurnTick)
+        {
+            if (!IsAlive)
+                return;
+
+            statusController?.AddStatus(type, amount, durationType, duration, skipNextTurnTick);
         }
 
         public virtual void ClearStatuses()
@@ -153,6 +166,11 @@ namespace CardBattle.Core
         public virtual void TickStatusTurnDuration()
         {
             statusController?.TickTurnDurationStatuses();
+        }
+
+        public virtual void TickStatusOwnerActionDuration()
+        {
+            statusController?.TickOwnerActionDurationStatuses();
         }
 
         public virtual int CalculateOutgoingAttackDamage(int baseDamage, bool consumeOnUse = true)

@@ -21,6 +21,16 @@ namespace CardBattle.Core
 
         public void AddStatus(StatusEffectType type, int amount, StatusDurationType durationType, int duration)
         {
+            AddStatus(type, amount, durationType, duration, false);
+        }
+
+        public void AddStatus(
+            StatusEffectType type,
+            int amount,
+            StatusDurationType durationType,
+            int duration,
+            bool skipNextTurnTick)
+        {
             if (amount <= 0 && type != StatusEffectType.Weak && type != StatusEffectType.Vulnerable)
                 return;
 
@@ -32,10 +42,14 @@ namespace CardBattle.Core
 
                 if (durationType != StatusDurationType.Encounter)
                     existing.SetRemainingDurationToMax(duration);
+
+                existing.SetSkipNextTurnTick(skipNextTurnTick);
             }
             else
             {
-                statuses.Add(new StatusInstance(type, amount, durationType, duration));
+                var created = new StatusInstance(type, amount, durationType, duration);
+                created.SetSkipNextTurnTick(skipNextTurnTick);
+                statuses.Add(created);
             }
 
             RemoveExpiredStatuses();
@@ -113,6 +127,15 @@ namespace CardBattle.Core
         {
             for (int i = 0; i < statuses.Count; i++)
                 statuses[i].TickTurn();
+
+            RemoveExpiredStatuses();
+            NotifyChanged();
+        }
+
+        public void TickOwnerActionDurationStatuses()
+        {
+            for (int i = 0; i < statuses.Count; i++)
+                statuses[i].TickOwnerAction();
 
             RemoveExpiredStatuses();
             NotifyChanged();

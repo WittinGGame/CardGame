@@ -19,6 +19,11 @@ namespace CardBattle.Core
         [Header("Turn Presentation")]
         [SerializeField] private TurnPresentationController turnPresentation;
 
+        [Header("Status Timing")]
+        [SerializeField] private bool tickStatusesOnPlayerRoundStart = true;
+        [SerializeField] private bool skipStatusTickOnFirstPlayerRound = true;
+        [SerializeField] private bool verboseStatusTickLogs = false;
+
         private Coroutine runningEnemyActions;
 
         public PlayerBattleUnit Player => player;
@@ -85,6 +90,8 @@ namespace CardBattle.Core
 
             if (turnPresentation != null)
                 yield return turnPresentation.PlayTurnIntro(CurrentTurn);
+
+            TickTurnDurationStatusesForPlayerRoundStart();
 
             // Reset enemy flags
             foreach (var enemy in enemies)
@@ -231,6 +238,76 @@ namespace CardBattle.Core
             }
 
             runningEnemyActions = null;
+        }
+
+        private void TickTurnDurationStatusesForPlayerRoundStart()
+        {
+            if (!tickStatusesOnPlayerRoundStart)
+                return;
+
+            if (skipStatusTickOnFirstPlayerRound && CurrentTurn <= 1)
+            {
+                if (verboseStatusTickLogs)
+                    Debug.Log("[EnemyActionSystem] Skipping status tick on first player round.");
+
+                return;
+            }
+
+            if (player != null && player.IsAlive)
+                player.TickStatusTurnDuration();
+
+            for (int i = 0; i < enemies.Count; i++)
+            {
+                EnemyBattleUnit enemy = enemies[i];
+                if (enemy == null || !enemy.IsAlive)
+                    continue;
+
+                enemy.TickStatusTurnDuration();
+            }
+
+            if (verboseStatusTickLogs)
+                DebugPrintBattleStatuses();
+        }
+
+        [ContextMenu("Debug Print Battle Statuses")]
+        private void DebugPrintBattleStatuses()
+        {
+            Debug.Log("[EnemyActionSystem] --- Battle Statuses ---");
+            Debug.Log($"CurrentTurn={CurrentTurn}");
+
+            if (player != null)
+            {
+                string playerText = player.StatusController != null
+                    ? player.StatusController.BuildDebugText()
+                    : "None";
+                Debug.Log($"Player: {playerText}");
+            }
+            else
+            {
+                Debug.Log("Player: (missing)");
+            }
+
+            for (int i = 0; i < enemies.Count; i++)
+            {
+                EnemyBattleUnit enemy = enemies[i];
+                if (enemy == null)
+                {
+                    Debug.Log($"Enemy[{i}]: (null)");
+                    continue;
+                }
+
+                string enemyText = enemy.StatusController != null
+                    ? enemy.StatusController.BuildDebugText()
+                    : "None";
+                Debug.Log($"Enemy[{i}] {enemy.name}: {enemyText}");
+            }
+        }
+
+        [ContextMenu("Debug Tick Turn Duration Statuses")]
+        private void DebugTickTurnDurationStatuses()
+        {
+            TickTurnDurationStatusesForPlayerRoundStart();
+            DebugPrintBattleStatuses();
         }
     }
 }

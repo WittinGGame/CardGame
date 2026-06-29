@@ -1050,6 +1050,7 @@ namespace CardBattle.Core
 
 ## FILE: EnemyActionSystem.cs
 **Path:** `Assets/Scripts/CardBattle/Battle/Systems/EnemyActionSystem.cs`
+```csharp
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
@@ -1070,6 +1071,11 @@ namespace CardBattle.Core
 
         [Header("Turn Presentation")]
         [SerializeField] private TurnPresentationController turnPresentation;
+
+        [Header("Status Timing")]
+        [SerializeField] private bool tickStatusesOnPlayerRoundStart = true;
+        [SerializeField] private bool skipStatusTickOnFirstPlayerRound = true;
+        [SerializeField] private bool verboseStatusTickLogs = false;
 
         private Coroutine runningEnemyActions;
 
@@ -1137,6 +1143,8 @@ namespace CardBattle.Core
 
             if (turnPresentation != null)
                 yield return turnPresentation.PlayTurnIntro(CurrentTurn);
+
+            TickTurnDurationStatusesForPlayerRoundStart();
 
             // Reset enemy flags
             foreach (var enemy in enemies)
@@ -1283,6 +1291,76 @@ namespace CardBattle.Core
             }
 
             runningEnemyActions = null;
+        }
+
+        private void TickTurnDurationStatusesForPlayerRoundStart()
+        {
+            if (!tickStatusesOnPlayerRoundStart)
+                return;
+
+            if (skipStatusTickOnFirstPlayerRound && CurrentTurn <= 1)
+            {
+                if (verboseStatusTickLogs)
+                    Debug.Log("[EnemyActionSystem] Skipping status tick on first player round.");
+
+                return;
+            }
+
+            if (player != null && player.IsAlive)
+                player.TickStatusTurnDuration();
+
+            for (int i = 0; i < enemies.Count; i++)
+            {
+                EnemyBattleUnit enemy = enemies[i];
+                if (enemy == null || !enemy.IsAlive)
+                    continue;
+
+                enemy.TickStatusTurnDuration();
+            }
+
+            if (verboseStatusTickLogs)
+                DebugPrintBattleStatuses();
+        }
+
+        [ContextMenu("Debug Print Battle Statuses")]
+        private void DebugPrintBattleStatuses()
+        {
+            Debug.Log("[EnemyActionSystem] --- Battle Statuses ---");
+            Debug.Log($"CurrentTurn={CurrentTurn}");
+
+            if (player != null)
+            {
+                string playerText = player.StatusController != null
+                    ? player.StatusController.BuildDebugText()
+                    : "None";
+                Debug.Log($"Player: {playerText}");
+            }
+            else
+            {
+                Debug.Log("Player: (missing)");
+            }
+
+            for (int i = 0; i < enemies.Count; i++)
+            {
+                EnemyBattleUnit enemy = enemies[i];
+                if (enemy == null)
+                {
+                    Debug.Log($"Enemy[{i}]: (null)");
+                    continue;
+                }
+
+                string enemyText = enemy.StatusController != null
+                    ? enemy.StatusController.BuildDebugText()
+                    : "None";
+                Debug.Log($"Enemy[{i}] {enemy.name}: {enemyText}");
+            }
+        }
+
+        [ContextMenu("Debug Tick Turn Duration Statuses")]
+        private void DebugTickTurnDurationStatuses()
+        {
+            TickTurnDurationStatusesForPlayerRoundStart();
+            DebugPrintBattleStatuses();
         }
     }
 }
@@ -1751,7 +1829,20 @@ namespace CardBattle.Core
 
         public virtual void ApplyStatus(StatusEffectType type, int amount, StatusDurationType durationType, int duration)
         {
-            statusController?.AddStatus(type, amount, durationType, duration);
+            ApplyStatus(type, amount, durationType, duration, false);
+        }
+
+        public virtual void ApplyStatus(
+            StatusEffectType type,
+            int amount,
+            StatusDurationType durationType,
+            int duration,
+            bool skipNextTurnTick)
+        {
+            if (!IsAlive)
+                return;
+
+            statusController?.AddStatus(type, amount, durationType, duration, skipNextTurnTick);
         }
 
         public virtual void ClearStatuses()
@@ -1762,6 +1853,11 @@ namespace CardBattle.Core
         public virtual void TickStatusTurnDuration()
         {
             statusController?.TickTurnDurationStatuses();
+        }
+
+        public virtual void TickStatusOwnerActionDuration()
+        {
+            statusController?.TickOwnerActionDurationStatuses();
         }
 
         public virtual int CalculateOutgoingAttackDamage(int baseDamage, bool consumeOnUse = true)
@@ -2943,6 +3039,16 @@ namespace CardBattle.Core
 
         public void AddStatus(StatusEffectType type, int amount, StatusDurationType durationType, int duration)
         {
+            AddStatus(type, amount, durationType, duration, false);
+        }
+
+        public void AddStatus(
+            StatusEffectType type,
+            int amount,
+            StatusDurationType durationType,
+            int duration,
+            bool skipNextTurnTick)
+        {
             if (amount <= 0 && type != StatusEffectType.Weak && type != StatusEffectType.Vulnerable)
                 return;
 
@@ -2954,10 +3060,14 @@ namespace CardBattle.Core
 
                 if (durationType != StatusDurationType.Encounter)
                     existing.SetRemainingDurationToMax(duration);
+
+                existing.SetSkipNextTurnTick(skipNextTurnTick);
             }
             else
             {
-                statuses.Add(new StatusInstance(type, amount, durationType, duration));
+                var created = new StatusInstance(type, amount, durationType, duration);
+                created.SetSkipNextTurnTick(skipNextTurnTick);
+                statuses.Add(created);
             }
 
             RemoveExpiredStatuses();
@@ -3040,6 +3150,15 @@ namespace CardBattle.Core
             NotifyChanged();
         }
 
+        public void TickOwnerActionDurationStatuses()
+        {
+            for (int i = 0; i < statuses.Count; i++)
+                statuses[i].TickOwnerAction();
+
+            RemoveExpiredStatuses();
+            NotifyChanged();
+        }
+
         public string BuildDebugText()
         {
             if (statuses.Count == 0)
@@ -3107,7 +3226,8 @@ namespace CardBattle.Core
     {
         Encounter,
         Turn,
-        UseCount
+        UseCount,
+        OwnerAction
     }
 }
 ```
@@ -3142,11 +3262,13 @@ namespace CardBattle.Core
         [SerializeField] private int amount;
         [SerializeField] private StatusDurationType durationType;
         [SerializeField] private int remainingDuration;
+        [SerializeField] private bool skipNextTurnTick;
 
         public StatusEffectType Type => type;
         public int Amount => amount;
         public StatusDurationType DurationType => durationType;
         public int RemainingDuration => remainingDuration;
+        public bool SkipNextTurnTick => skipNextTurnTick;
 
         public StatusInstance(StatusEffectType type, int amount, StatusDurationType durationType, int duration)
         {
@@ -3166,12 +3288,37 @@ namespace CardBattle.Core
             remainingDuration = Mathf.Max(remainingDuration, value);
         }
 
+        public void SetSkipNextTurnTick(bool value)
+        {
+            if (durationType == StatusDurationType.Turn)
+                skipNextTurnTick = value;
+        }
+
+        public void MarkJustAppliedForTurnTick()
+        {
+            SetSkipNextTurnTick(true);
+        }
+
         public void TickTurn()
         {
             if (durationType != StatusDurationType.Turn)
                 return;
 
-            remainingDuration--;
+            if (skipNextTurnTick)
+            {
+                skipNextTurnTick = false;
+                return;
+            }
+
+            remainingDuration = Mathf.Max(0, remainingDuration - 1);
+        }
+
+        public void TickOwnerAction()
+        {
+            if (durationType != StatusDurationType.OwnerAction)
+                return;
+
+            remainingDuration = Mathf.Max(0, remainingDuration - 1);
         }
 
         public void ConsumeUse()
@@ -3183,16 +3330,21 @@ namespace CardBattle.Core
         }
 
         public bool IsExpired =>
-            durationType == StatusDurationType.Turn && remainingDuration <= 0
-            || durationType == StatusDurationType.UseCount && remainingDuration <= 0;
+            durationType == StatusDurationType.Encounter && amount <= 0
+            || durationType == StatusDurationType.Turn && (amount <= 0 || remainingDuration <= 0)
+            || durationType == StatusDurationType.UseCount && (amount <= 0 || remainingDuration <= 0)
+            || durationType == StatusDurationType.OwnerAction && (amount <= 0 || remainingDuration <= 0);
 
         public string ToShortText()
         {
             return durationType switch
             {
                 StatusDurationType.Encounter => $"{type} {amount}",
-                StatusDurationType.Turn => $"{type} {amount} ({remainingDuration}T)",
-                StatusDurationType.UseCount => $"{type} {amount} ({remainingDuration}U)",
+                StatusDurationType.Turn => skipNextTurnTick
+                    ? $"{type} {amount} ({remainingDuration}T*)"
+                    : $"{type} {amount} ({remainingDuration}T)",
+                StatusDurationType.UseCount => $"{type} {amount} ({remainingDuration} use)",
+                StatusDurationType.OwnerAction => $"{type} {amount} ({remainingDuration} action)",
                 _ => $"{type} {amount}"
             };
         }
@@ -3225,6 +3377,12 @@ namespace CardBattle.Core
             attacker?.ApplyStatus(StatusEffectType.Weak, 1, StatusDurationType.Turn, 2);
         }
 
+        [ContextMenu("Add Weak 1 Turn to Attacker (skip first tick)")]
+        private void AddWeakToAttackerWithSkip()
+        {
+            attacker?.ApplyStatus(StatusEffectType.Weak, 1, StatusDurationType.Turn, 1, skipNextTurnTick: true);
+        }
+
         [ContextMenu("Add NextAttackBonus +5 to Attacker")]
         private void AddNextAttackBonusToAttacker()
         {
@@ -3235,6 +3393,35 @@ namespace CardBattle.Core
         private void AddVulnerableToDefender()
         {
             defender?.ApplyStatus(StatusEffectType.Vulnerable, 1, StatusDurationType.Turn, 2);
+        }
+
+        [ContextMenu("Status Test/Attacker Add Strength +2 OwnerAction")]
+        private void AddStrengthOwnerAction()
+        {
+            attacker?.ApplyStatus(StatusEffectType.Strength, 2, StatusDurationType.OwnerAction, 1);
+            DebugPrint();
+        }
+
+        [ContextMenu("Status Test/Tick Attacker OwnerAction")]
+        private void TickAttackerOwnerAction()
+        {
+            attacker?.TickStatusOwnerActionDuration();
+            DebugPrint();
+        }
+
+        [ContextMenu("Status Test/Tick Defender OwnerAction")]
+        private void TickDefenderOwnerAction()
+        {
+            defender?.TickStatusOwnerActionDuration();
+            DebugPrint();
+        }
+
+        [ContextMenu("Status Test/Tick Both OwnerAction")]
+        private void TickBothOwnerAction()
+        {
+            attacker?.TickStatusOwnerActionDuration();
+            defender?.TickStatusOwnerActionDuration();
+            DebugPrint();
         }
 
         [ContextMenu("Deal Test Attack Damage")]
@@ -3263,6 +3450,11 @@ namespace CardBattle.Core
 
         [ContextMenu("Print")]
         private void Print()
+        {
+            DebugPrint();
+        }
+
+        private void DebugPrint()
         {
             string attackerText = attacker?.StatusController != null
                 ? attacker.StatusController.BuildDebugText()
