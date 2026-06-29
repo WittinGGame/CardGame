@@ -25,6 +25,9 @@ namespace CardBattle.Core
         [SerializeField] private GameObject buffRoot;
         [SerializeField] private TextMeshProUGUI buffText;
 
+        [Header("Status UI")]
+        [SerializeField] private BattleStatusTextUI playerStatusTextUI;
+
         private void Start()
         {
             if (endTurnButton != null)
@@ -40,6 +43,9 @@ namespace CardBattle.Core
                 HandlePlayerApChanged(player.CurrentAp, player.ApPerRound);
                 HandlePlayerBlockChanged(player.CurrentBlock);
                 UpdateBuffUI(player.DebugBuffCount);
+
+                if (playerStatusTextUI != null)
+                    playerStatusTextUI.SetTarget(player);
             }
             RefreshUIExternal();
         }
@@ -93,6 +99,7 @@ namespace CardBattle.Core
         public void RefreshUIExternal()
         {
             RefreshEndTurnButtonState();
+            playerStatusTextUI?.Refresh();
         }
 
         private void BindEnemyStatusUI()

@@ -146,6 +146,19 @@ namespace CardBattle.Core
             if (statuses.Count == 0)
                 return "(none)";
 
+            return BuildStatusListText();
+        }
+
+        public string BuildStatusDisplayText()
+        {
+            if (statuses.Count == 0)
+                return string.Empty;
+
+            return BuildStatusListText();
+        }
+
+        private string BuildStatusListText()
+        {
             var builder = new StringBuilder();
             for (int i = 0; i < statuses.Count; i++)
             {

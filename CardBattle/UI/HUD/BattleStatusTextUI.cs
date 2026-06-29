@@ -3,33 +3,63 @@ using UnityEngine;
 
 namespace CardBattle.Core
 {
-    public class EnemyBuffUI : MonoBehaviour
+    public class BattleStatusTextUI : MonoBehaviour
     {
+        [SerializeField] private BattleUnit target;
         [SerializeField] private GameObject root;
         [SerializeField] private TextMeshProUGUI statusText;
         [SerializeField] private bool hideWhenEmpty = true;
+        [SerializeField] private bool refreshOnStart = true;
+        [SerializeField] private bool verboseLogs = false;
 
-        private EnemyBattleUnit target;
         private StatusController subscribedStatusController;
 
-        public void SetTarget(EnemyBattleUnit enemy)
+        public BattleUnit Target => target;
+
+        private void Start()
         {
-            if (target == enemy)
+            if (refreshOnStart)
+                Refresh();
+        }
+
+        private void OnEnable()
+        {
+            SubscribeStatusController();
+            Refresh();
+        }
+
+        private void OnDisable()
+        {
+            UnsubscribeStatusController();
+        }
+
+        private void OnDestroy()
+        {
+            UnsubscribeStatusController();
+        }
+
+        public void SetTarget(BattleUnit unit)
+        {
+            if (target == unit)
             {
                 Refresh();
                 return;
             }
 
             UnsubscribeStatusController();
-            target = enemy;
+            target = unit;
             SubscribeStatusController();
             Refresh();
+        }
+
+        public void ClearTarget()
+        {
+            SetTarget(null);
         }
 
         public void Refresh()
         {
             if (target == null ||
-                !target.gameObject.activeInHierarchy ||
                 !target.IsAlive ||
                 target.StatusController == null)
             {
@@ -49,22 +79,9 @@ namespace CardBattle.Core
 
             if (root != null)
                 root.SetActive(true);
-        }
 
-        private void OnEnable()
-        {
-            SubscribeStatusController();
-            Refresh();
-        }
-
-        private void OnDisable()
-        {
-            UnsubscribeStatusController();
-        }
-
-        private void OnDestroy()
-        {
-            UnsubscribeStatusController();
+            if (verboseLogs)
+                Debug.Log($"[BattleStatusTextUI] {target.name}: {displayText}", this);
         }
 
         private void SubscribeStatusController()
@@ -114,8 +131,8 @@ namespace CardBattle.Core
         }
 
 #if UNITY_EDITOR
-        [ContextMenu("Debug Refresh Enemy Status UI")]
-        private void DebugRefreshEnemyStatusUI()
+        [ContextMenu("Debug Refresh Status UI")]
+        private void DebugRefreshStatusUI()
         {
             Refresh();
         }

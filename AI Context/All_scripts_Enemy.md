@@ -391,23 +391,128 @@ namespace CardBattle.Core
 ## FILE: EnemyBuffUI.cs
 **Path:** `Assets/Scripts/CardBattle/Enemy/UI/EnemyBuffUI.cs`
 ```csharp
+using TMPro;
 using UnityEngine;
 
 namespace CardBattle.Core
 {
     public class EnemyBuffUI : MonoBehaviour
     {
+        [SerializeField] private GameObject root;
+        [SerializeField] private TextMeshProUGUI statusText;
+        [SerializeField] private bool hideWhenEmpty = true;
+
         private EnemyBattleUnit target;
+        private StatusController subscribedStatusController;
 
         public void SetTarget(EnemyBattleUnit enemy)
         {
+            if (target == enemy)
+            {
+                Refresh();
+                return;
+            }
+
+            UnsubscribeStatusController();
             target = enemy;
+            SubscribeStatusController();
+            Refresh();
         }
 
         public void Refresh()
         {
-            // TODO: ทำจริงทีหลัง
+            if (target == null ||
+                !target.gameObject.activeInHierarchy ||
+                !target.IsAlive ||
+                target.StatusController == null)
+            {
+                ShowEmpty();
+                return;
+            }
+
+            string displayText = ResolveDisplayText(target.StatusController);
+            if (string.IsNullOrEmpty(displayText))
+            {
+                ShowEmpty();
+                return;
+            }
+
+            if (statusText != null)
+                statusText.text = displayText;
+
+            if (root != null)
+                root.SetActive(true);
         }
+
+        private void OnEnable()
+        {
+            SubscribeStatusController();
+            Refresh();
+        }
+
+        private void OnDisable()
+        {
+            UnsubscribeStatusController();
+        }
+
+        private void OnDestroy()
+        {
+            UnsubscribeStatusController();
+        }
+
+        private void SubscribeStatusController()
+        {
+            if (target?.StatusController == null || subscribedStatusController == target.StatusController)
+                return;
+
+            UnsubscribeStatusController();
+            subscribedStatusController = target.StatusController;
+            subscribedStatusController.OnStatusesChanged += HandleStatusesChanged;
+        }
+
+        private void UnsubscribeStatusController()
+        {
+            if (subscribedStatusController == null)
+                return;
+
+            subscribedStatusController.OnStatusesChanged -= HandleStatusesChanged;
+            subscribedStatusController = null;
+        }
+
+        private void HandleStatusesChanged()
+        {
+            Refresh();
+        }
+
+        private void ShowEmpty()
+        {
+            if (statusText != null)
+                statusText.text = string.Empty;
+
+            if (root != null && hideWhenEmpty)
+                root.SetActive(false);
+        }
+
+        private static string ResolveDisplayText(StatusController controller)
+        {
+            if (controller == null)
+                return string.Empty;
+
+            string displayText = controller.BuildStatusDisplayText();
+            if (!string.IsNullOrEmpty(displayText))
+                return displayText;
+
+            string debugText = controller.BuildDebugText();
+            return debugText == "(none)" ? string.Empty : debugText;
+        }
+
+#if UNITY_EDITOR
+        [ContextMenu("Debug Refresh Enemy Status UI")]
+        private void DebugRefreshEnemyStatusUI()
+        {
+            Refresh();
+        }
+#endif
     }
 }
 ```
@@ -745,40 +850,52 @@ namespace CardBattle.Core
         {
             if (target == null)
             {
-                Debug.LogWarning("[EnemyUIController] Target is null.");
+                if (verboseLogs)
+                    Debug.LogWarning("[EnemyUIController] Target is null.");
+
                 return;
             }
 
-            Debug.Log($"[EnemyUIController] Binding follow for {target.name}");
+            if (verboseLogs)
+                Debug.Log($"[EnemyUIController] Binding follow for {target.name}");
 
             if (hpFollow != null && target.UIAnchorHP != null)
             {
                 hpFollow.SetTarget(target.UIAnchorHP);
-                Debug.Log($"HP Follow -> {target.UIAnchorHP.name}");
+
+                if (verboseLogs)
+                    Debug.Log($"HP Follow -> {target.UIAnchorHP.name}");
             }
             else
             {
-                Debug.LogWarning($"HP Follow missing | hpFollow={(hpFollow != null)} | anchor={(target.UIAnchorHP != null)}");
+                Debug.LogWarning(
+                    $"HP Follow missing | hpFollow={(hpFollow != null)} | anchor={(target.UIAnchorHP != null)}");
             }
 
             if (intentFollow != null && target.UIAnchorIntent != null)
             {
                 intentFollow.SetTarget(target.UIAnchorIntent);
-                Debug.Log($"Intent Follow -> {target.UIAnchorIntent.name}");
+
+                if (verboseLogs)
+                    Debug.Log($"Intent Follow -> {target.UIAnchorIntent.name}");
             }
             else
             {
-                Debug.LogWarning($"Intent Follow missing | intentFollow={(intentFollow != null)} | anchor={(target.UIAnchorIntent != null)}");
+                Debug.LogWarning(
+                    $"Intent Follow missing | intentFollow={(intentFollow != null)} | anchor={(target.UIAnchorIntent != null)}");
             }
 
             if (buffFollow != null && target.UIAnchorBuff != null)
             {
                 buffFollow.SetTarget(target.UIAnchorBuff);
-                Debug.Log($"Buff Follow -> {target.UIAnchorBuff.name}");
+
+                if (verboseLogs)
+                    Debug.Log($"Buff Follow -> {target.UIAnchorBuff.name}");
             }
             else
             {
-                Debug.LogWarning($"Buff Follow missing | buffFollow={(buffFollow != null)} | anchor={(target.UIAnchorBuff != null)}");
+                Debug.LogWarning(
+                    $"Buff Follow missing | buffFollow={(buffFollow != null)} | anchor={(target.UIAnchorBuff != null)}");
             }
         }
 
@@ -793,6 +910,10 @@ namespace CardBattle.Core
             target.OnHpChangedEvent += HandleHpChanged;
             target.OnBlockChangedEvent += HandleBlockChanged;
             target.OnEnemyStateChanged += HandleEnemyStateChanged;
+
+            if (target.StatusController != null)
+                target.StatusController.OnStatusesChanged += HandleStatusesChanged;
+
             subscribedTarget = target;
         }
 
@@ -804,6 +925,10 @@ namespace CardBattle.Core
             subscribedTarget.OnHpChangedEvent -= HandleHpChanged;
             subscribedTarget.OnBlockChangedEvent -= HandleBlockChanged;
             subscribedTarget.OnEnemyStateChanged -= HandleEnemyStateChanged;
+
+            if (subscribedTarget.StatusController != null)
+                subscribedTarget.StatusController.OnStatusesChanged -= HandleStatusesChanged;
+
             subscribedTarget = null;
         }
 
@@ -818,6 +943,11 @@ namespace CardBattle.Core
         }
 
         private void HandleEnemyStateChanged()
+        {
+            RefreshAll();
+        }
+
+        private void HandleStatusesChanged()
         {
             RefreshAll();
         }
@@ -867,7 +997,7 @@ namespace CardBattle.Core
                 intentUI.gameObject.SetActive(false);
 
             if (buffUI != null)
-                buffUI.gameObject.SetActive(false);
+                buffUI.Refresh();
 
             SetFollowEnabled(false);
         }
