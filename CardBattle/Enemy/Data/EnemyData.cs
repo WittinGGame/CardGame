@@ -20,6 +20,9 @@ namespace CardBattle.Core
         [Tooltip("If true, a CountdownAttacker that already attacked this player round may also attack again at end turn.")]
         [SerializeField] private bool allowEndTurnAttackAfterCountdownAttackThisRound = false;
 
+        [Header("Action Data")]
+        [SerializeField] private EnemyActionData defaultAction;
+
         public string EnemyId => string.IsNullOrEmpty(enemyId) ? name : enemyId;
         public string DisplayName => string.IsNullOrEmpty(displayName) ? name : displayName;
         public EnemyBehaviorType Behavior => behavior;
@@ -28,5 +31,6 @@ namespace CardBattle.Core
         public int Speed => speed;
         public int BaseCountdown => Mathf.Max(0, baseCountdown);
         public bool AllowEndTurnAttackAfterCountdownAttackThisRound => allowEndTurnAttackAfterCountdownAttackThisRound;
+        public EnemyActionData DefaultAction => defaultAction;
     }
 }

@@ -34,6 +34,12 @@ namespace CardBattle.Core
         private bool waitingForFinish;
         private PlayerBattleUnit pendingTarget;
         private bool attackInProgress;
+        private EnemyActionData pendingAction;
+        private int pendingAttackDamage;
+        private int pendingHitCount;
+        private float pendingDelayBetweenHits;
+        private bool multiHitInProgress;
+
         public event System.Action OnEnemyStateChanged;
 
         public EnemyData Data => enemyData;
@@ -79,6 +85,11 @@ namespace CardBattle.Core
             _countdown = enemyData.BaseCountdown;
         }
 
+        private EnemyActionData ResolveDefaultAction()
+        {
+            return enemyData != null ? enemyData.DefaultAction : null;
+        }
+
         /// <summary>Reset flags when a new player round begins.</summary>
         public void ResetRoundCombatFlags()
         {
@@ -116,7 +127,7 @@ namespace CardBattle.Core
             if (!IsCountdownReady)
                 yield break;
 
-            yield return PerformStrike(player);
+            yield return PerformAction(player, ResolveDefaultAction());
             _countdown = enemyData != null ? enemyData.BaseCountdown : 0;
             NotifyStateChanged();
         }
@@ -163,10 +174,88 @@ namespace CardBattle.Core
             if (_hasAttackedThisPlayerRound)
                 yield break;
 
-            yield return PerformStrike(player);
+            yield return PerformAction(player, ResolveDefaultAction());
+        }
+
+        private IEnumerator PerformAction(PlayerBattleUnit player, EnemyActionData action)
+        {
+            if (player == null || !player.IsAlive || !IsAlive)
+                yield break;
+
+            if (action == null)
+            {
+                yield return PerformStrike(player);
+                yield break;
+            }
+
+            pendingAction = action;
+
+            if (action.VerboseLogs)
+                Debug.Log($"[{name}] PerformAction: {action.DisplayName}", action);
+
+            if (action.ApplyStatusToSelf)
+            {
+                ApplyStatus(
+                    action.SelfStatusType,
+                    action.ResolveSelfStatusAmount(),
+                    action.SelfStatusDurationType,
+                    action.ResolveSelfStatusDuration(),
+                    action.SelfStatusSkipNextTurnTick);
+            }
+
+            if (action.DealsAttackDamage)
+            {
+                yield return PerformAttackDamageAction(player, action);
+
+                if (action.ApplyStatusToPlayer)
+                    ApplyPlayerStatusFromAction(player, action);
+
+                // Self-buff + attack: OwnerAction self buff is consumed after this damaging action.
+                TickStatusOwnerActionDuration();
+            }
+            else
+            {
+                if (action.ApplyStatusToPlayer)
+                    ApplyPlayerStatusFromAction(player, action);
+
+                // Pure self-buff (e.g. Battle Cry): keep OwnerAction until a future damaging action.
+            }
+
+            _hasAttackedThisPlayerRound = true;
+            pendingAction = null;
+            NotifyStateChanged();
+        }
+
+        private void ApplyPlayerStatusFromAction(PlayerBattleUnit player, EnemyActionData action)
+        {
+            if (player == null || !player.IsAlive || action == null || !action.ApplyStatusToPlayer)
+                return;
+
+            player.ApplyStatus(
+                action.PlayerStatusType,
+                action.ResolvePlayerStatusAmount(),
+                action.PlayerStatusDurationType,
+                action.ResolvePlayerStatusDuration(),
+                action.PlayerStatusSkipNextTurnTick);
         }
 
         private IEnumerator PerformStrike(PlayerBattleUnit player)
+        {
+            pendingAttackDamage = enemyData != null ? enemyData.AttackDamage : 0;
+            pendingHitCount = 1;
+            pendingDelayBetweenHits = 0f;
+            yield return PerformAttackAnimation(player);
+        }
+
+        private IEnumerator PerformAttackDamageAction(PlayerBattleUnit player, EnemyActionData action)
+        {
+            pendingAttackDamage = action.ResolveDamage();
+            pendingHitCount = action.ResolveHitCount();
+            pendingDelayBetweenHits = action.ResolveDelayBetweenHits();
+            yield return PerformAttackAnimation(player);
+        }
+
+        private IEnumerator PerformAttackAnimation(PlayerBattleUnit player)
         {
             if (attackInProgress || player == null || !player.IsAlive)
                 yield break;
@@ -181,12 +270,15 @@ namespace CardBattle.Core
                 SubscribeToViewEvents();
                 View.PlayAttack();
 
-                yield return new WaitUntil(() => !waitingForFinish);
+                yield return new WaitUntil(() => !waitingForFinish && !multiHitInProgress);
                 UnsubscribeFromViewEvents();
             }
             else
             {
                 ApplyDamageOnHit();
+                if (multiHitInProgress)
+                    yield return new WaitUntil(() => !multiHitInProgress);
+
                 waitingForFinish = false;
             }
 
@@ -203,6 +295,8 @@ namespace CardBattle.Core
             waitingForFinish = false;
             pendingTarget = null;
             attackInProgress = false;
+            pendingAction = null;
+            multiHitInProgress = false;
         }
 
         private void SubscribeToViewEvents()
@@ -257,14 +351,53 @@ namespace CardBattle.Core
             if (pendingTarget == null || !pendingTarget.IsAlive)
                 return;
 
-            var damage = enemyData != null ? enemyData.AttackDamage : 0;
-            if (damage <= 0)
+            if (pendingAttackDamage <= 0)
+                return;
+
+            if (pendingHitCount <= 1)
+            {
+                ApplySingleHitDamage();
+                return;
+            }
+
+            StartCoroutine(ApplyMultiHitDamageRoutine());
+        }
+
+        private IEnumerator ApplyMultiHitDamageRoutine()
+        {
+            multiHitInProgress = true;
+
+            for (int i = 0; i < pendingHitCount; i++)
+            {
+                if (pendingTarget == null || !pendingTarget.IsAlive)
+                    break;
+
+                ApplySingleHitDamage();
+
+                if (i >= pendingHitCount - 1)
+                    continue;
+
+                if (pendingDelayBetweenHits > 0f)
+                    yield return new WaitForSeconds(pendingDelayBetweenHits);
+                else
+                    yield return null;
+            }
+
+            multiHitInProgress = false;
+        }
+
+        private void ApplySingleHitDamage()
+        {
+            if (pendingTarget == null || !pendingTarget.IsAlive)
+                return;
+
+            if (pendingAttackDamage <= 0)
                 return;
 
             bool wasAliveBeforeHit = pendingTarget.IsAlive;
             int blockBeforeHit = pendingTarget.CurrentBlock;
 
-            int hpDamage = pendingTarget.TakeAttackDamage(this, damage);
+            int hpDamage = pendingTarget.TakeAttackDamage(this, pendingAttackDamage);
             bool blockedAnyDamage = blockBeforeHit > pendingTarget.CurrentBlock;
 
             if (blockedAnyDamage)
@@ -278,8 +411,6 @@ namespace CardBattle.Core
                     pendingTarget.View?.PlayDead();
                 else if (hpDamage > 0)
                     pendingTarget.View?.PlayHurt();
-                // else if (blockedAnyDamage)
-                //     pendingTarget.View?.PlayDefense();
             }
 
             _hasAttackedThisPlayerRound = true;

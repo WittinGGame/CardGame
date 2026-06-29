@@ -34,7 +34,22 @@ namespace CardBattle.Core
             if (intentRoot != null)
                 intentRoot.SetActive(true);
 
-            int damage = target.Data != null ? target.Data.AttackDamage : 0;
+            int damage = 0;
+            if (target.Data != null)
+            {
+                EnemyActionData action = target.Data.DefaultAction;
+                if (action != null)
+                {
+                    if (action.IntentValue > 0)
+                        damage = action.IntentValue;
+                    else if (action.DealsAttackDamage)
+                        damage = action.Damage;
+                }
+                else
+                {
+                    damage = target.Data.AttackDamage;
+                }
+            }
 
             if (attackValueText != null)
                 attackValueText.text = damage.ToString();
