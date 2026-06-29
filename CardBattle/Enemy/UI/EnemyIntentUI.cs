@@ -34,22 +34,7 @@ namespace CardBattle.Core
             if (intentRoot != null)
                 intentRoot.SetActive(true);
 
-            int damage = 0;
-            if (target.Data != null)
-            {
-                EnemyActionData action = target.Data.DefaultAction;
-                if (action != null)
-                {
-                    if (action.IntentValue > 0)
-                        damage = action.IntentValue;
-                    else if (action.DealsAttackDamage)
-                        damage = action.Damage;
-                }
-                else
-                {
-                    damage = target.Data.AttackDamage;
-                }
-            }
+            int damage = ResolveIntentValue(target);
 
             if (attackValueText != null)
                 attackValueText.text = damage.ToString();
@@ -66,6 +51,29 @@ namespace CardBattle.Core
                 if (showCountdown)
                     countdownValueText.text = target.CurrentCountdown.ToString();
             }
+        }
+
+        private static int ResolveIntentValue(EnemyBattleUnit enemy)
+        {
+            if (enemy == null)
+                return 0;
+
+            EnemyActionData action = enemy.CurrentPlannedAction;
+            if (action == null && enemy.Data != null)
+                action = enemy.Data.DefaultAction;
+
+            if (action != null)
+            {
+                if (action.IntentValue > 0)
+                    return action.IntentValue;
+
+                if (action.DealsAttackDamage)
+                    return action.Damage;
+
+                return 0;
+            }
+
+            return enemy.Data != null ? enemy.Data.AttackDamage : 0;
         }
     }
 }

@@ -39,6 +39,8 @@ namespace CardBattle.Core
         private int pendingHitCount;
         private float pendingDelayBetweenHits;
         private bool multiHitInProgress;
+        private int currentActionPatternIndex;
+        private bool lastActionResolved;
 
         public event System.Action OnEnemyStateChanged;
 
@@ -48,6 +50,8 @@ namespace CardBattle.Core
         public int CurrentCountdown => _countdown;
         public bool HasAttackedThisPlayerRound => _hasAttackedThisPlayerRound;
         public bool IsAttackInProgress => attackInProgress;
+        public EnemyActionData CurrentPlannedAction { get; private set; }
+        public int CurrentActionPatternIndex => currentActionPatternIndex;
         public bool AllowEndTurnAttackAfterCountdownAttackThisRound =>
             enemyData != null && enemyData.AllowEndTurnAttackAfterCountdownAttackThisRound;
 
@@ -73,6 +77,7 @@ namespace CardBattle.Core
             ClearStatuses();
             _hasAttackedThisPlayerRound = false;
             attackInProgress = false;
+            ResetActionPatternState();
             NotifyStateChanged();
         }
 
@@ -83,11 +88,71 @@ namespace CardBattle.Core
 
             SetMaxHp(enemyData.MaxHp, true);
             _countdown = enemyData.BaseCountdown;
+            ResetActionPatternState();
         }
 
-        private EnemyActionData ResolveDefaultAction()
+        public void ResetActionPatternState()
         {
+            currentActionPatternIndex = ResolvePatternStartIndex();
+            CurrentPlannedAction = ResolveCurrentPlannedAction();
+        }
+
+        private EnemyActionPatternData ResolveActionPattern()
+        {
+            return enemyData != null ? enemyData.ActionPattern : null;
+        }
+
+        private bool HasValidActionPattern()
+        {
+            var pattern = ResolveActionPattern();
+            return pattern != null && pattern.HasValidActions();
+        }
+
+        private int ResolvePatternStartIndex()
+        {
+            var pattern = ResolveActionPattern();
+            if (pattern == null || !pattern.HasValidActions())
+                return 0;
+
+            return pattern.GetSafeStartIndex();
+        }
+
+        private EnemyActionData ResolveCurrentPlannedAction()
+        {
+            var pattern = ResolveActionPattern();
+            if (pattern == null || !pattern.HasValidActions())
+                return null;
+
+            return pattern.GetActionAt(currentActionPatternIndex);
+        }
+
+        private EnemyActionData ResolveActionForExecution()
+        {
+            if (HasValidActionPattern() && CurrentPlannedAction != null)
+                return CurrentPlannedAction;
+
             return enemyData != null ? enemyData.DefaultAction : null;
+        }
+
+        private void AdvanceActionPatternAfterResolved()
+        {
+            var pattern = ResolveActionPattern();
+            if (pattern == null || !pattern.HasValidActions())
+                return;
+
+            if (pattern.AdvanceMode != EnemyActionPatternAdvanceMode.AfterActionResolved)
+                return;
+
+            currentActionPatternIndex = pattern.GetNextIndex(currentActionPatternIndex);
+            CurrentPlannedAction = ResolveCurrentPlannedAction();
+
+            if (pattern.VerboseLogs)
+            {
+                string actionName = CurrentPlannedAction != null ? CurrentPlannedAction.DisplayName : "(none)";
+                Debug.Log($"[{name}] Action pattern advanced to index {currentActionPatternIndex}: {actionName}", pattern);
+            }
+
+            NotifyStateChanged();
         }
 
         /// <summary>Reset flags when a new player round begins.</summary>
@@ -127,7 +192,12 @@ namespace CardBattle.Core
             if (!IsCountdownReady)
                 yield break;
 
-            yield return PerformAction(player, ResolveDefaultAction());
+            EnemyActionData action = ResolveActionForExecution();
+            yield return PerformAction(player, action);
+
+            if (lastActionResolved)
+                AdvanceActionPatternAfterResolved();
+
             _countdown = enemyData != null ? enemyData.BaseCountdown : 0;
             NotifyStateChanged();
         }
@@ -174,11 +244,17 @@ namespace CardBattle.Core
             if (_hasAttackedThisPlayerRound)
                 yield break;
 
-            yield return PerformAction(player, ResolveDefaultAction());
+            EnemyActionData action = ResolveActionForExecution();
+            yield return PerformAction(player, action);
+
+            if (lastActionResolved)
+                AdvanceActionPatternAfterResolved();
         }
 
         private IEnumerator PerformAction(PlayerBattleUnit player, EnemyActionData action)
         {
+            lastActionResolved = false;
+
             if (player == null || !player.IsAlive || !IsAlive)
                 yield break;
 
@@ -206,6 +282,8 @@ namespace CardBattle.Core
             if (action.DealsAttackDamage)
             {
                 yield return PerformAttackDamageAction(player, action);
+                if (!lastActionResolved)
+                    yield break;
 
                 if (action.ApplyStatusToPlayer)
                     ApplyPlayerStatusFromAction(player, action);
@@ -219,6 +297,7 @@ namespace CardBattle.Core
                     ApplyPlayerStatusFromAction(player, action);
 
                 // Pure self-buff (e.g. Battle Cry): keep OwnerAction until a future damaging action.
+                lastActionResolved = true;
             }
 
             _hasAttackedThisPlayerRound = true;
@@ -258,7 +337,10 @@ namespace CardBattle.Core
         private IEnumerator PerformAttackAnimation(PlayerBattleUnit player)
         {
             if (attackInProgress || player == null || !player.IsAlive)
+            {
+                lastActionResolved = false;
                 yield break;
+            }
 
             attackInProgress = true;
             pendingTarget = player;
@@ -285,6 +367,7 @@ namespace CardBattle.Core
             waitingForHit = false;
             pendingTarget = null;
             attackInProgress = false;
+            lastActionResolved = true;
             NotifyStateChanged();
         }
 
@@ -420,5 +503,30 @@ namespace CardBattle.Core
         {
             OnEnemyStateChanged?.Invoke();
         }
+
+#if UNITY_EDITOR
+        [ContextMenu("Debug Print Enemy Planned Action")]
+        private void DebugPrintPlannedAction()
+        {
+            string patternName = enemyData?.ActionPattern != null
+                ? enemyData.ActionPattern.DisplayName
+                : "(none)";
+
+            string plannedName = CurrentPlannedAction != null
+                ? CurrentPlannedAction.DisplayName
+                : "(none)";
+
+            string defaultName = enemyData?.DefaultAction != null
+                ? enemyData.DefaultAction.DisplayName
+                : "(none)";
+
+            int fallbackDamage = enemyData != null ? enemyData.AttackDamage : 0;
+
+            Debug.Log(
+                $"[{name}] behavior={Behavior}, pattern={patternName}, " +
+                $"patternIndex={currentActionPatternIndex}, planned={plannedName}, " +
+                $"default={defaultName}, fallbackAttackDamage={fallbackDamage}");
+        }
+#endif
     }
 }

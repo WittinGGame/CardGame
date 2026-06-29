@@ -23,6 +23,9 @@ namespace CardBattle.Core
         [Header("Action Data")]
         [SerializeField] private EnemyActionData defaultAction;
 
+        [Header("Action Pattern")]
+        [SerializeField] private EnemyActionPatternData actionPattern;
+
         public string EnemyId => string.IsNullOrEmpty(enemyId) ? name : enemyId;
         public string DisplayName => string.IsNullOrEmpty(displayName) ? name : displayName;
         public EnemyBehaviorType Behavior => behavior;
@@ -32,5 +35,6 @@ namespace CardBattle.Core
         public int BaseCountdown => Mathf.Max(0, baseCountdown);
         public bool AllowEndTurnAttackAfterCountdownAttackThisRound => allowEndTurnAttackAfterCountdownAttackThisRound;
         public EnemyActionData DefaultAction => defaultAction;
+        public EnemyActionPatternData ActionPattern => actionPattern;
     }
 }
