@@ -64,6 +64,11 @@ namespace CardBattle.Core
             RefreshAll();
         }
 
+        public void RefreshExternal()
+        {
+            RefreshAll();
+        }
+
         // =========================
         // BINDING
         // =========================

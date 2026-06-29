@@ -430,9 +430,35 @@ namespace CardBattle.Core
         [SerializeField] private TextMeshProUGUI attackValueText;
         [SerializeField] private TextMeshProUGUI countdownValueText;
 
+        private EnemyBattleUnit subscribedTarget;
+
+        private void OnEnable()
+        {
+            SubscribeTarget();
+            Refresh();
+        }
+
+        private void OnDisable()
+        {
+            UnsubscribeTarget();
+        }
+
+        private void OnDestroy()
+        {
+            UnsubscribeTarget();
+        }
+
         public void SetTarget(EnemyBattleUnit enemy)
         {
+            if (target == enemy)
+            {
+                Refresh();
+                return;
+            }
+
+            UnsubscribeTarget();
             target = enemy;
+            SubscribeTarget();
             Refresh();
         }
 
@@ -468,6 +494,33 @@ namespace CardBattle.Core
                 if (showCountdown)
                     countdownValueText.text = target.CurrentCountdown.ToString();
             }
+        }
+
+        private void SubscribeTarget()
+        {
+            if (target == null || subscribedTarget == target)
+                return;
+
+            UnsubscribeTarget();
+            subscribedTarget = target;
+            subscribedTarget.OnPlannedActionChanged += HandlePlannedActionChanged;
+        }
+
+        private void UnsubscribeTarget()
+        {
+            if (subscribedTarget == null)
+                return;
+
+            subscribedTarget.OnPlannedActionChanged -= HandlePlannedActionChanged;
+            subscribedTarget = null;
+        }
+
+        private void HandlePlannedActionChanged(EnemyBattleUnit enemy)
+        {
+            if (enemy != target)
+                return;
+
+            Refresh();
         }
 
         private static int ResolveIntentValue(EnemyBattleUnit enemy)
@@ -653,6 +706,11 @@ namespace CardBattle.Core
         }
 
         public void RefreshNow()
+        {
+            RefreshAll();
+        }
+
+        public void RefreshExternal()
         {
             RefreshAll();
         }

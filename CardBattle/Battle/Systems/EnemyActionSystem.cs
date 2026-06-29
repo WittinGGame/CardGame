@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Collections.Generic;
+using System.Text;
 using UnityEngine;
 
 namespace CardBattle.Core
@@ -308,6 +309,47 @@ namespace CardBattle.Core
         {
             TickTurnDurationStatusesForPlayerRoundStart();
             DebugPrintBattleStatuses();
+        }
+
+        [ContextMenu("Debug Print Enemy Planned Actions")]
+        private void DebugPrintEnemyPlannedActions()
+        {
+            Debug.Log(BuildEnemyPlannedActionsDebugText());
+        }
+
+        public string BuildEnemyPlannedActionsDebugText()
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("[EnemyActionSystem] --- Enemy Planned Actions ---");
+
+            for (int i = 0; i < enemies.Count; i++)
+            {
+                EnemyBattleUnit enemy = enemies[i];
+                if (enemy == null)
+                {
+                    sb.AppendLine($"Enemy[{i}]: (null)");
+                    continue;
+                }
+
+                string defaultActionName = enemy.Data != null && enemy.Data.DefaultAction != null
+                    ? enemy.Data.DefaultAction.DisplayName
+                    : "None";
+
+                int fallbackDamage = enemy.Data != null ? enemy.Data.AttackDamage : 0;
+
+                sb.AppendLine(
+                    $"Enemy[{i}] {enemy.name} | " +
+                    $"alive={enemy.IsAlive} | " +
+                    $"behavior={enemy.Behavior} | " +
+                    $"countdown={enemy.CurrentCountdown} | " +
+                    $"pattern={enemy.CurrentActionPatternName} | " +
+                    $"patternIndex={enemy.CurrentActionPatternIndex} | " +
+                    $"planned={enemy.CurrentPlannedActionName} | " +
+                    $"default={defaultActionName} | " +
+                    $"fallbackAttackDamage={fallbackDamage}");
+            }
+
+            return sb.ToString();
         }
     }
 }

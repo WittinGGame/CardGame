@@ -1053,6 +1053,7 @@ namespace CardBattle.Core
 ```csharp
 using System.Collections;
 using System.Collections.Generic;
+using System.Text;
 using UnityEngine;
 
 namespace CardBattle.Core
@@ -1361,6 +1362,47 @@ namespace CardBattle.Core
         {
             TickTurnDurationStatusesForPlayerRoundStart();
             DebugPrintBattleStatuses();
+        }
+
+        [ContextMenu("Debug Print Enemy Planned Actions")]
+        private void DebugPrintEnemyPlannedActions()
+        {
+            Debug.Log(BuildEnemyPlannedActionsDebugText());
+        }
+
+        public string BuildEnemyPlannedActionsDebugText()
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("[EnemyActionSystem] --- Enemy Planned Actions ---");
+
+            for (int i = 0; i < enemies.Count; i++)
+            {
+                EnemyBattleUnit enemy = enemies[i];
+                if (enemy == null)
+                {
+                    sb.AppendLine($"Enemy[{i}]: (null)");
+                    continue;
+                }
+
+                string defaultActionName = enemy.Data != null && enemy.Data.DefaultAction != null
+                    ? enemy.Data.DefaultAction.DisplayName
+                    : "None";
+
+                int fallbackDamage = enemy.Data != null ? enemy.Data.AttackDamage : 0;
+
+                sb.AppendLine(
+                    $"Enemy[{i}] {enemy.name} | " +
+                    $"alive={enemy.IsAlive} | " +
+                    $"behavior={enemy.Behavior} | " +
+                    $"countdown={enemy.CurrentCountdown} | " +
+                    $"pattern={enemy.CurrentActionPatternName} | " +
+                    $"patternIndex={enemy.CurrentActionPatternIndex} | " +
+                    $"planned={enemy.CurrentPlannedActionName} | " +
+                    $"default={defaultActionName} | " +
+                    $"fallbackAttackDamage={fallbackDamage}");
+            }
+
+            return sb.ToString();
         }
     }
 }
@@ -1945,6 +1987,7 @@ namespace CardBattle.Core
         private bool lastActionResolved;
 
         public event System.Action OnEnemyStateChanged;
+        public event System.Action<EnemyBattleUnit> OnPlannedActionChanged;
 
         public EnemyData Data => enemyData;
         public EnemyBehaviorType Behavior => enemyData != null ? enemyData.Behavior : EnemyBehaviorType.EndTurnAttacker;
@@ -1954,6 +1997,14 @@ namespace CardBattle.Core
         public bool IsAttackInProgress => attackInProgress;
         public EnemyActionData CurrentPlannedAction { get; private set; }
         public int CurrentActionPatternIndex => currentActionPatternIndex;
+        public bool HasActionPattern =>
+            Data != null &&
+            Data.ActionPattern != null &&
+            Data.ActionPattern.HasValidActions();
+        public string CurrentPlannedActionName =>
+            CurrentPlannedAction != null ? CurrentPlannedAction.DisplayName : "None";
+        public string CurrentActionPatternName =>
+            HasActionPattern ? Data.ActionPattern.DisplayName : "None";
         public bool AllowEndTurnAttackAfterCountdownAttackThisRound =>
             enemyData != null && enemyData.AllowEndTurnAttackAfterCountdownAttackThisRound;
 
@@ -1961,6 +2012,7 @@ namespace CardBattle.Core
         {
             base.Awake();
             ApplyEnemyData();
+            ResetActionPatternForEncounter();
         }
 
 #if UNITY_EDITOR
@@ -1979,7 +2031,8 @@ namespace CardBattle.Core
             ClearStatuses();
             _hasAttackedThisPlayerRound = false;
             attackInProgress = false;
-            ResetActionPatternState();
+            // Pattern resets once per encounter bind, not per player round or countdown tick.
+            ResetActionPatternForEncounter();
             NotifyStateChanged();
         }
 
@@ -1990,13 +2043,27 @@ namespace CardBattle.Core
 
             SetMaxHp(enemyData.MaxHp, true);
             _countdown = enemyData.BaseCountdown;
+        }
+
+        /// <summary>Resets pattern index and planned action when enemy data is applied for a new encounter.</summary>
+        public void ResetActionPatternForEncounter()
+        {
             ResetActionPatternState();
         }
 
         public void ResetActionPatternState()
         {
             currentActionPatternIndex = ResolvePatternStartIndex();
-            CurrentPlannedAction = ResolveCurrentPlannedAction();
+            SetCurrentPlannedAction(ResolveCurrentPlannedAction());
+        }
+
+        private void SetCurrentPlannedAction(EnemyActionData action)
+        {
+            if (CurrentPlannedAction == action)
+                return;
+
+            CurrentPlannedAction = action;
+            OnPlannedActionChanged?.Invoke(this);
         }
 
         private EnemyActionPatternData ResolveActionPattern()
@@ -2045,13 +2112,18 @@ namespace CardBattle.Core
             if (pattern.AdvanceMode != EnemyActionPatternAdvanceMode.AfterActionResolved)
                 return;
 
+            EnemyActionData previousAction = CurrentPlannedAction;
             currentActionPatternIndex = pattern.GetNextIndex(currentActionPatternIndex);
-            CurrentPlannedAction = ResolveCurrentPlannedAction();
+            SetCurrentPlannedAction(ResolveCurrentPlannedAction());
 
             if (pattern.VerboseLogs)
             {
-                string actionName = CurrentPlannedAction != null ? CurrentPlannedAction.DisplayName : "(none)";
-                Debug.Log($"[{name}] Action pattern advanced to index {currentActionPatternIndex}: {actionName}", pattern);
+                string previousName = previousAction != null ? previousAction.DisplayName : "(none)";
+                string nextName = CurrentPlannedAction != null ? CurrentPlannedAction.DisplayName : "(none)";
+                Debug.Log(
+                    $"[{name}] Pattern advance: {previousName} -> {nextName} " +
+                    $"(index {currentActionPatternIndex})",
+                    pattern);
             }
 
             NotifyStateChanged();
@@ -2406,28 +2478,26 @@ namespace CardBattle.Core
             OnEnemyStateChanged?.Invoke();
         }
 
+        protected override void OnDefeated()
+        {
+            base.OnDefeated();
+            SetCurrentPlannedAction(null);
+        }
+
 #if UNITY_EDITOR
-        [ContextMenu("Debug Print Enemy Planned Action")]
+        [ContextMenu("Debug Print Planned Action")]
         private void DebugPrintPlannedAction()
         {
-            string patternName = enemyData?.ActionPattern != null
-                ? enemyData.ActionPattern.DisplayName
-                : "(none)";
-
-            string plannedName = CurrentPlannedAction != null
-                ? CurrentPlannedAction.DisplayName
-                : "(none)";
-
-            string defaultName = enemyData?.DefaultAction != null
-                ? enemyData.DefaultAction.DisplayName
-                : "(none)";
-
-            int fallbackDamage = enemyData != null ? enemyData.AttackDamage : 0;
-
             Debug.Log(
-                $"[{name}] behavior={Behavior}, pattern={patternName}, " +
-                $"patternIndex={currentActionPatternIndex}, planned={plannedName}, " +
-                $"default={defaultName}, fallbackAttackDamage={fallbackDamage}");
+                $"[EnemyBattleUnit] Planned Action | " +
+                $"Enemy={name} | " +
+                $"Behavior={Behavior} | " +
+                $"Pattern={CurrentActionPatternName} | " +
+                $"Index={CurrentActionPatternIndex} | " +
+                $"Planned={CurrentPlannedActionName} | " +
+                $"Default={(Data != null && Data.DefaultAction != null ? Data.DefaultAction.DisplayName : "None")} | " +
+                $"FallbackAttackDamage={(Data != null ? Data.AttackDamage : 0)}",
+                this);
         }
 #endif
     }
