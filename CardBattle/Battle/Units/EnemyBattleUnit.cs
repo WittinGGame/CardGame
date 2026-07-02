@@ -323,6 +323,8 @@ namespace CardBattle.Core
             }
             else
             {
+                ApplyDefendFromAction(action);
+
                 if (action.ApplyStatusToPlayer)
                     ApplyPlayerStatusFromAction(player, action);
 
@@ -346,6 +348,24 @@ namespace CardBattle.Core
                 action.PlayerStatusDurationType,
                 action.ResolvePlayerStatusDuration(),
                 action.PlayerStatusSkipNextTurnTick);
+        }
+
+        private void ApplyDefendFromAction(EnemyActionData action)
+        {
+            if (action == null)
+                return;
+
+            if (action.IntentType != EnemyActionIntentType.Defend)
+                return;
+
+            int blockAmount = Mathf.Max(0, action.IntentValue);
+            if (blockAmount <= 0)
+                return;
+
+            AddBlock(blockAmount);
+
+            if (action.VerboseLogs)
+                Debug.Log($"[{name}] Defend gained {blockAmount} Block.", action);
         }
 
         private IEnumerator PerformStrike(PlayerBattleUnit player)

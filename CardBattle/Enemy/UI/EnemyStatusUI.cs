@@ -1,5 +1,6 @@
 using TMPro;
 using UnityEngine;
+using UnityEngine.UI;
 
 namespace CardBattle.Core
 {
@@ -14,11 +15,42 @@ namespace CardBattle.Core
         [SerializeField] private TextMeshProUGUI countdownText;
         [SerializeField] private HpBarUI hpBarUI;
 
+        [Header("Block UI")]
+        [SerializeField] private GameObject blockRoot;
+        [SerializeField] private TextMeshProUGUI blockValueText;
+        [SerializeField] private Image blockIconImage;
+
+        private EnemyBattleUnit subscribedTarget;
+
         public EnemyBattleUnit TargetEnemy => targetEnemy;
+
+        private void OnEnable()
+        {
+            SubscribeTarget();
+            Refresh();
+        }
+
+        private void OnDisable()
+        {
+            UnsubscribeTarget();
+        }
+
+        private void OnDestroy()
+        {
+            UnsubscribeTarget();
+        }
 
         public void SetTarget(EnemyBattleUnit enemy)
         {
+            if (targetEnemy == enemy)
+            {
+                Refresh();
+                return;
+            }
+
+            UnsubscribeTarget();
             targetEnemy = enemy;
+            SubscribeTarget();
             Refresh();
         }
 
@@ -34,6 +66,7 @@ namespace CardBattle.Core
 
             if (!targetEnemy.IsAlive)
             {
+                RefreshBlock();
                 gameObject.SetActive(false);
                 return;
             }
@@ -67,6 +100,36 @@ namespace CardBattle.Core
                     countdownText.text = "-";
                 }
             }
+
+            RefreshBlock();
+        }
+
+        private void RefreshBlock()
+        {
+            if (blockRoot == null)
+                return;
+
+            int block = targetEnemy != null ? targetEnemy.CurrentBlock : 0;
+            bool showBlock = targetEnemy != null && targetEnemy.IsAlive && block > 0;
+
+            blockRoot.SetActive(showBlock);
+
+            if (!showBlock)
+            {
+                if (blockValueText != null)
+                    blockValueText.text = string.Empty;
+
+                if (blockIconImage != null)
+                    blockIconImage.enabled = false;
+
+                return;
+            }
+
+            if (blockValueText != null)
+                blockValueText.text = block.ToString();
+
+            if (blockIconImage != null)
+                blockIconImage.enabled = blockIconImage.sprite != null;
         }
 
         private void SetEmptyState()
@@ -82,6 +145,32 @@ namespace CardBattle.Core
 
             if (hpBarUI != null)
                 hpBarUI.SetHp(0, 1);
+
+            RefreshBlock();
+        }
+
+        private void SubscribeTarget()
+        {
+            if (targetEnemy == null || subscribedTarget == targetEnemy)
+                return;
+
+            UnsubscribeTarget();
+            subscribedTarget = targetEnemy;
+            subscribedTarget.OnBlockChangedEvent += HandleBlockChanged;
+        }
+
+        private void UnsubscribeTarget()
+        {
+            if (subscribedTarget == null)
+                return;
+
+            subscribedTarget.OnBlockChangedEvent -= HandleBlockChanged;
+            subscribedTarget = null;
+        }
+
+        private void HandleBlockChanged(int currentBlock)
+        {
+            Refresh();
         }
     }
 }

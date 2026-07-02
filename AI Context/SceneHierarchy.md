@@ -140,8 +140,6 @@
 13. BattlePresentationController
 14. RunPersistenceDebugTest
 
-
-
 EnemyUI.Prefab
 
 1. EnemyUI (EnemyUIController.cs)
@@ -150,6 +148,7 @@ EnemyUI.Prefab
   3. EnemyBuffUI (EnemyBuffUI.cs, WorldToUIFollow.cs)
     1. StatusRoot
       1. StatusText
-
-
+  4. EnemyBlock
+    1. EnemyBlockIcon
+    2. EnemyBlockValue
 
