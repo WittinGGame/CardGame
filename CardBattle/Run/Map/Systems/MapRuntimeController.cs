@@ -43,6 +43,11 @@ namespace CardBattle.Core
             CurrentMapState != null &&
             !string.IsNullOrWhiteSpace(CurrentMapState.SelectedNodeId);
 
+        public bool HasPendingEncounterNode =>
+            HasSelectedNode &&
+            CurrentMapState.IsNodeCurrent(CurrentMapState.SelectedNodeId) &&
+            !CurrentMapState.IsNodeCompleted(CurrentMapState.SelectedNodeId);
+
         public event Action<RunMapState> OnMapInitialized;
         public event Action<string, MapNodeState> OnNodeStateChanged;
         public event Action<MapNodeData> OnNodeSelected;
@@ -89,12 +94,101 @@ namespace CardBattle.Core
             return true;
         }
 
+        public bool CanStartBattleFromNode(string nodeId)
+        {
+            if (!HasInitialized || CurrentMapState == null ||
+                string.IsNullOrWhiteSpace(nodeId))
+            {
+                return false;
+            }
+
+            if (actData == null || !actData.TryGetNode(nodeId, out MapNodeData node))
+                return false;
+
+            if (!node.HasEncounter)
+                return false;
+
+            if (HasPendingEncounterNode)
+            {
+                return string.Equals(
+                           CurrentMapState.SelectedNodeId,
+                           nodeId,
+                           StringComparison.Ordinal) &&
+                       CurrentMapState.IsNodeCurrent(nodeId);
+            }
+
+            return CurrentMapState.IsNodeAvailable(nodeId);
+        }
+
+        public bool TryRestorePendingEncounterSelection()
+        {
+            if (!HasPendingEncounterNode)
+                return true;
+
+            if (!TryGetSelectedNode(out MapNodeData node))
+            {
+                LogError("Cannot restore pending encounter: selected node data is missing.");
+                return false;
+            }
+
+            bool restored = TryEnsureEncounterSelectedForNode(node);
+
+            if (verboseLogs)
+            {
+                Debug.Log(
+                    $"[MapRuntimeController] Restore pending encounter for node={node.NodeId} => {restored}");
+            }
+
+            return restored;
+        }
+
         public bool TrySelectNode(string nodeId)
         {
             if (!HasInitialized || CurrentMapState == null)
             {
                 LogError("Cannot select node: Map is not initialized.");
                 return false;
+            }
+
+            if (HasPendingEncounterNode)
+            {
+                if (!string.Equals(CurrentMapState.SelectedNodeId, nodeId, StringComparison.Ordinal))
+                {
+                    if (verboseLogs)
+                    {
+                        Debug.LogWarning(
+                            $"[MapRuntimeController] Cannot select node '{nodeId}': " +
+                            $"pending encounter is locked to '{CurrentMapState.SelectedNodeId}'.");
+                    }
+
+                    return false;
+                }
+
+                if (!CurrentMapState.IsNodeCurrent(nodeId))
+                {
+                    if (verboseLogs)
+                    {
+                        Debug.LogWarning(
+                            $"[MapRuntimeController] Cannot re-enter node '{nodeId}': " +
+                            "node is not the pending current node.");
+                    }
+
+                    return false;
+                }
+
+                if (!TryGetSelectedNode(out MapNodeData pendingNode))
+                    return false;
+
+                bool encounterReady = TryEnsureEncounterSelectedForNode(pendingNode);
+
+                if (verboseLogs)
+                {
+                    Debug.Log(
+                        $"[MapRuntimeController] Re-enter pending node: {nodeId} | " +
+                        $"EncounterReady={encounterReady}");
+                }
+
+                return encounterReady;
             }
 
             if (actData == null || !actData.TryGetNode(nodeId, out MapNodeData node))
@@ -115,33 +209,18 @@ namespace CardBattle.Core
                 return false;
             }
 
-            bool runtimeEncounterSelected = true;
+            return TrySelectNodeInternal(node);
+        }
 
-            if (node.HasEncounter)
-            {
-                if (runtimeEncounterContext == null)
-                {
-                    LogError(
-                        $"Cannot select node '{nodeId}': RuntimeEncounterContext is missing " +
-                        $"but node requires encounter '{node.EncounterId}'.");
-                    return false;
-                }
+        private bool TrySelectNodeInternal(MapNodeData node)
+        {
+            if (node == null || !node.HasValidNodeId)
+                return false;
 
-                runtimeEncounterSelected =
-                    runtimeEncounterContext.TrySelectEncounterById(node.EncounterId);
-
-                if (!runtimeEncounterSelected)
-                {
-                    if (verboseLogs)
-                    {
-                        Debug.LogWarning(
-                            $"[MapRuntimeController] Cannot select node '{nodeId}': " +
-                            $"encounter selection failed for '{node.EncounterId}'.");
-                    }
-
-                    return false;
-                }
-            }
+            string nodeId = node.NodeId;
+            bool runtimeEncounterSelected = TryEnsureEncounterSelectedForNode(node);
+            if (node.HasEncounter && !runtimeEncounterSelected)
+                return false;
 
             ClearCurrentNodesExcept(nodeId);
 
@@ -161,6 +240,22 @@ namespace CardBattle.Core
             }
 
             return true;
+        }
+
+        private bool TryEnsureEncounterSelectedForNode(MapNodeData node)
+        {
+            if (node == null || !node.HasEncounter)
+                return true;
+
+            if (runtimeEncounterContext == null)
+            {
+                LogError(
+                    $"Cannot select node '{node.NodeId}': RuntimeEncounterContext is missing " +
+                    $"but node requires encounter '{node.EncounterId}'.");
+                return false;
+            }
+
+            return runtimeEncounterContext.TrySelectEncounterById(node.EncounterId);
         }
 
         public bool TryCompleteSelectedNode()

@@ -56,7 +56,7 @@ namespace CardBattle.Core
             }
         }
 
-        public void RefreshState(MapNodeState state, bool isSelected)
+        public void RefreshState(MapNodeState state, bool isSelected, bool canStartBattle)
         {
             CurrentState = state;
 
@@ -102,8 +102,7 @@ namespace CardBattle.Core
             if (canvasGroup != null)
                 canvasGroup.alpha = alpha;
 
-            bool interactable = state == MapNodeState.Available;
-            SetInteractable(interactable);
+            SetInteractable(canStartBattle);
         }
 
         public void SetInteractable(bool value)

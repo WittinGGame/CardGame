@@ -35,6 +35,7 @@ namespace CardBattle.Core
         [Header("Options")]
         [SerializeField] private bool initializeMapOnStart = true;
         [SerializeField] private bool rebuildOnMapStateChanged = true;
+        [SerializeField] private bool hideStartBattleButtonInGameplay = true;
         [SerializeField] private bool verboseLogs = true;
 
         private readonly Dictionary<string, TreeMapNodeButtonUI> nodeViews =
@@ -44,9 +45,10 @@ namespace CardBattle.Core
 
         public bool IsVisible { get; private set; }
 
-        public event Action<MapNodeData> OnStartBattleRequested;
+        public event Action<string> OnNodeStartRequested;
 
         private MapRuntimeController subscribedMapController;
+        private bool isBattleStartInProgress;
 
         private void Awake()
         {
@@ -54,6 +56,9 @@ namespace CardBattle.Core
             {
                 startBattleButton.onClick.RemoveListener(HandleStartBattleClicked);
                 startBattleButton.onClick.AddListener(HandleStartBattleClicked);
+
+                if (hideStartBattleButtonInGameplay)
+                    startBattleButton.gameObject.SetActive(false);
             }
         }
 
@@ -157,12 +162,20 @@ namespace CardBattle.Core
                 MapNodeState state = controller.GetNodeState(pair.Key);
                 bool isSelected = !string.IsNullOrWhiteSpace(selectedNodeId) &&
                                   string.Equals(pair.Key, selectedNodeId, StringComparison.Ordinal);
-                pair.Value.RefreshState(state, isSelected);
+                bool canStartBattle = !isBattleStartInProgress &&
+                                      controller.CanStartBattleFromNode(pair.Key);
+                pair.Value.RefreshState(state, isSelected, canStartBattle);
             }
 
             RefreshSelectedNodeText(controller);
             RefreshStartBattleButton(controller);
             RefreshStatusText(controller);
+        }
+
+        public void SetBattleStartInProgress(bool inProgress)
+        {
+            isBattleStartInProgress = inProgress;
+            Refresh();
         }
 
         public bool TryGetSelectedNode(out MapNodeData node)
@@ -214,14 +227,18 @@ namespace CardBattle.Core
 
             if (controller.TryGetSelectedNode(out MapNodeData node))
             {
+                string statusPrefix = controller.HasPendingEncounterNode
+                    ? "Pending encounter"
+                    : "Selected";
+
                 selectedNodeText.text =
-                    $"Selected: {node.DisplayName}\n" +
+                    $"{statusPrefix}: {node.DisplayName}\n" +
                     $"Type: {node.NodeType}\n" +
                     $"Encounter: {(node.HasEncounter ? node.EncounterId : "none")}";
             }
             else
             {
-                selectedNodeText.text = "Select an available node.";
+                selectedNodeText.text = "Select an available node to start the encounter.";
             }
         }
 
@@ -229,6 +246,12 @@ namespace CardBattle.Core
         {
             if (startBattleButton == null)
                 return;
+
+            if (hideStartBattleButtonInGameplay)
+            {
+                startBattleButton.interactable = false;
+                return;
+            }
 
             bool canStart = controller.HasSelectedNode &&
                             controller.TryGetSelectedNode(out MapNodeData node) &&
@@ -251,22 +274,47 @@ namespace CardBattle.Core
 
         private void HandleNodeClicked(string nodeId)
         {
+            if (isBattleStartInProgress)
+            {
+                if (verboseLogs)
+                {
+                    Debug.Log(
+                        $"[TreeMapUIController] Node click ignored: battle start already in progress. nodeId={nodeId}");
+                }
+
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(nodeId))
+                return;
+
             if (!TryGetMapController(out MapRuntimeController controller))
                 return;
 
-            bool selected = controller.TrySelectNode(nodeId);
-            Refresh();
-
-            if (!selected && statusText != null)
+            if (!controller.CanStartBattleFromNode(nodeId))
             {
-                statusText.text =
-                    $"Cannot select '{nodeId}'. Choose an available node.";
+                if (verboseLogs)
+                {
+                    Debug.Log(
+                        $"[TreeMapUIController] Node click rejected: unavailable, completed, locked, " +
+                        $"or pending different node. nodeId={nodeId}");
+                }
+
+                if (statusText != null)
+                {
+                    statusText.text =
+                        $"Cannot start from '{nodeId}'. Choose an available node or re-enter the pending node.";
+                }
+
+                return;
             }
+
+            OnNodeStartRequested?.Invoke(nodeId);
 
             if (verboseLogs)
             {
                 Debug.Log(
-                    $"[TreeMapUIController] TrySelectNode('{nodeId}') => {selected}");
+                    $"[TreeMapUIController] Node start requested: {nodeId}");
             }
         }
 
@@ -294,12 +342,12 @@ namespace CardBattle.Core
                 return;
             }
 
-            OnStartBattleRequested?.Invoke(node);
+            OnNodeStartRequested?.Invoke(node.NodeId);
 
             if (verboseLogs)
             {
                 Debug.Log(
-                    $"[TreeMapUIController] Start battle requested for node={node.NodeId} | " +
+                    $"[TreeMapUIController] Debug Start Battle requested for node={node.NodeId} | " +
                     $"encounter={node.EncounterId}");
             }
         }

@@ -340,6 +340,13 @@ namespace CardBattle.Core
 
             ResetMainFlowForNewRun();
 
+            if (!mapRuntimeController.TryRestorePendingEncounterSelection())
+            {
+                Debug.LogWarning(
+                    "[MainFlow] Continue: pending encounter restore failed. " +
+                    "Player may need to re-select the pending node on the map.");
+            }
+
             SetPanelActive(mainMenuPanel, false);
             SetPanelActive(characterSelectPanel, false);
             SetPanelActive(gameplayRoot, true);
@@ -354,9 +361,12 @@ namespace CardBattle.Core
             {
                 RunState run = manager.CurrentRun;
                 int deckCount = run?.currentDeck != null ? run.currentDeck.Count : 0;
+                string pendingNodeId = mapRuntimeController.HasPendingEncounterNode
+                    ? mapRuntimeController.SelectedNodeId
+                    : "none";
                 Debug.Log(
                     $"[MainFlow] Continued active run. Class={run?.playerClassId} | " +
-                    $"HP={run?.currentHp}/{run?.maxHp} | Deck={deckCount}");
+                    $"HP={run?.currentHp}/{run?.maxHp} | Deck={deckCount} | PendingNode={pendingNodeId}");
             }
         }
 
