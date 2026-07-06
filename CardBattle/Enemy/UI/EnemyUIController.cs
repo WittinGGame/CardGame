@@ -10,7 +10,6 @@ namespace CardBattle.Core
         [Header("UI Parts")]
         [SerializeField] private EnemyStatusUI hpUI;
         [SerializeField] private EnemyIntentUI intentUI;
-        [SerializeField] private EnemyBuffUI buffUI; // optional
 
         [Header("Status Icon UI")]
         [SerializeField] private BattleStatusIconPanelUI statusIconPanelUI;
@@ -49,10 +48,6 @@ namespace CardBattle.Core
             UnsubscribeTargetEvents();
         }
 
-        // =========================
-        // PUBLIC
-        // =========================
-
         public void SetTarget(EnemyBattleUnit enemy)
         {
             UnsubscribeTargetEvents();
@@ -72,10 +67,6 @@ namespace CardBattle.Core
             RefreshAll();
         }
 
-        // =========================
-        // BINDING
-        // =========================
-
         private void BindAll()
         {
             if (target == null)
@@ -84,20 +75,15 @@ namespace CardBattle.Core
                 return;
             }
 
-            // bind UI data
             if (hpUI != null)
                 hpUI.SetTarget(target);
 
             if (intentUI != null)
                 intentUI.SetTarget(target);
 
-            if (buffUI != null)
-                buffUI.SetTarget(target);
-
             if (statusIconPanelUI != null)
                 statusIconPanelUI.SetTarget(target);
 
-            // bind follow anchors
             BindFollow();
         }
 
@@ -210,13 +196,10 @@ namespace CardBattle.Core
         private void RefreshAll()
         {
             if (!RefreshVisibility())
-            {
                 return;
-            }
 
             hpUI?.Refresh();
             intentUI?.Refresh();
-            buffUI?.Refresh();
             statusIconPanelUI?.Refresh();
         }
 
@@ -240,10 +223,6 @@ namespace CardBattle.Core
             return true;
         }
 
-        // =========================
-        // VISIBILITY
-        // =========================
-
         private void HideAll()
         {
             if (hpUI != null)
@@ -251,9 +230,6 @@ namespace CardBattle.Core
 
             if (intentUI != null)
                 intentUI.gameObject.SetActive(false);
-
-            if (buffUI != null)
-                buffUI.Refresh();
 
             statusIconPanelUI?.Refresh();
 
@@ -267,9 +243,6 @@ namespace CardBattle.Core
 
             if (intentUI != null && !intentUI.gameObject.activeSelf)
                 intentUI.gameObject.SetActive(true);
-
-            if (buffUI != null && !buffUI.gameObject.activeSelf)
-                buffUI.gameObject.SetActive(true);
 
             SetFollowEnabled(true);
         }
@@ -299,10 +272,6 @@ namespace CardBattle.Core
             }
         }
 
-        // =========================
-        // DEBUG
-        // =========================
-
 #if UNITY_EDITOR
         [ContextMenu("Debug Refresh UI")]
         private void DebugRefresh()
@@ -315,7 +284,6 @@ namespace CardBattle.Core
 
             hpUI?.Refresh();
             intentUI?.Refresh();
-            buffUI?.Refresh();
             statusIconPanelUI?.Refresh();
 
             Debug.Log($"[EnemyUIController] Refreshed UI for {target.name}");
