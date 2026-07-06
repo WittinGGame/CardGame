@@ -12,6 +12,9 @@ namespace CardBattle.Core
         [SerializeField] private EnemyIntentUI intentUI;
         [SerializeField] private EnemyBuffUI buffUI; // optional
 
+        [Header("Status Icon UI")]
+        [SerializeField] private BattleStatusIconPanelUI statusIconPanelUI;
+
         [Header("Follow Components")]
         [SerializeField] private WorldToUIFollow hpFollow;
         [SerializeField] private WorldToUIFollow intentFollow;
@@ -90,6 +93,9 @@ namespace CardBattle.Core
 
             if (buffUI != null)
                 buffUI.SetTarget(target);
+
+            if (statusIconPanelUI != null)
+                statusIconPanelUI.SetTarget(target);
 
             // bind follow anchors
             BindFollow();
@@ -211,6 +217,7 @@ namespace CardBattle.Core
             hpUI?.Refresh();
             intentUI?.Refresh();
             buffUI?.Refresh();
+            statusIconPanelUI?.Refresh();
         }
 
         private bool RefreshVisibility()
@@ -247,6 +254,8 @@ namespace CardBattle.Core
 
             if (buffUI != null)
                 buffUI.Refresh();
+
+            statusIconPanelUI?.Refresh();
 
             SetFollowEnabled(false);
         }
@@ -307,6 +316,7 @@ namespace CardBattle.Core
             hpUI?.Refresh();
             intentUI?.Refresh();
             buffUI?.Refresh();
+            statusIconPanelUI?.Refresh();
 
             Debug.Log($"[EnemyUIController] Refreshed UI for {target.name}");
         }

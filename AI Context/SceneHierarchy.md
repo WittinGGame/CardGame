@@ -73,6 +73,8 @@
       5. Graveyard
       6. PlayerAP
       7. Buff
+      8. StatusText
+      9. PlayerStatusIconPanel
     3. BattleVFX
       1. GraveyardVFXContainer
       2. GraveyardToDeckVFXController
@@ -145,6 +147,16 @@ EnemyUI.Prefab
 1. EnemyUI (EnemyUIController.cs)
   1. EnemyIntentUI (EnemyIntentUI.cs, WorldToUIFollow.cs)
   2. EnemyHpUI (EnemyStatusUI.cs, WorldToUIFollow.cs)
+    1. EnemyHpBar
+    2. EnemyName
+    3. EnemyHpText
+    4. EnemyAction
+    5. EnemyActionPoint
+    6. EnemyStatusIconPanel
+      1. SlotContainer
+    7. EnemyBlock
+      1. EnemyBlockIcon
+      2. EnemyBlockValue
   3. EnemyBuffUI (EnemyBuffUI.cs, WorldToUIFollow.cs)
     1. StatusRoot
       1. StatusText

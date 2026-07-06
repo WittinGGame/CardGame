@@ -28,6 +28,9 @@ namespace CardBattle.Core
         [Header("Status UI")]
         [SerializeField] private BattleStatusTextUI playerStatusTextUI;
 
+        [Header("Status Icon UI")]
+        [SerializeField] private BattleStatusIconPanelUI playerStatusIconPanelUI;
+
         private void Start()
         {
             if (endTurnButton != null)
@@ -46,6 +49,9 @@ namespace CardBattle.Core
 
                 if (playerStatusTextUI != null)
                     playerStatusTextUI.SetTarget(player);
+
+                if (playerStatusIconPanelUI != null)
+                    playerStatusIconPanelUI.SetTarget(player);
             }
             RefreshUIExternal();
         }
@@ -100,6 +106,7 @@ namespace CardBattle.Core
         {
             RefreshEndTurnButtonState();
             playerStatusTextUI?.Refresh();
+            playerStatusIconPanelUI?.Refresh();
         }
 
         private void BindEnemyStatusUI()

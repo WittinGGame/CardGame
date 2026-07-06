@@ -3504,6 +3504,80 @@ namespace CardBattle.Core
             return BuildStatusListText();
         }
 
+        public int BuildStatusDisplayData(List<StatusDisplayData> output)
+        {
+            if (output == null)
+                return 0;
+
+            output.Clear();
+
+            for (int i = 0; i < statuses.Count; i++)
+            {
+                StatusInstance status = statuses[i];
+                if (status.IsExpired)
+                    continue;
+
+                output.Add(CreateDisplayData(status));
+            }
+
+            return output.Count;
+        }
+
+        private static StatusDisplayData CreateDisplayData(StatusInstance status)
+        {
+            int displayNumber;
+            bool isBuff;
+            bool isDebuff;
+
+            switch (status.Type)
+            {
+                case StatusEffectType.Strength:
+                    displayNumber = status.Amount;
+                    isBuff = true;
+                    isDebuff = false;
+                    break;
+
+                case StatusEffectType.NextAttackBonus:
+                    displayNumber = status.Amount;
+                    isBuff = true;
+                    isDebuff = false;
+                    break;
+
+                case StatusEffectType.Weak:
+                    displayNumber = status.RemainingDuration;
+                    isBuff = false;
+                    isDebuff = true;
+                    break;
+
+                case StatusEffectType.Vulnerable:
+                    displayNumber = status.RemainingDuration;
+                    isBuff = false;
+                    isDebuff = true;
+                    break;
+
+                default:
+                    if (status.Amount > 0)
+                        displayNumber = status.Amount;
+                    else if (status.RemainingDuration > 0)
+                        displayNumber = status.RemainingDuration;
+                    else
+                        displayNumber = 0;
+
+                    isBuff = false;
+                    isDebuff = false;
+                    break;
+            }
+
+            return new StatusDisplayData(
+                status.Type,
+                status.Amount,
+                status.DurationType,
+                status.RemainingDuration,
+                displayNumber,
+                isBuff,
+                isDebuff);
+        }
+
         private string BuildStatusListText()
         {
             var builder = new StringBuilder();
@@ -3554,6 +3628,42 @@ namespace CardBattle.Core
         private void NotifyChanged()
         {
             OnStatusesChanged?.Invoke();
+        }
+    }
+}
+```
+
+## FILE: StatusDisplayData.cs
+**Path:** `Assets/Scripts/CardBattle/Battle/Status/StatusDisplayData.cs`
+```csharp
+namespace CardBattle.Core
+{
+    public readonly struct StatusDisplayData
+    {
+        public StatusEffectType Type { get; }
+        public int Amount { get; }
+        public StatusDurationType DurationType { get; }
+        public int RemainingDuration { get; }
+        public int DisplayNumber { get; }
+        public bool IsBuff { get; }
+        public bool IsDebuff { get; }
+
+        public StatusDisplayData(
+            StatusEffectType type,
+            int amount,
+            StatusDurationType durationType,
+            int remainingDuration,
+            int displayNumber,
+            bool isBuff,
+            bool isDebuff)
+        {
+            Type = type;
+            Amount = amount;
+            DurationType = durationType;
+            RemainingDuration = remainingDuration;
+            DisplayNumber = displayNumber;
+            IsBuff = isBuff;
+            IsDebuff = isDebuff;
         }
     }
 }
