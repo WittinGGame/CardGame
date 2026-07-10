@@ -1,6 +1,5 @@
 using System;
 using System.Collections;
-using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -20,19 +19,6 @@ namespace CardBattle.Core
         [SerializeField] private GameObject currentMarkerRoot;
         [SerializeField] private CanvasGroup canvasGroup;
 
-        [Header("Legacy Visual Layers")]
-        [SerializeField] private Image backgroundImage;
-        [SerializeField] private GameObject selectedRoot;
-        [SerializeField] private GameObject completedRoot;
-        [SerializeField] private GameObject lockedRoot;
-        [SerializeField] private GameObject availableRoot;
-        [SerializeField] private GameObject currentRoot;
-
-        [Header("Debug Text")]
-        [SerializeField] private TextMeshProUGUI titleText;
-        [SerializeField] private TextMeshProUGUI typeText;
-        [SerializeField] private TextMeshProUGUI stateText;
-
         [Header("Visual State Styles")]
         [SerializeField] private TreeMapNodeVisualStyle lockedStyle = TreeMapNodeVisualStyle.CreateLockedDefault();
         [SerializeField] private TreeMapNodeVisualStyle availableStyle = TreeMapNodeVisualStyle.CreateAvailableDefault();
@@ -51,7 +37,6 @@ namespace CardBattle.Core
         [SerializeField] private float currentGlowMaxAlpha = 0.70f;
 
         [Header("Options")]
-        [SerializeField] private bool useLegacyRootsWhenLayerMissing = true;
         [SerializeField] private bool verboseLogs;
 
         public string NodeId { get; private set; } = string.Empty;
@@ -104,33 +89,14 @@ namespace CardBattle.Core
             NodeData = nodeData;
             NodeId = nodeData != null ? nodeData.NodeId : string.Empty;
             lastLoggedVisualState = (TreeMapNodeVisualState)(-1);
-
-            if (titleText != null)
-                titleText.text = nodeData != null ? nodeData.DisplayName : string.Empty;
-
-            if (typeText != null)
-                typeText.text = nodeData != null ? nodeData.NodeType.ToString() : string.Empty;
-        }
-
-        public void RefreshState(MapNodeState state, bool isSelected, bool canStartBattle)
-        {
-            RefreshState(state, isSelected, canStartBattle, MapNodeStateToVisualState(state));
         }
 
         public void RefreshState(
             MapNodeState state,
-            bool isSelected,
             bool canStartBattle,
             TreeMapNodeVisualState visualState)
         {
             CurrentState = state;
-
-            if (stateText != null)
-                stateText.text = state.ToString();
-
-            if (selectedRoot != null)
-                selectedRoot.SetActive(isSelected);
-
             SetVisualState(visualState);
             SetInteractable(canStartBattle);
         }
@@ -139,7 +105,7 @@ namespace CardBattle.Core
         {
             CurrentVisualState = visualState;
             TreeMapNodeVisualStyle style = GetStyleForVisualState(visualState);
-            ApplyVisualStyle(style, visualState);
+            ApplyVisualStyle(style);
 
             if (verboseLogs && lastLoggedVisualState != visualState)
             {
@@ -176,18 +142,6 @@ namespace CardBattle.Core
             CurrentState = MapNodeState.Locked;
             lastLoggedVisualState = (TreeMapNodeVisualState)(-1);
 
-            if (titleText != null)
-                titleText.text = string.Empty;
-
-            if (typeText != null)
-                typeText.text = string.Empty;
-
-            if (stateText != null)
-                stateText.text = string.Empty;
-
-            if (selectedRoot != null)
-                selectedRoot.SetActive(false);
-
             SetVisualState(TreeMapNodeVisualState.Locked);
             SetInteractable(false);
         }
@@ -215,50 +169,25 @@ namespace CardBattle.Core
             };
         }
 
-        private void ApplyVisualStyle(TreeMapNodeVisualStyle style, TreeMapNodeVisualState visualState)
+        private void ApplyVisualStyle(TreeMapNodeVisualStyle style)
         {
             if (style == null)
                 return;
 
-            Image resolvedBgImage = ResolveBgImage();
-            SetImageAlpha(resolvedBgImage, style.bgAlpha);
+            SetImageAlpha(bgImage, style.bgAlpha);
             SetImageAlpha(ringImage, style.ringAlpha);
             SetImageAlpha(iconImage, style.iconAlpha);
 
             SetLayerActive(glowImage, style.glowEnabled);
-            SetOverlayActive(completedXRoot, completedRoot, style.completedXEnabled);
-            SetOverlayActive(currentMarkerRoot, currentRoot, style.currentMarkerEnabled);
 
-            if (useLegacyRootsWhenLayerMissing)
-                ApplyLegacyRootFallback(visualState, style);
+            if (completedXRoot != null)
+                completedXRoot.SetActive(style.completedXEnabled);
+
+            if (currentMarkerRoot != null)
+                currentMarkerRoot.SetActive(style.currentMarkerEnabled);
 
             if (canvasGroup != null)
                 canvasGroup.alpha = 1f;
-        }
-
-        private void ApplyLegacyRootFallback(
-            TreeMapNodeVisualState visualState,
-            TreeMapNodeVisualStyle style)
-        {
-            if (lockedRoot != null && glowImage == null)
-                lockedRoot.SetActive(visualState == TreeMapNodeVisualState.Locked);
-
-            if (availableRoot != null && glowImage == null)
-                availableRoot.SetActive(visualState == TreeMapNodeVisualState.Available);
-
-            if (currentRoot != null && currentMarkerRoot == null)
-                currentRoot.SetActive(visualState == TreeMapNodeVisualState.Current);
-
-            if (completedRoot != null && completedXRoot == null)
-                completedRoot.SetActive(style.completedXEnabled);
-        }
-
-        private Image ResolveBgImage()
-        {
-            if (bgImage != null)
-                return bgImage;
-
-            return backgroundImage;
         }
 
         private static void SetImageAlpha(Image image, float alpha)
@@ -281,21 +210,6 @@ namespace CardBattle.Core
                 image.gameObject.SetActive(enabled);
         }
 
-        private static void SetOverlayActive(
-            GameObject primaryRoot,
-            GameObject legacyRoot,
-            bool enabled)
-        {
-            if (primaryRoot != null)
-            {
-                primaryRoot.SetActive(enabled);
-                return;
-            }
-
-            if (legacyRoot != null)
-                legacyRoot.SetActive(enabled);
-        }
-
         private void CacheBaseTransforms()
         {
             if (baseTransformsCached)
@@ -306,8 +220,6 @@ namespace CardBattle.Core
 
             if (currentMarkerRoot != null)
                 currentMarkerRect = currentMarkerRoot.transform as RectTransform;
-            else if (currentRoot != null)
-                currentMarkerRect = currentRoot.transform as RectTransform;
 
             baseRingScale = ringRect != null ? ringRect.localScale : Vector3.one;
             baseMarkerAnchoredPosition =

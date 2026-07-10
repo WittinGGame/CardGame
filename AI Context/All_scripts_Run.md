@@ -7309,9 +7309,6 @@ namespace CardBattle.Core
         [SerializeField] private RectTransform rectTransform;
         [SerializeField] private Image lineImage;
 
-        [Header("Legacy")]
-        [SerializeField] private Image image;
-
         [Header("Visual Colors")]
         [SerializeField] private Color lockedLineColor = new Color(0.45f, 0.45f, 0.50f, 1f);
         [SerializeField] private Color availableLineColor = new Color(0.75f, 0.68f, 0.42f, 1f);
@@ -7351,29 +7348,13 @@ namespace CardBattle.Core
 
         public void SetVisualState(TreeMapLineVisualState state)
         {
-            Image resolvedImage = ResolveLineImage();
-            if (resolvedImage == null)
+            if (lineImage == null)
                 return;
 
             Color baseColor = GetColorForState(state);
             float alpha = GetAlphaForState(state);
             baseColor.a = alpha;
-            resolvedImage.color = baseColor;
-        }
-
-        public void SetColor(Color color)
-        {
-            Image resolvedImage = ResolveLineImage();
-            if (resolvedImage != null)
-                resolvedImage.color = color;
-        }
-
-        private Image ResolveLineImage()
-        {
-            if (lineImage != null)
-                return lineImage;
-
-            return image;
+            lineImage.color = baseColor;
         }
 
         private Color GetColorForState(TreeMapLineVisualState state)
@@ -7421,7 +7402,6 @@ namespace CardBattle.Core
 ```csharp
 using System;
 using System.Collections;
-using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -7441,19 +7421,6 @@ namespace CardBattle.Core
         [SerializeField] private GameObject currentMarkerRoot;
         [SerializeField] private CanvasGroup canvasGroup;
 
-        [Header("Legacy Visual Layers")]
-        [SerializeField] private Image backgroundImage;
-        [SerializeField] private GameObject selectedRoot;
-        [SerializeField] private GameObject completedRoot;
-        [SerializeField] private GameObject lockedRoot;
-        [SerializeField] private GameObject availableRoot;
-        [SerializeField] private GameObject currentRoot;
-
-        [Header("Debug Text")]
-        [SerializeField] private TextMeshProUGUI titleText;
-        [SerializeField] private TextMeshProUGUI typeText;
-        [SerializeField] private TextMeshProUGUI stateText;
-
         [Header("Visual State Styles")]
         [SerializeField] private TreeMapNodeVisualStyle lockedStyle = TreeMapNodeVisualStyle.CreateLockedDefault();
         [SerializeField] private TreeMapNodeVisualStyle availableStyle = TreeMapNodeVisualStyle.CreateAvailableDefault();
@@ -7472,7 +7439,6 @@ namespace CardBattle.Core
         [SerializeField] private float currentGlowMaxAlpha = 0.70f;
 
         [Header("Options")]
-        [SerializeField] private bool useLegacyRootsWhenLayerMissing = true;
         [SerializeField] private bool verboseLogs;
 
         public string NodeId { get; private set; } = string.Empty;
@@ -7525,33 +7491,14 @@ namespace CardBattle.Core
             NodeData = nodeData;
             NodeId = nodeData != null ? nodeData.NodeId : string.Empty;
             lastLoggedVisualState = (TreeMapNodeVisualState)(-1);
-
-            if (titleText != null)
-                titleText.text = nodeData != null ? nodeData.DisplayName : string.Empty;
-
-            if (typeText != null)
-                typeText.text = nodeData != null ? nodeData.NodeType.ToString() : string.Empty;
-        }
-
-        public void RefreshState(MapNodeState state, bool isSelected, bool canStartBattle)
-        {
-            RefreshState(state, isSelected, canStartBattle, MapNodeStateToVisualState(state));
         }
 
         public void RefreshState(
             MapNodeState state,
-            bool isSelected,
             bool canStartBattle,
             TreeMapNodeVisualState visualState)
         {
             CurrentState = state;
-
-            if (stateText != null)
-                stateText.text = state.ToString();
-
-            if (selectedRoot != null)
-                selectedRoot.SetActive(isSelected);
-
             SetVisualState(visualState);
             SetInteractable(canStartBattle);
         }
@@ -7560,7 +7507,7 @@ namespace CardBattle.Core
         {
             CurrentVisualState = visualState;
             TreeMapNodeVisualStyle style = GetStyleForVisualState(visualState);
-            ApplyVisualStyle(style, visualState);
+            ApplyVisualStyle(style);
 
             if (verboseLogs && lastLoggedVisualState != visualState)
             {
@@ -7597,18 +7544,6 @@ namespace CardBattle.Core
             CurrentState = MapNodeState.Locked;
             lastLoggedVisualState = (TreeMapNodeVisualState)(-1);
 
-            if (titleText != null)
-                titleText.text = string.Empty;
-
-            if (typeText != null)
-                typeText.text = string.Empty;
-
-            if (stateText != null)
-                stateText.text = string.Empty;
-
-            if (selectedRoot != null)
-                selectedRoot.SetActive(false);
-
             SetVisualState(TreeMapNodeVisualState.Locked);
             SetInteractable(false);
         }
@@ -7636,50 +7571,25 @@ namespace CardBattle.Core
             };
         }
 
-        private void ApplyVisualStyle(TreeMapNodeVisualStyle style, TreeMapNodeVisualState visualState)
+        private void ApplyVisualStyle(TreeMapNodeVisualStyle style)
         {
             if (style == null)
                 return;
 
-            Image resolvedBgImage = ResolveBgImage();
-            SetImageAlpha(resolvedBgImage, style.bgAlpha);
+            SetImageAlpha(bgImage, style.bgAlpha);
             SetImageAlpha(ringImage, style.ringAlpha);
             SetImageAlpha(iconImage, style.iconAlpha);
 
             SetLayerActive(glowImage, style.glowEnabled);
-            SetOverlayActive(completedXRoot, completedRoot, style.completedXEnabled);
-            SetOverlayActive(currentMarkerRoot, currentRoot, style.currentMarkerEnabled);
 
-            if (useLegacyRootsWhenLayerMissing)
-                ApplyLegacyRootFallback(visualState, style);
+            if (completedXRoot != null)
+                completedXRoot.SetActive(style.completedXEnabled);
+
+            if (currentMarkerRoot != null)
+                currentMarkerRoot.SetActive(style.currentMarkerEnabled);
 
             if (canvasGroup != null)
                 canvasGroup.alpha = 1f;
-        }
-
-        private void ApplyLegacyRootFallback(
-            TreeMapNodeVisualState visualState,
-            TreeMapNodeVisualStyle style)
-        {
-            if (lockedRoot != null && glowImage == null)
-                lockedRoot.SetActive(visualState == TreeMapNodeVisualState.Locked);
-
-            if (availableRoot != null && glowImage == null)
-                availableRoot.SetActive(visualState == TreeMapNodeVisualState.Available);
-
-            if (currentRoot != null && currentMarkerRoot == null)
-                currentRoot.SetActive(visualState == TreeMapNodeVisualState.Current);
-
-            if (completedRoot != null && completedXRoot == null)
-                completedRoot.SetActive(style.completedXEnabled);
-        }
-
-        private Image ResolveBgImage()
-        {
-            if (bgImage != null)
-                return bgImage;
-
-            return backgroundImage;
         }
 
         private static void SetImageAlpha(Image image, float alpha)
@@ -7702,21 +7612,6 @@ namespace CardBattle.Core
                 image.gameObject.SetActive(enabled);
         }
 
-        private static void SetOverlayActive(
-            GameObject primaryRoot,
-            GameObject legacyRoot,
-            bool enabled)
-        {
-            if (primaryRoot != null)
-            {
-                primaryRoot.SetActive(enabled);
-                return;
-            }
-
-            if (legacyRoot != null)
-                legacyRoot.SetActive(enabled);
-        }
-
         private void CacheBaseTransforms()
         {
             if (baseTransformsCached)
@@ -7727,8 +7622,6 @@ namespace CardBattle.Core
 
             if (currentMarkerRoot != null)
                 currentMarkerRect = currentMarkerRoot.transform as RectTransform;
-            else if (currentRoot != null)
-                currentMarkerRect = currentRoot.transform as RectTransform;
 
             baseRingScale = ringRect != null ? ringRect.localScale : Vector3.one;
             baseMarkerAnchoredPosition =
@@ -7991,9 +7884,7 @@ namespace CardBattle.Core
 ```csharp
 using System;
 using System.Collections.Generic;
-using TMPro;
 using UnityEngine;
-using UnityEngine.UI;
 
 namespace CardBattle.Core
 {
@@ -8017,9 +7908,6 @@ namespace CardBattle.Core
         [Header("Panel")]
         [SerializeField] private GameObject panelRoot;
         [SerializeField] private CanvasGroup mapCanvasGroup;
-        [SerializeField] private Button startBattleButton;
-        [SerializeField] private TextMeshProUGUI selectedNodeText;
-        [SerializeField] private TextMeshProUGUI statusText;
 
         [Header("Layout")]
         [SerializeField] private float nodePositionScale = 1f;
@@ -8028,7 +7916,6 @@ namespace CardBattle.Core
         [Header("Options")]
         [SerializeField] private bool initializeMapOnStart = true;
         [SerializeField] private bool rebuildOnMapStateChanged = true;
-        [SerializeField] private bool hideStartBattleButtonInGameplay = true;
         [SerializeField] private bool verboseLogs = true;
 
         private readonly Dictionary<string, TreeMapNodeButtonUI> nodeViews =
@@ -8046,15 +7933,6 @@ namespace CardBattle.Core
         private void Awake()
         {
             ResolveCanvasGroup();
-
-            if (startBattleButton != null)
-            {
-                startBattleButton.onClick.RemoveListener(HandleStartBattleClicked);
-                startBattleButton.onClick.AddListener(HandleStartBattleClicked);
-
-                if (hideStartBattleButtonInGameplay)
-                    startBattleButton.gameObject.SetActive(false);
-            }
         }
 
         private void Start()
@@ -8189,14 +8067,14 @@ namespace CardBattle.Core
             {
                 string nodeId = pair.Key;
                 MapNodeState state = controller.GetNodeState(nodeId);
-                bool isSelected = !string.IsNullOrWhiteSpace(selectedNodeId) &&
-                                  string.Equals(nodeId, selectedNodeId, StringComparison.Ordinal);
 
                 TreeMapNodeVisualState visualState;
                 bool interactable;
 
                 if (hasPendingSelectedNode)
                 {
+                    bool isSelected = string.Equals(nodeId, selectedNodeId, StringComparison.Ordinal);
+
                     if (isSelected)
                     {
                         visualState = TreeMapNodeVisualState.Current;
@@ -8225,14 +8103,10 @@ namespace CardBattle.Core
                         $"[TreeMapUI] Node {nodeId}: visual={visualState}, interactable={interactable}");
                 }
 
-                pair.Value.RefreshState(state, isSelected, interactable, visualState);
+                pair.Value.RefreshState(state, interactable, visualState);
             }
 
             RefreshLineStates(controller, hasPendingSelectedNode, selectedNodeId);
-
-            RefreshSelectedNodeText(controller);
-            RefreshStartBattleButton(controller);
-            RefreshStatusText(controller);
         }
 
         private bool IsNodeInteractionAllowed(MapRuntimeController controller, string nodeId)
@@ -8344,16 +8218,6 @@ namespace CardBattle.Core
             Refresh();
         }
 
-        public bool TryGetSelectedNode(out MapNodeData node)
-        {
-            node = null;
-
-            if (mapRuntimeController == null)
-                return false;
-
-            return mapRuntimeController.TryGetSelectedNode(out node);
-        }
-
         private void BuildLines(MapActData actData)
         {
             if (linePrefab == null || lineContainer == null || actData == null)
@@ -8387,58 +8251,6 @@ namespace CardBattle.Core
             }
         }
 
-        private void RefreshSelectedNodeText(MapRuntimeController controller)
-        {
-            if (selectedNodeText == null)
-                return;
-
-            if (controller.TryGetSelectedNode(out MapNodeData node))
-            {
-                string statusPrefix = controller.HasPendingEncounterNode
-                    ? "Pending encounter"
-                    : "Selected";
-
-                selectedNodeText.text =
-                    $"{statusPrefix}: {node.DisplayName}\n" +
-                    $"Type: {node.NodeType}\n" +
-                    $"Encounter: {(node.HasEncounter ? node.EncounterId : "none")}";
-            }
-            else
-            {
-                selectedNodeText.text = "Select an available node to start the encounter.";
-            }
-        }
-
-        private void RefreshStartBattleButton(MapRuntimeController controller)
-        {
-            if (startBattleButton == null)
-                return;
-
-            if (hideStartBattleButtonInGameplay)
-            {
-                startBattleButton.interactable = false;
-                return;
-            }
-
-            bool canStart = controller.HasSelectedNode &&
-                            controller.TryGetSelectedNode(out MapNodeData node) &&
-                            node.HasEncounter;
-
-            startBattleButton.interactable = canStart;
-        }
-
-        private void RefreshStatusText(MapRuntimeController controller)
-        {
-            if (statusText == null || controller.CurrentMapState == null)
-                return;
-
-            RunMapState mapState = controller.CurrentMapState;
-            statusText.text =
-                $"Current: {mapState.CurrentNodeId}\n" +
-                $"Selected: {mapState.SelectedNodeId}\n" +
-                $"Available: {FormatNodeIdList(mapState.GetNodeIdsByState(MapNodeState.Available))}";
-        }
-
         private void HandleNodeClicked(string nodeId)
         {
             if (isBattleStartInProgress)
@@ -8467,12 +8279,6 @@ namespace CardBattle.Core
                         $"or pending different node. nodeId={nodeId}");
                 }
 
-                if (statusText != null)
-                {
-                    statusText.text =
-                        $"Cannot start from '{nodeId}'. Choose an available node or re-enter the pending node.";
-                }
-
                 return;
             }
 
@@ -8482,40 +8288,6 @@ namespace CardBattle.Core
             {
                 Debug.Log(
                     $"[TreeMapUIController] Node start requested: {nodeId}");
-            }
-        }
-
-        private void HandleStartBattleClicked()
-        {
-            if (!TryGetSelectedNode(out MapNodeData node))
-            {
-                if (verboseLogs)
-                {
-                    Debug.LogWarning(
-                        "[TreeMapUIController] Start Battle clicked with no valid selected node.");
-                }
-
-                return;
-            }
-
-            if (!node.HasEncounter)
-            {
-                if (verboseLogs)
-                {
-                    Debug.LogWarning(
-                        $"[TreeMapUIController] Start Battle clicked but node '{node.NodeId}' has no encounter.");
-                }
-
-                return;
-            }
-
-            OnNodeStartRequested?.Invoke(node.NodeId);
-
-            if (verboseLogs)
-            {
-                Debug.Log(
-                    $"[TreeMapUIController] Debug Start Battle requested for node={node.NodeId} | " +
-                    $"encounter={node.EncounterId}");
             }
         }
 
@@ -8612,14 +8384,6 @@ namespace CardBattle.Core
             rect.anchorMin = new Vector2(0.5f, 0.5f);
             rect.anchorMax = new Vector2(0.5f, 0.5f);
             rect.pivot = new Vector2(0.5f, 0.5f);
-        }
-
-        private static string FormatNodeIdList(List<string> nodeIds)
-        {
-            if (nodeIds == null || nodeIds.Count == 0)
-                return string.Empty;
-
-            return string.Join(", ", nodeIds);
         }
 
         private void TryApplyNodeIcon(TreeMapNodeButtonUI view, MapNodeData node)

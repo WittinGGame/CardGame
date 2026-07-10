@@ -9,9 +9,6 @@ namespace CardBattle.Core
         [SerializeField] private RectTransform rectTransform;
         [SerializeField] private Image lineImage;
 
-        [Header("Legacy")]
-        [SerializeField] private Image image;
-
         [Header("Visual Colors")]
         [SerializeField] private Color lockedLineColor = new Color(0.45f, 0.45f, 0.50f, 1f);
         [SerializeField] private Color availableLineColor = new Color(0.75f, 0.68f, 0.42f, 1f);
@@ -51,29 +48,13 @@ namespace CardBattle.Core
 
         public void SetVisualState(TreeMapLineVisualState state)
         {
-            Image resolvedImage = ResolveLineImage();
-            if (resolvedImage == null)
+            if (lineImage == null)
                 return;
 
             Color baseColor = GetColorForState(state);
             float alpha = GetAlphaForState(state);
             baseColor.a = alpha;
-            resolvedImage.color = baseColor;
-        }
-
-        public void SetColor(Color color)
-        {
-            Image resolvedImage = ResolveLineImage();
-            if (resolvedImage != null)
-                resolvedImage.color = color;
-        }
-
-        private Image ResolveLineImage()
-        {
-            if (lineImage != null)
-                return lineImage;
-
-            return image;
+            lineImage.color = baseColor;
         }
 
         private Color GetColorForState(TreeMapLineVisualState state)
