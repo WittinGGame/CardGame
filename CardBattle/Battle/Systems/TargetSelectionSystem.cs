@@ -203,6 +203,11 @@ namespace CardBattle.Core
             ForceCancelTargetSelection();
         }
 
+        public void SetEnemyHighlights(EnemyTargetHighlight[] highlights)
+        {
+            enemyHighlights = highlights;
+        }
+
         private void SetHighlight(bool value)
         {
             if (enemyHighlights == null)

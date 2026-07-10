@@ -1616,6 +1616,11 @@ namespace CardBattle.Core
             ForceCancelTargetSelection();
         }
 
+        public void SetEnemyHighlights(EnemyTargetHighlight[] highlights)
+        {
+            enemyHighlights = highlights;
+        }
+
         private void SetHighlight(bool value)
         {
             if (enemyHighlights == null)
@@ -3193,6 +3198,34 @@ namespace CardBattle.Core
 }
 ```
 
+## FILE: BattlePresentationController.cs
+**Path:** `Assets/Scripts/CardBattle/Battle/Presentation/BattlePresentationController.cs`
+```csharp
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    /// <summary>
+    /// Scene-level bridge for battle presentation systems that subscribe to runtime enemy events.
+    /// </summary>
+    public class BattlePresentationController : MonoBehaviour
+    {
+        [SerializeField] private BattleCameraFeedbackController cameraFeedback;
+
+        private void Awake()
+        {
+            if (cameraFeedback == null)
+                cameraFeedback = GetComponent<BattleCameraFeedbackController>();
+        }
+
+        public void RefreshSubscriptions()
+        {
+            cameraFeedback?.RefreshEnemySubscriptions();
+        }
+    }
+}
+```
+
 ## FILE: BattleOutcome.cs
 **Path:** `Assets/Scripts/CardBattle/Battle/Systems/BattleOutcome.cs`
 ```csharp
@@ -3247,6 +3280,12 @@ namespace CardBattle.Core
         {
             CurrentOutcome = BattleOutcome.None;
             Debug.Log("[BattleOutcome] Outcome reset.");
+        }
+
+        public void RefreshEnemyReferences()
+        {
+            UnsubscribeEnemies();
+            SubscribeEnemies();
         }
 
         private void SubscribePlayer()
@@ -3309,12 +3348,19 @@ namespace CardBattle.Core
                 return;
 
             var enemies = enemyActionSystem.Enemies;
+            int aliveCount = 0;
             for (int i = 0; i < enemies.Count; i++)
             {
                 var enemy = enemies[i];
                 if (enemy != null && enemy.IsAlive)
+                {
+                    aliveCount++;
                     return;
+                }
             }
+
+            Debug.Log(
+                $"[BattleOutcome] Enemy count from EnemyActionSystem={enemies.Count}, alive={aliveCount}.");
 
             ResolveOutcome(BattleOutcome.EncounterCleared);
         }

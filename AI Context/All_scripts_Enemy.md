@@ -331,6 +331,11 @@ public class EnemyTargetHighlight : MonoBehaviour, IPointerEnterHandler, IPointe
             baseScale = targetRing.transform.localScale;
     }
 
+    public void Bind(EnemyBattleUnit enemy)
+    {
+        enemyBattleUnit = enemy;
+    }
+
     public void SetSelectable(bool value)
     {
         bool canSelect = value && enemyBattleUnit != null && enemyBattleUnit.IsAlive;
@@ -373,6 +378,12 @@ namespace CardBattle.Core
     {
         [SerializeField] private EnemyBattleUnit enemyBattleUnit;
         [SerializeField] private TargetSelectionSystem targetSelectionSystem;
+
+        public void Bind(EnemyBattleUnit enemy, TargetSelectionSystem selectionSystem)
+        {
+            enemyBattleUnit = enemy;
+            targetSelectionSystem = selectionSystem;
+        }
 
         public void OnPointerClick(PointerEventData eventData)
         {

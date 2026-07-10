@@ -1531,6 +1531,9 @@ namespace CardBattle.Core
         [SerializeField] private Color damageColor = new Color(1f, 0.35f, 0.35f, 1f);
         [SerializeField] private Color healColor = new Color(0.45f, 1f, 0.55f, 1f);
 
+        private readonly System.Collections.Generic.List<EnemyBattleUnit> subscribedEnemies =
+            new System.Collections.Generic.List<EnemyBattleUnit>();
+
         private void Awake()
         {
             if (worldCamera == null)
@@ -1550,10 +1553,15 @@ namespace CardBattle.Core
         }
 
         /// <summary>Call after registering new enemies at runtime so they receive floating text.</summary>
-        public void RefreshEnemySubscriptions()
+        public void RefreshSubscriptions()
         {
             UnsubscribeEnemies();
             SubscribeEnemies();
+        }
+
+        public void RefreshEnemySubscriptions()
+        {
+            RefreshSubscriptions();
         }
 
         private void SubscribePlayer()
@@ -1583,29 +1591,28 @@ namespace CardBattle.Core
             for (int i = 0; i < list.Count; i++)
             {
                 var enemy = list[i];
-                if (enemy == null)
+                if (enemy == null || subscribedEnemies.Contains(enemy))
                     continue;
 
                 enemy.OnDamageTakenEvent += HandleUnitDamageTaken;
                 enemy.OnHealedEvent += HandleUnitHealed;
+                subscribedEnemies.Add(enemy);
             }
         }
 
         private void UnsubscribeEnemies()
         {
-            if (enemyActionSystem == null)
-                return;
-
-            var list = enemyActionSystem.Enemies;
-            for (int i = 0; i < list.Count; i++)
+            for (int i = 0; i < subscribedEnemies.Count; i++)
             {
-                var enemy = list[i];
+                var enemy = subscribedEnemies[i];
                 if (enemy == null)
                     continue;
 
                 enemy.OnDamageTakenEvent -= HandleUnitDamageTaken;
                 enemy.OnHealedEvent -= HandleUnitHealed;
             }
+
+            subscribedEnemies.Clear();
         }
 
         private void HandleUnitDamageTaken(BattleUnit unit, int amount)

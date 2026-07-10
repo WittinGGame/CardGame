@@ -37,6 +37,12 @@ namespace CardBattle.Core
             Debug.Log("[BattleOutcome] Outcome reset.");
         }
 
+        public void RefreshEnemyReferences()
+        {
+            UnsubscribeEnemies();
+            SubscribeEnemies();
+        }
+
         private void SubscribePlayer()
         {
             if (player == null)
@@ -97,12 +103,19 @@ namespace CardBattle.Core
                 return;
 
             var enemies = enemyActionSystem.Enemies;
+            int aliveCount = 0;
             for (int i = 0; i < enemies.Count; i++)
             {
                 var enemy = enemies[i];
                 if (enemy != null && enemy.IsAlive)
+                {
+                    aliveCount++;
                     return;
+                }
             }
+
+            Debug.Log(
+                $"[BattleOutcome] Enemy count from EnemyActionSystem={enemies.Count}, alive={aliveCount}.");
 
             ResolveOutcome(BattleOutcome.EncounterCleared);
         }

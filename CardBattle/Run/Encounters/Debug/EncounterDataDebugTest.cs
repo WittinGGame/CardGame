@@ -31,10 +31,35 @@ namespace CardBattle.Core
                 $"EnvironmentSceneName={encounterData.EnvironmentSceneName}\n" +
                 $"RewardConfig={(encounterData.RewardConfig != null ? encounterData.RewardConfig.name : "null")}\n" +
                 $"EncounterSeedOffset={encounterData.EncounterSeedOffset}\n" +
+                $"EnemySlotCount={encounterData.EnemySlotCount}\n" +
+                $"ValidEnemySlotCount={encounterData.GetValidEnemySlotCount()}\n" +
+                $"HasEnemySlotPrefabs={encounterData.HasEnemySlotPrefabs}\n" +
                 $"EnemyCount={encounterData.EnemyCount}\n" +
                 $"ValidEnemyCount={encounterData.GetValidEnemyCount()}\n" +
                 $"IsRuntimeValid={isValid}\n" +
                 $"ValidationError={(isValid ? string.Empty : error)}");
+
+            if (encounterData.HasEnemySlotPrefabs)
+            {
+                var sortedSlotScratch = new List<EncounterEnemySlotData>();
+                encounterData.GetValidEnemySlots(sortedSlotScratch);
+
+                for (int i = 0; i < sortedSlotScratch.Count; i++)
+                {
+                    EncounterEnemySlotData slot = sortedSlotScratch[i];
+                    if (slot == null)
+                        continue;
+
+                    Debug.Log(
+                        $"[EncounterDataDebugTest] EnemySlot[{i}] | " +
+                        $"SlotIndex={slot.SlotIndex} | " +
+                        $"Prefab={(slot.EnemyPrefab != null ? slot.EnemyPrefab.name : "null")} | " +
+                        $"EnemyId={slot.EnemyId} | " +
+                        $"DisplayName={(slot.EnemyData != null ? slot.EnemyData.DisplayName : "n/a")}");
+                }
+
+                return;
+            }
 
             sortedEnemyScratch.Clear();
             encounterData.GetValidEnemyEntries(sortedEnemyScratch);

@@ -70,6 +70,7 @@ namespace CardBattle.Core
                 $"LastMissingSlotCount={binder.LastMissingSlotCount}\n" +
                 $"LastUnusedSceneEnemyCount={binder.LastUnusedSceneEnemyCount}\n" +
                 $"LastApplyError={binder.LastApplyError}\n" +
+                $"SpawnedEnemyCount={binder.SpawnedEnemies.Count}\n" +
                 $"CurrentEncounterId={currentEncounterId}\n" +
                 $"EnemyActionSystemCount={enemySystemCount}");
 

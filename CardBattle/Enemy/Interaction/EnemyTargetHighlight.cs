@@ -17,6 +17,11 @@ public class EnemyTargetHighlight : MonoBehaviour, IPointerEnterHandler, IPointe
             baseScale = targetRing.transform.localScale;
     }
 
+    public void Bind(EnemyBattleUnit enemy)
+    {
+        enemyBattleUnit = enemy;
+    }
+
     public void SetSelectable(bool value)
     {
         bool canSelect = value && enemyBattleUnit != null && enemyBattleUnit.IsAlive;
