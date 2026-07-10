@@ -17,7 +17,11 @@ namespace CardBattle.Core
         public Vector3 LocalPositionOffset => localPositionOffset;
         public Vector3 LocalEulerOffset => localEulerOffset;
 
-        public bool IsValid => enemyData != null;
+        public bool IsValid =>
+            enemyPrefab != null &&
+            enemyData != null &&
+            slotIndex >= 0;
+
         public bool HasPrefab => enemyPrefab != null;
 
         public string EnemyId =>

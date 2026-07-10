@@ -3825,9 +3825,8 @@ namespace CardBattle.Core
         [SerializeField] private string environmentId;
         [SerializeField] private string environmentSceneName;
 
-        [Header("Enemies")]
+        [Header("Enemy Slots")]
         [SerializeField] private EncounterEnemySlotData[] enemySlots;
-        [SerializeField] private List<EncounterEnemyEntry> enemies = new List<EncounterEnemyEntry>();
 
         [Header("Reward")]
         [SerializeField] private EncounterRewardConfig rewardConfig;
@@ -3852,34 +3851,9 @@ namespace CardBattle.Core
         public int EncounterSeedOffset => encounterSeedOffset;
 
         public IReadOnlyList<EncounterEnemySlotData> EnemySlots => enemySlots;
-        public IReadOnlyList<EncounterEnemyEntry> Enemies => enemies;
-        public int EnemyCount => enemies != null ? enemies.Count : 0;
         public int EnemySlotCount => enemySlots != null ? enemySlots.Length : 0;
 
-        public bool HasEnemySlotPrefabs => GetValidEnemySlotCount() > 0;
-
-        public bool TryGetEnemyEntry(string slotId, out EncounterEnemyEntry entry)
-        {
-            entry = null;
-
-            if (string.IsNullOrWhiteSpace(slotId) || enemies == null)
-                return false;
-
-            for (int i = 0; i < enemies.Count; i++)
-            {
-                EncounterEnemyEntry candidate = enemies[i];
-                if (candidate == null || !candidate.IsValid)
-                    continue;
-
-                if (string.Equals(candidate.SlotId, slotId, StringComparison.Ordinal))
-                {
-                    entry = candidate;
-                    return true;
-                }
-            }
-
-            return false;
-        }
+        public bool HasEnemySlots => GetValidEnemySlotCount() > 0;
 
         public int GetValidEnemySlotCount()
         {
@@ -3896,6 +3870,8 @@ namespace CardBattle.Core
 
             return count;
         }
+
+        public int GetValidEnemyCount() => GetValidEnemySlotCount();
 
         public void GetValidEnemySlots(List<EncounterEnemySlotData> output)
         {
@@ -3915,45 +3891,6 @@ namespace CardBattle.Core
             }
 
             output.Sort(CompareSlotIndex);
-        }
-
-        public int GetValidEnemyCount()
-        {
-            if (HasEnemySlotPrefabs)
-                return GetValidEnemySlotCount();
-
-            if (enemies == null)
-                return 0;
-
-            int count = 0;
-            for (int i = 0; i < enemies.Count; i++)
-            {
-                EncounterEnemyEntry entry = enemies[i];
-                if (entry != null && entry.IsValid)
-                    count++;
-            }
-
-            return count;
-        }
-
-        public void GetValidEnemyEntries(List<EncounterEnemyEntry> output)
-        {
-            if (output == null)
-                return;
-
-            output.Clear();
-
-            if (enemies == null)
-                return;
-
-            for (int i = 0; i < enemies.Count; i++)
-            {
-                EncounterEnemyEntry entry = enemies[i];
-                if (entry != null && entry.IsValid)
-                    output.Add(entry);
-            }
-
-            output.Sort(CompareSpawnOrder);
         }
 
         public bool IsRuntimeValid(out string error)
@@ -3984,10 +3921,7 @@ namespace CardBattle.Core
                 return false;
             }
 
-            if (HasEnemySlotPrefabs)
-                return IsEnemySlotsRuntimeValid(out error);
-
-            return IsLegacyEnemyEntriesRuntimeValid(out error);
+            return IsEnemySlotsRuntimeValid(out error);
         }
 
         private bool IsEnemySlotsRuntimeValid(out string error)
@@ -3996,7 +3930,7 @@ namespace CardBattle.Core
 
             if (enemySlots == null || enemySlots.Length == 0)
             {
-                error = "Encounter has no valid enemy slot entries.";
+                error = "EncounterData requires at least one valid Enemy Slot.";
                 return false;
             }
 
@@ -4012,9 +3946,21 @@ namespace CardBattle.Core
                     return false;
                 }
 
-                if (!slot.IsValid)
+                if (slot.SlotIndex < 0)
+                {
+                    error = $"Enemy slot at index {i} has invalid slot index {slot.SlotIndex}.";
+                    return false;
+                }
+
+                if (slot.EnemyData == null)
                 {
                     error = $"Enemy slot at index {i} has no EnemyData.";
+                    return false;
+                }
+
+                if (slot.EnemyPrefab == null)
+                {
+                    error = $"Enemy slot at index {i} has no enemy prefab.";
                     return false;
                 }
 
@@ -4029,59 +3975,7 @@ namespace CardBattle.Core
 
             if (validCount == 0)
             {
-                error = "Encounter has no valid enemy slot entries.";
-                return false;
-            }
-
-            return true;
-        }
-
-        private bool IsLegacyEnemyEntriesRuntimeValid(out string error)
-        {
-            error = string.Empty;
-
-            if (enemies == null || enemies.Count == 0)
-            {
-                error = "Encounter has no valid enemy entries.";
-                return false;
-            }
-
-            var seenSlotIds = new HashSet<string>(StringComparer.Ordinal);
-            int validCount = 0;
-
-            for (int i = 0; i < enemies.Count; i++)
-            {
-                EncounterEnemyEntry entry = enemies[i];
-                if (entry == null)
-                {
-                    error = $"Enemy entry at index {i} is null.";
-                    return false;
-                }
-
-                if (!entry.IsValid)
-                {
-                    if (string.IsNullOrWhiteSpace(entry.SlotId))
-                    {
-                        error = $"Enemy entry at index {i} has a blank slot ID.";
-                        return false;
-                    }
-
-                    error = $"Enemy entry at index {i} has no EnemyData.";
-                    return false;
-                }
-
-                if (!seenSlotIds.Add(entry.SlotId))
-                {
-                    error = $"Duplicate slot ID '{entry.SlotId}'.";
-                    return false;
-                }
-
-                validCount++;
-            }
-
-            if (validCount == 0)
-            {
-                error = "Encounter has no valid enemy entries.";
+                error = "EncounterData requires at least one valid Enemy Slot.";
                 return false;
             }
 
@@ -4100,20 +3994,6 @@ namespace CardBattle.Core
                 return -1;
 
             return a.SlotIndex.CompareTo(b.SlotIndex);
-        }
-
-        private static int CompareSpawnOrder(EncounterEnemyEntry a, EncounterEnemyEntry b)
-        {
-            if (ReferenceEquals(a, b))
-                return 0;
-
-            if (a == null)
-                return 1;
-
-            if (b == null)
-                return -1;
-
-            return a.SpawnOrder.CompareTo(b.SpawnOrder);
         }
 
 #if UNITY_EDITOR
@@ -4147,92 +4027,51 @@ namespace CardBattle.Core
                     this);
             }
 
-            if (enemySlots != null && enemySlots.Length > 0)
-            {
-                var seenSlotIndices = new HashSet<int>();
-
-                for (int i = 0; i < enemySlots.Length; i++)
-                {
-                    EncounterEnemySlotData slot = enemySlots[i];
-                    if (slot == null)
-                    {
-                        Debug.LogWarning(
-                            $"[EncounterData] Null enemy slot at index {i} in '{name}'.",
-                            this);
-                        continue;
-                    }
-
-                    if (!seenSlotIndices.Add(slot.SlotIndex))
-                    {
-                        Debug.LogWarning(
-                            $"[EncounterData] Duplicate enemy slot index {slot.SlotIndex} in '{name}'.",
-                            this);
-                    }
-
-                    if (slot.EnemyData == null)
-                    {
-                        Debug.LogWarning(
-                            $"[EncounterData] Enemy slot at index {i} has no EnemyData in '{name}'.",
-                            this);
-                    }
-
-                    if (slot.EnemyPrefab == null)
-                    {
-                        Debug.LogWarning(
-                            $"[EncounterData] Enemy slot at index {i} has no enemy prefab in '{name}'.",
-                            this);
-                    }
-                }
-
-                return;
-            }
-
-            if (enemies == null || enemies.Count == 0)
+            if (enemySlots == null || enemySlots.Length == 0)
             {
                 Debug.LogWarning(
-                    $"[EncounterData] No enemy entries configured in '{name}'.",
+                    $"[EncounterData] EncounterData requires at least one valid Enemy Slot in '{name}'.",
                     this);
                 return;
             }
 
-            var seenSlotIds = new HashSet<string>(StringComparer.Ordinal);
-            var seenSpawnOrders = new HashSet<int>();
+            var seenSlotIndices = new HashSet<int>();
 
-            for (int i = 0; i < enemies.Count; i++)
+            for (int i = 0; i < enemySlots.Length; i++)
             {
-                EncounterEnemyEntry entry = enemies[i];
-                if (entry == null)
+                EncounterEnemySlotData slot = enemySlots[i];
+                if (slot == null)
                 {
                     Debug.LogWarning(
-                        $"[EncounterData] Null enemy entry at index {i} in '{name}'.",
+                        $"[EncounterData] Null enemy slot at index {i} in '{name}'.",
                         this);
                     continue;
                 }
 
-                if (string.IsNullOrWhiteSpace(entry.SlotId))
+                if (slot.SlotIndex < 0)
                 {
                     Debug.LogWarning(
-                        $"[EncounterData] Enemy entry at index {i} has a blank slot ID in '{name}'.",
+                        $"[EncounterData] Enemy slot at index {i} has invalid slot index in '{name}'.",
                         this);
                 }
-                else if (!seenSlotIds.Add(entry.SlotId))
+                else if (!seenSlotIndices.Add(slot.SlotIndex))
                 {
                     Debug.LogWarning(
-                        $"[EncounterData] Duplicate slot ID '{entry.SlotId}' in '{name}'.",
-                        this);
-                }
-
-                if (!seenSpawnOrders.Add(entry.SpawnOrder))
-                {
-                    Debug.LogWarning(
-                        $"[EncounterData] Duplicate spawn order {entry.SpawnOrder} in '{name}'.",
+                        $"[EncounterData] Duplicate enemy slot index {slot.SlotIndex} in '{name}'.",
                         this);
                 }
 
-                if (entry.EnemyData == null)
+                if (slot.EnemyData == null)
                 {
                     Debug.LogWarning(
-                        $"[EncounterData] Enemy entry at index {i} has no EnemyData in '{name}'.",
+                        $"[EncounterData] Enemy slot at index {i} has no EnemyData in '{name}'.",
+                        this);
+                }
+
+                if (slot.EnemyPrefab == null)
+                {
+                    Debug.LogWarning(
+                        $"[EncounterData] Enemy slot at index {i} has no enemy prefab in '{name}'.",
                         this);
                 }
             }
@@ -4292,7 +4131,11 @@ namespace CardBattle.Core
         public Vector3 LocalPositionOffset => localPositionOffset;
         public Vector3 LocalEulerOffset => localEulerOffset;
 
-        public bool IsValid => enemyData != null;
+        public bool IsValid =>
+            enemyPrefab != null &&
+            enemyData != null &&
+            slotIndex >= 0;
+
         public bool HasPrefab => enemyPrefab != null;
 
         public string EnemyId =>
@@ -4329,8 +4172,6 @@ namespace CardBattle.Core
         [SerializeField] private EncounterCatalog encounterCatalog;
         [SerializeField] private string lookupEncounterId;
 
-        private readonly List<EncounterEnemyEntry> sortedEnemyScratch = new List<EncounterEnemyEntry>();
-
         [ContextMenu("Debug Print Encounter")]
         private void DebugPrintEncounter()
         {
@@ -4346,56 +4187,26 @@ namespace CardBattle.Core
                 $"[EncounterDataDebugTest] --- Encounter ---\n" +
                 $"EncounterId={encounterData.EncounterId}\n" +
                 $"DisplayName={encounterData.DisplayName}\n" +
-                $"Type={encounterData.EncounterType}\n" +
-                $"EnvironmentId={encounterData.EnvironmentId}\n" +
-                $"EnvironmentSceneName={encounterData.EnvironmentSceneName}\n" +
-                $"RewardConfig={(encounterData.RewardConfig != null ? encounterData.RewardConfig.name : "null")}\n" +
-                $"EncounterSeedOffset={encounterData.EncounterSeedOffset}\n" +
                 $"EnemySlotCount={encounterData.EnemySlotCount}\n" +
                 $"ValidEnemySlotCount={encounterData.GetValidEnemySlotCount()}\n" +
-                $"HasEnemySlotPrefabs={encounterData.HasEnemySlotPrefabs}\n" +
-                $"EnemyCount={encounterData.EnemyCount}\n" +
-                $"ValidEnemyCount={encounterData.GetValidEnemyCount()}\n" +
                 $"IsRuntimeValid={isValid}\n" +
                 $"ValidationError={(isValid ? string.Empty : error)}");
 
-            if (encounterData.HasEnemySlotPrefabs)
+            var sortedSlotScratch = new List<EncounterEnemySlotData>();
+            encounterData.GetValidEnemySlots(sortedSlotScratch);
+
+            for (int i = 0; i < sortedSlotScratch.Count; i++)
             {
-                var sortedSlotScratch = new List<EncounterEnemySlotData>();
-                encounterData.GetValidEnemySlots(sortedSlotScratch);
-
-                for (int i = 0; i < sortedSlotScratch.Count; i++)
-                {
-                    EncounterEnemySlotData slot = sortedSlotScratch[i];
-                    if (slot == null)
-                        continue;
-
-                    Debug.Log(
-                        $"[EncounterDataDebugTest] EnemySlot[{i}] | " +
-                        $"SlotIndex={slot.SlotIndex} | " +
-                        $"Prefab={(slot.EnemyPrefab != null ? slot.EnemyPrefab.name : "null")} | " +
-                        $"EnemyId={slot.EnemyId} | " +
-                        $"DisplayName={(slot.EnemyData != null ? slot.EnemyData.DisplayName : "n/a")}");
-                }
-
-                return;
-            }
-
-            sortedEnemyScratch.Clear();
-            encounterData.GetValidEnemyEntries(sortedEnemyScratch);
-
-            for (int i = 0; i < sortedEnemyScratch.Count; i++)
-            {
-                EncounterEnemyEntry entry = sortedEnemyScratch[i];
-                if (entry == null)
+                EncounterEnemySlotData slot = sortedSlotScratch[i];
+                if (slot == null)
                     continue;
 
                 Debug.Log(
-                    $"[EncounterDataDebugTest] Enemy[{i}] | " +
-                    $"SlotId={entry.SlotId} | " +
-                    $"EnemyId={entry.EnemyId} | " +
-                    $"DisplayName={(entry.EnemyData != null ? entry.EnemyData.DisplayName : "n/a")} | " +
-                    $"SpawnOrder={entry.SpawnOrder}");
+                    $"[EncounterDataDebugTest] EnemySlot[{i}] | " +
+                    $"SlotIndex={slot.SlotIndex} | " +
+                    $"Prefab={(slot.EnemyPrefab != null ? slot.EnemyPrefab.name : "null")} | " +
+                    $"EnemyData={(slot.EnemyData != null ? slot.EnemyData.name : "null")} | " +
+                    $"DisplayName={(slot.EnemyData != null ? slot.EnemyData.DisplayName : "n/a")}");
             }
         }
 
@@ -4836,13 +4647,11 @@ namespace CardBattle.Core
 using System;
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.Serialization;
 
 namespace CardBattle.Core
 {
     /// <summary>
-    /// Spawns encounter enemy prefabs into scene slot anchors and binds EnemyData,
-    /// or falls back to legacy pre-placed scene enemy binding by slot ID.
+    /// Spawns encounter enemy prefabs into scene slot anchors and binds EnemyData.
     /// </summary>
     public class EncounterEnemySceneBinder : MonoBehaviour
     {
@@ -4857,11 +4666,6 @@ namespace CardBattle.Core
         [SerializeField] private bool autoDiscoverSpawnSlots = true;
         [SerializeField] private EnemySpawnSlot[] spawnSlots;
 
-        [Header("Legacy Scene Enemy Slots")]
-        [FormerlySerializedAs("slotBindings")]
-        [SerializeField] private List<EncounterEnemySlotBinding> legacySlotBindings =
-            new List<EncounterEnemySlotBinding>();
-
         [Header("UI")]
         [SerializeField] private EnemyUIManager enemyUIManager;
 
@@ -4872,8 +4676,6 @@ namespace CardBattle.Core
 
         [Header("Options")]
         [SerializeField] private bool applyOnStart;
-        [FormerlySerializedAs("disableUnusedEnemyObjects")]
-        [SerializeField] private bool disableUnusedLegacyEnemyObjects = true;
         [SerializeField] private bool registerBoundEnemiesToEnemyActionSystem = true;
         [SerializeField] private bool verboseLogs;
 
@@ -4881,7 +4683,6 @@ namespace CardBattle.Core
         public int ApplyCount { get; private set; }
         public int LastBoundEnemyCount { get; private set; }
         public int LastMissingSlotCount { get; private set; }
-        public int LastUnusedSceneEnemyCount { get; private set; }
         public string LastApplyError { get; private set; } = string.Empty;
         public IReadOnlyList<EnemyBattleUnit> SpawnedEnemies => spawnedEnemies;
 
@@ -4889,10 +4690,8 @@ namespace CardBattle.Core
 
         private readonly List<EnemyBattleUnit> spawnedEnemies = new List<EnemyBattleUnit>();
         private readonly List<EnemyTargetHighlight> spawnedHighlights = new List<EnemyTargetHighlight>();
-        private readonly List<EncounterEnemyEntry> validEntryScratch = new List<EncounterEnemyEntry>();
         private readonly List<EncounterEnemySlotData> validSlotScratch = new List<EncounterEnemySlotData>();
         private readonly List<EnemyBattleUnit> boundEnemyScratch = new List<EnemyBattleUnit>();
-        private readonly HashSet<string> validationSlotScratch = new HashSet<string>(StringComparer.Ordinal);
         private readonly Dictionary<int, EnemySpawnSlot> spawnSlotMapScratch =
             new Dictionary<int, EnemySpawnSlot>();
 
@@ -4930,10 +4729,7 @@ namespace CardBattle.Core
             if (registerBoundEnemiesToEnemyActionSystem && enemyActionSystem == null)
                 return FailApply("EnemyActionSystem reference is missing.");
 
-            if (encounter.HasEnemySlotPrefabs)
-                return TryApplyEncounterEnemySlots(encounter);
-
-            return TryApplyLegacyEncounterEnemies(encounter);
+            return TryApplyEncounterEnemySlots(encounter);
         }
 
         public void ClearAppliedEncounterEnemies()
@@ -4941,7 +4737,6 @@ namespace CardBattle.Core
             HasAppliedEncounterEnemies = false;
             LastBoundEnemyCount = 0;
             LastMissingSlotCount = 0;
-            LastUnusedSceneEnemyCount = 0;
             LastApplyError = string.Empty;
 
             for (int i = 0; i < spawnedEnemies.Count; i++)
@@ -4962,18 +4757,6 @@ namespace CardBattle.Core
             if (targetSelectionSystem != null)
                 targetSelectionSystem.SetEnemyHighlights(Array.Empty<EnemyTargetHighlight>());
 
-            if (disableUnusedLegacyEnemyObjects && legacySlotBindings != null)
-            {
-                for (int i = 0; i < legacySlotBindings.Count; i++)
-                {
-                    EncounterEnemySlotBinding binding = legacySlotBindings[i];
-                    if (binding == null || binding.EnemyUnit == null)
-                        continue;
-
-                    binding.EnemyUnit.gameObject.SetActive(false);
-                }
-            }
-
             RefreshRuntimeEnemyDependents();
 
             if (verboseLogs)
@@ -4986,7 +4769,7 @@ namespace CardBattle.Core
             encounter.GetValidEnemySlots(validSlotScratch);
 
             if (validSlotScratch.Count == 0)
-                return FailApply("Encounter has no valid enemy slot entries.");
+                return FailApply("EncounterData requires at least one valid Enemy Slot.");
 
             if (!TryBuildSpawnSlotMap(out string spawnSlotError))
                 return FailApply(spawnSlotError);
@@ -5000,17 +4783,6 @@ namespace CardBattle.Core
                 EncounterEnemySlotData slotData = validSlotScratch[i];
                 if (slotData == null || !slotData.IsValid)
                     return FailApply($"Encounter enemy slot at index {i} is invalid.");
-
-                if (!slotData.HasPrefab)
-                {
-                    if (verboseLogs)
-                    {
-                        Debug.LogWarning(
-                            $"[EncounterEnemySceneBinder] Failed: missing prefab for slot index {slotData.SlotIndex}.");
-                    }
-
-                    continue;
-                }
 
                 if (!spawnSlotMapScratch.TryGetValue(slotData.SlotIndex, out EnemySpawnSlot spawnSlot) ||
                     spawnSlot == null)
@@ -5056,7 +4828,6 @@ namespace CardBattle.Core
             ApplyCount++;
             LastBoundEnemyCount = boundEnemyScratch.Count;
             LastMissingSlotCount = missingSlotCount;
-            LastUnusedSceneEnemyCount = 0;
             LastApplyError = string.Empty;
 
             OnEncounterEnemiesApplied?.Invoke(spawnedEnemies);
@@ -5082,18 +4853,7 @@ namespace CardBattle.Core
                 if (verboseLogs)
                 {
                     Debug.LogError(
-                        "[EncounterEnemySceneBinder] Failed: enemy slot has no EnemyData.");
-                }
-
-                return false;
-            }
-
-            if (!slotData.HasPrefab)
-            {
-                if (verboseLogs)
-                {
-                    Debug.LogWarning(
-                        $"[EncounterEnemySceneBinder] Failed: missing prefab for slot index {slotData.SlotIndex}.");
+                        "[EncounterEnemySceneBinder] Failed: enemy slot is invalid.");
                 }
 
                 return false;
@@ -5104,7 +4864,7 @@ namespace CardBattle.Core
             instance.transform.localPosition = slotData.LocalPositionOffset;
             instance.transform.localRotation = Quaternion.Euler(slotData.LocalEulerOffset);
 
-            string dataName = slotData.EnemyData != null ? slotData.EnemyData.name : "null";
+            string dataName = slotData.EnemyData.name;
             instance.name = $"{slotData.EnemyPrefab.name}_Slot{slotData.SlotIndex}";
 
             spawnedEnemy = instance.GetComponentInChildren<EnemyBattleUnit>();
@@ -5150,102 +4910,6 @@ namespace CardBattle.Core
                 highlight.Bind(enemy);
                 spawnedHighlights.Add(highlight);
             }
-        }
-
-        private bool TryApplyLegacyEncounterEnemies(EncounterData encounter)
-        {
-            if (legacySlotBindings == null || legacySlotBindings.Count == 0)
-                return FailApply("No scene enemy slot bindings are configured.");
-
-            if (!ValidateLegacySlotBindingsConfiguration(out string bindingError))
-                return FailApply(bindingError);
-
-            validEntryScratch.Clear();
-            encounter.GetValidEnemyEntries(validEntryScratch);
-
-            if (validEntryScratch.Count == 0)
-                return FailApply("Encounter has no valid enemy entries.");
-
-            boundEnemyScratch.Clear();
-            int missingSlotCount = 0;
-            string firstMissingSlotId = null;
-
-            for (int i = 0; i < validEntryScratch.Count; i++)
-            {
-                EncounterEnemyEntry entry = validEntryScratch[i];
-                if (entry == null || !entry.IsValid)
-                    return FailApply($"Encounter enemy entry at index {i} is invalid.");
-
-                if (!TryGetLegacySlotBinding(entry.SlotId, out EncounterEnemySlotBinding binding))
-                {
-                    missingSlotCount++;
-                    if (firstMissingSlotId == null)
-                        firstMissingSlotId = entry.SlotId;
-                    continue;
-                }
-
-                boundEnemyScratch.Add(binding.EnemyUnit);
-            }
-
-            if (missingSlotCount > 0)
-            {
-                LastMissingSlotCount = missingSlotCount;
-                if (missingSlotCount == 1)
-                {
-                    return FailApply(
-                        $"No scene binding found for encounter slot '{firstMissingSlotId}'.");
-                }
-
-                return FailApply(
-                    $"Encounter has {missingSlotCount} enemy slot(s) with no matching scene binding.");
-            }
-
-            for (int i = 0; i < boundEnemyScratch.Count; i++)
-            {
-                EnemyBattleUnit unit = boundEnemyScratch[i];
-                EncounterEnemyEntry entry = validEntryScratch[i];
-                unit.BindEnemyData(entry.EnemyData);
-                unit.gameObject.SetActive(true);
-            }
-
-            int unusedCount = 0;
-            for (int i = 0; i < legacySlotBindings.Count; i++)
-            {
-                EncounterEnemySlotBinding binding = legacySlotBindings[i];
-                if (binding == null || !binding.IsValid)
-                    continue;
-
-                EnemyBattleUnit unit = binding.EnemyUnit;
-                if (boundEnemyScratch.Contains(unit))
-                    continue;
-
-                unusedCount++;
-                if (disableUnusedLegacyEnemyObjects)
-                    unit.gameObject.SetActive(false);
-            }
-
-            if (registerBoundEnemiesToEnemyActionSystem)
-                enemyActionSystem.ReplaceRegisteredEnemies(boundEnemyScratch);
-
-            RefreshRuntimeEnemyDependents(logAfterApply: true);
-
-            HasAppliedEncounterEnemies = true;
-            ApplyCount++;
-            LastBoundEnemyCount = boundEnemyScratch.Count;
-            LastMissingSlotCount = 0;
-            LastUnusedSceneEnemyCount = unusedCount;
-            LastApplyError = string.Empty;
-
-            OnEncounterEnemiesApplied?.Invoke(boundEnemyScratch);
-
-            if (verboseLogs)
-            {
-                Debug.Log(
-                    $"[EncounterEnemySceneBinder] Applied legacy encounter '{encounter.EncounterId}'. " +
-                    $"Bound={LastBoundEnemyCount} | Unused={LastUnusedSceneEnemyCount}");
-            }
-
-            return true;
         }
 
         private bool TryBuildSpawnSlotMap(out string error)
@@ -5300,33 +4964,9 @@ namespace CardBattle.Core
             targetSelectionSystem.SetEnemyHighlights(spawnedHighlights.ToArray());
         }
 
-        private void RefreshLegacyTargetSelectionHighlights(IReadOnlyList<EnemyBattleUnit> enemies)
-        {
-            if (targetSelectionSystem == null || enemies == null)
-                return;
-
-            var highlights = new List<EnemyTargetHighlight>(enemies.Count);
-            for (int i = 0; i < enemies.Count; i++)
-            {
-                EnemyBattleUnit enemy = enemies[i];
-                if (enemy == null)
-                    continue;
-
-                EnemyTargetHighlight highlight = enemy.GetComponentInChildren<EnemyTargetHighlight>();
-                if (highlight != null)
-                    highlights.Add(highlight);
-            }
-
-            targetSelectionSystem.SetEnemyHighlights(highlights.ToArray());
-        }
-
         private void RefreshRuntimeEnemyDependents(bool logAfterApply = false)
         {
-            if (spawnedHighlights.Count > 0)
-                RefreshTargetSelectionHighlights();
-            else if (enemyActionSystem != null)
-                RefreshLegacyTargetSelectionHighlights(enemyActionSystem.Enemies);
-
+            RefreshTargetSelectionHighlights();
             RefreshEnemyPresentation(logAfterApply: false);
 
             if (verboseLogs && logAfterApply)
@@ -5394,77 +5034,10 @@ namespace CardBattle.Core
             }
         }
 
-        private bool ValidateLegacySlotBindingsConfiguration(out string error)
-        {
-            error = string.Empty;
-            validationSlotScratch.Clear();
-            var usedUnits = new HashSet<EnemyBattleUnit>();
-
-            for (int i = 0; i < legacySlotBindings.Count; i++)
-            {
-                EncounterEnemySlotBinding binding = legacySlotBindings[i];
-                if (binding == null)
-                {
-                    error = $"Scene slot binding at index {i} is null.";
-                    return false;
-                }
-
-                if (string.IsNullOrWhiteSpace(binding.SlotId))
-                {
-                    error = $"Scene slot binding at index {i} has a blank slot ID.";
-                    return false;
-                }
-
-                if (binding.EnemyUnit == null)
-                {
-                    error = $"Scene slot binding '{binding.SlotId}' has no EnemyBattleUnit.";
-                    return false;
-                }
-
-                if (!validationSlotScratch.Add(binding.SlotId))
-                {
-                    error = $"Duplicate scene slot ID '{binding.SlotId}'.";
-                    return false;
-                }
-
-                if (!usedUnits.Add(binding.EnemyUnit))
-                {
-                    error = $"EnemyBattleUnit '{binding.EnemyUnit.name}' is assigned to multiple slots.";
-                    return false;
-                }
-            }
-
-            return true;
-        }
-
-        private bool TryGetLegacySlotBinding(string slotId, out EncounterEnemySlotBinding binding)
-        {
-            binding = null;
-
-            if (string.IsNullOrWhiteSpace(slotId) || legacySlotBindings == null)
-                return false;
-
-            for (int i = 0; i < legacySlotBindings.Count; i++)
-            {
-                EncounterEnemySlotBinding candidate = legacySlotBindings[i];
-                if (candidate == null || !candidate.IsValid)
-                    continue;
-
-                if (string.Equals(candidate.SlotId, slotId, StringComparison.Ordinal))
-                {
-                    binding = candidate;
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
         private void ResetAttemptDiagnostics()
         {
             LastBoundEnemyCount = 0;
             LastMissingSlotCount = 0;
-            LastUnusedSceneEnemyCount = 0;
             LastApplyError = string.Empty;
         }
 
@@ -5494,50 +5067,6 @@ namespace CardBattle.Core
                 Debug.LogWarning(
                     "[EncounterEnemySceneBinder] Enemy registration is enabled, but EnemyActionSystem is missing.",
                     this);
-            }
-
-            if (legacySlotBindings == null || legacySlotBindings.Count == 0)
-                return;
-
-            var seenSlotIds = new HashSet<string>(StringComparer.Ordinal);
-            var seenUnits = new HashSet<EnemyBattleUnit>();
-
-            for (int i = 0; i < legacySlotBindings.Count; i++)
-            {
-                EncounterEnemySlotBinding binding = legacySlotBindings[i];
-                if (binding == null)
-                {
-                    Debug.LogWarning(
-                        $"[EncounterEnemySceneBinder] Null legacy slot binding at index {i}.",
-                        this);
-                    continue;
-                }
-
-                if (string.IsNullOrWhiteSpace(binding.SlotId))
-                {
-                    Debug.LogWarning(
-                        $"[EncounterEnemySceneBinder] Legacy slot binding at index {i} has a blank slot ID.",
-                        this);
-                }
-                else if (!seenSlotIds.Add(binding.SlotId))
-                {
-                    Debug.LogWarning(
-                        $"[EncounterEnemySceneBinder] Duplicate legacy slot ID '{binding.SlotId}'.",
-                        this);
-                }
-
-                if (binding.EnemyUnit == null)
-                {
-                    Debug.LogWarning(
-                        $"[EncounterEnemySceneBinder] Legacy slot '{binding.SlotId}' has no EnemyBattleUnit.",
-                        this);
-                }
-                else if (!seenUnits.Add(binding.EnemyUnit))
-                {
-                    Debug.LogWarning(
-                        $"[EncounterEnemySceneBinder] EnemyBattleUnit '{binding.EnemyUnit.name}' is assigned to multiple legacy slots.",
-                        this);
-                }
             }
         }
 #endif
@@ -5670,11 +5199,10 @@ namespace CardBattle.Core
                 $"ApplyCount={binder.ApplyCount}\n" +
                 $"LastBoundEnemyCount={binder.LastBoundEnemyCount}\n" +
                 $"LastMissingSlotCount={binder.LastMissingSlotCount}\n" +
-                $"LastUnusedSceneEnemyCount={binder.LastUnusedSceneEnemyCount}\n" +
                 $"LastApplyError={binder.LastApplyError}\n" +
                 $"SpawnedEnemyCount={binder.SpawnedEnemies.Count}\n" +
-                $"CurrentEncounterId={currentEncounterId}\n" +
-                $"EnemyActionSystemCount={enemySystemCount}");
+                $"RegisteredEnemyCount={enemySystemCount}\n" +
+                $"CurrentEncounterId={currentEncounterId}");
 
             PrintRegisteredEnemies();
         }

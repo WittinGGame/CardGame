@@ -68,11 +68,10 @@ namespace CardBattle.Core
                 $"ApplyCount={binder.ApplyCount}\n" +
                 $"LastBoundEnemyCount={binder.LastBoundEnemyCount}\n" +
                 $"LastMissingSlotCount={binder.LastMissingSlotCount}\n" +
-                $"LastUnusedSceneEnemyCount={binder.LastUnusedSceneEnemyCount}\n" +
                 $"LastApplyError={binder.LastApplyError}\n" +
                 $"SpawnedEnemyCount={binder.SpawnedEnemies.Count}\n" +
-                $"CurrentEncounterId={currentEncounterId}\n" +
-                $"EnemyActionSystemCount={enemySystemCount}");
+                $"RegisteredEnemyCount={enemySystemCount}\n" +
+                $"CurrentEncounterId={currentEncounterId}");
 
             PrintRegisteredEnemies();
         }
