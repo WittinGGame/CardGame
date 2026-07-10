@@ -7328,6 +7328,7 @@ namespace CardBattle.Core
 **Path:** `Assets/Scripts/Run/Map/UI/TreeMapNodeButtonUI.cs`
 ```csharp
 using System;
+using System.Collections;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -7336,29 +7337,70 @@ namespace CardBattle.Core
 {
     public class TreeMapNodeButtonUI : MonoBehaviour
     {
+        [Header("Interaction")]
         [SerializeField] private Button button;
-        [SerializeField] private TextMeshProUGUI titleText;
-        [SerializeField] private TextMeshProUGUI typeText;
-        [SerializeField] private TextMeshProUGUI stateText;
-        [SerializeField] private Image backgroundImage;
+
+        [Header("Visual Layers")]
+        [SerializeField] private Image bgImage;
+        [SerializeField] private Image ringImage;
+        [SerializeField] private Image glowImage;
+        [SerializeField] private Image iconImage;
+        [SerializeField] private GameObject completedXRoot;
+        [SerializeField] private GameObject currentMarkerRoot;
         [SerializeField] private CanvasGroup canvasGroup;
+
+        [Header("Legacy Visual Layers")]
+        [SerializeField] private Image backgroundImage;
         [SerializeField] private GameObject selectedRoot;
         [SerializeField] private GameObject completedRoot;
         [SerializeField] private GameObject lockedRoot;
         [SerializeField] private GameObject availableRoot;
         [SerializeField] private GameObject currentRoot;
 
-        [Header("State Colors")]
-        [SerializeField] private Color lockedColor = new Color(0.25f, 0.25f, 0.28f, 1f);
-        [SerializeField] private Color availableColor = new Color(0.85f, 0.72f, 0.35f, 1f);
-        [SerializeField] private Color currentColor = new Color(0.35f, 0.65f, 0.9f, 1f);
-        [SerializeField] private Color completedColor = new Color(0.45f, 0.62f, 0.48f, 1f);
+        [Header("Debug Text")]
+        [SerializeField] private TextMeshProUGUI titleText;
+        [SerializeField] private TextMeshProUGUI typeText;
+        [SerializeField] private TextMeshProUGUI stateText;
+
+        [Header("Visual State Styles")]
+        [SerializeField] private TreeMapNodeVisualStyle lockedStyle = TreeMapNodeVisualStyle.CreateLockedDefault();
+        [SerializeField] private TreeMapNodeVisualStyle availableStyle = TreeMapNodeVisualStyle.CreateAvailableDefault();
+        [SerializeField] private TreeMapNodeVisualStyle currentStyle = TreeMapNodeVisualStyle.CreateCurrentDefault();
+        [SerializeField] private TreeMapNodeVisualStyle completedStyle = TreeMapNodeVisualStyle.CreateCompletedDefault();
+
+        [Header("State Animation")]
+        [SerializeField] private bool enableStateAnimation = true;
+        [SerializeField] private float availablePulseScale = 1.06f;
+        [SerializeField] private float availablePulseDuration = 1.4f;
+        [SerializeField] private float availableGlowMinAlpha = 0.25f;
+        [SerializeField] private float availableGlowMaxAlpha = 0.60f;
+        [SerializeField] private float currentMarkerBobDistance = 4f;
+        [SerializeField] private float currentMarkerBobDuration = 1.2f;
+        [SerializeField] private float currentGlowMinAlpha = 0.35f;
+        [SerializeField] private float currentGlowMaxAlpha = 0.70f;
+
+        [Header("Options")]
+        [SerializeField] private bool useLegacyRootsWhenLayerMissing = true;
+        [SerializeField] private bool verboseLogs;
 
         public string NodeId { get; private set; } = string.Empty;
         public MapNodeData NodeData { get; private set; }
         public MapNodeState CurrentState { get; private set; } = MapNodeState.Locked;
+        public TreeMapNodeVisualState CurrentVisualState { get; private set; } = TreeMapNodeVisualState.Locked;
 
         public event Action<string> OnNodeClicked;
+
+        private TreeMapNodeVisualState lastLoggedVisualState = (TreeMapNodeVisualState)(-1);
+
+        private Coroutine stateAnimationRoutine;
+        private bool hasActiveStateAnimation;
+        private TreeMapNodeVisualState animatingState = TreeMapNodeVisualState.Locked;
+
+        private RectTransform ringRect;
+        private RectTransform currentMarkerRect;
+        private Vector3 baseRingScale = Vector3.one;
+        private Vector2 baseMarkerAnchoredPosition = Vector2.zero;
+        private bool baseTransformsCached;
 
         private void Awake()
         {
@@ -7367,25 +7409,48 @@ namespace CardBattle.Core
                 button.onClick.RemoveListener(HandleButtonClicked);
                 button.onClick.AddListener(HandleButtonClicked);
             }
+
+            CacheBaseTransforms();
+        }
+
+        private void OnEnable()
+        {
+            UpdateStateAnimation(CurrentVisualState);
+        }
+
+        private void OnDisable()
+        {
+            StopStateAnimation();
+        }
+
+        private void OnDestroy()
+        {
+            StopStateAnimation();
         }
 
         public void Bind(MapNodeData nodeData)
         {
             NodeData = nodeData;
             NodeId = nodeData != null ? nodeData.NodeId : string.Empty;
+            lastLoggedVisualState = (TreeMapNodeVisualState)(-1);
 
             if (titleText != null)
-            {
                 titleText.text = nodeData != null ? nodeData.DisplayName : string.Empty;
-            }
 
             if (typeText != null)
-            {
                 typeText.text = nodeData != null ? nodeData.NodeType.ToString() : string.Empty;
-            }
         }
 
         public void RefreshState(MapNodeState state, bool isSelected, bool canStartBattle)
+        {
+            RefreshState(state, isSelected, canStartBattle, MapNodeStateToVisualState(state));
+        }
+
+        public void RefreshState(
+            MapNodeState state,
+            bool isSelected,
+            bool canStartBattle,
+            TreeMapNodeVisualState visualState)
         {
             CurrentState = state;
 
@@ -7395,43 +7460,36 @@ namespace CardBattle.Core
             if (selectedRoot != null)
                 selectedRoot.SetActive(isSelected);
 
-            if (lockedRoot != null)
-                lockedRoot.SetActive(state == MapNodeState.Locked);
-
-            if (availableRoot != null)
-                availableRoot.SetActive(state == MapNodeState.Available);
-
-            if (currentRoot != null)
-                currentRoot.SetActive(state == MapNodeState.Current);
-
-            if (completedRoot != null)
-                completedRoot.SetActive(state == MapNodeState.Completed);
-
-            Color background = state switch
-            {
-                MapNodeState.Locked => lockedColor,
-                MapNodeState.Available => availableColor,
-                MapNodeState.Current => currentColor,
-                MapNodeState.Completed => completedColor,
-                _ => lockedColor
-            };
-
-            if (backgroundImage != null)
-                backgroundImage.color = background;
-
-            float alpha = state switch
-            {
-                MapNodeState.Locked => 0.35f,
-                MapNodeState.Completed => 0.75f,
-                MapNodeState.Available => 1f,
-                MapNodeState.Current => 1f,
-                _ => 1f
-            };
-
-            if (canvasGroup != null)
-                canvasGroup.alpha = alpha;
-
+            SetVisualState(visualState);
             SetInteractable(canStartBattle);
+        }
+
+        public void SetVisualState(TreeMapNodeVisualState visualState)
+        {
+            CurrentVisualState = visualState;
+            TreeMapNodeVisualStyle style = GetStyleForVisualState(visualState);
+            ApplyVisualStyle(style, visualState);
+
+            if (verboseLogs && lastLoggedVisualState != visualState)
+            {
+                Debug.Log(
+                    $"[TreeMapNodeUI] Node {NodeId} visual state = {visualState}");
+                lastLoggedVisualState = visualState;
+            }
+
+            UpdateStateAnimation(visualState);
+        }
+
+        public void SetNodeIcon(Sprite icon)
+        {
+            if (iconImage == null)
+            {
+                LogMissingOptionalReference(nameof(iconImage));
+                return;
+            }
+
+            iconImage.sprite = icon;
+            iconImage.enabled = icon != null;
         }
 
         public void SetInteractable(bool value)
@@ -7445,6 +7503,7 @@ namespace CardBattle.Core
             NodeId = string.Empty;
             NodeData = null;
             CurrentState = MapNodeState.Locked;
+            lastLoggedVisualState = (TreeMapNodeVisualState)(-1);
 
             if (titleText != null)
                 titleText.text = string.Empty;
@@ -7458,19 +7517,282 @@ namespace CardBattle.Core
             if (selectedRoot != null)
                 selectedRoot.SetActive(false);
 
-            if (lockedRoot != null)
-                lockedRoot.SetActive(false);
-
-            if (availableRoot != null)
-                availableRoot.SetActive(false);
-
-            if (currentRoot != null)
-                currentRoot.SetActive(false);
-
-            if (completedRoot != null)
-                completedRoot.SetActive(false);
-
+            SetVisualState(TreeMapNodeVisualState.Locked);
             SetInteractable(false);
+        }
+
+        public static TreeMapNodeVisualState MapNodeStateToVisualState(MapNodeState state)
+        {
+            return state switch
+            {
+                MapNodeState.Locked => TreeMapNodeVisualState.Locked,
+                MapNodeState.Available => TreeMapNodeVisualState.Available,
+                MapNodeState.Current => TreeMapNodeVisualState.Current,
+                MapNodeState.Completed => TreeMapNodeVisualState.Completed,
+                _ => TreeMapNodeVisualState.Locked
+            };
+        }
+
+        private TreeMapNodeVisualStyle GetStyleForVisualState(TreeMapNodeVisualState visualState)
+        {
+            return visualState switch
+            {
+                TreeMapNodeVisualState.Available => availableStyle,
+                TreeMapNodeVisualState.Current => currentStyle,
+                TreeMapNodeVisualState.Completed => completedStyle,
+                _ => lockedStyle
+            };
+        }
+
+        private void ApplyVisualStyle(TreeMapNodeVisualStyle style, TreeMapNodeVisualState visualState)
+        {
+            if (style == null)
+                return;
+
+            Image resolvedBgImage = ResolveBgImage();
+            SetImageAlpha(resolvedBgImage, style.bgAlpha);
+            SetImageAlpha(ringImage, style.ringAlpha);
+            SetImageAlpha(iconImage, style.iconAlpha);
+
+            SetLayerActive(glowImage, style.glowEnabled);
+            SetOverlayActive(completedXRoot, completedRoot, style.completedXEnabled);
+            SetOverlayActive(currentMarkerRoot, currentRoot, style.currentMarkerEnabled);
+
+            if (useLegacyRootsWhenLayerMissing)
+                ApplyLegacyRootFallback(visualState, style);
+
+            if (canvasGroup != null)
+                canvasGroup.alpha = 1f;
+        }
+
+        private void ApplyLegacyRootFallback(
+            TreeMapNodeVisualState visualState,
+            TreeMapNodeVisualStyle style)
+        {
+            if (lockedRoot != null && glowImage == null)
+                lockedRoot.SetActive(visualState == TreeMapNodeVisualState.Locked);
+
+            if (availableRoot != null && glowImage == null)
+                availableRoot.SetActive(visualState == TreeMapNodeVisualState.Available);
+
+            if (currentRoot != null && currentMarkerRoot == null)
+                currentRoot.SetActive(visualState == TreeMapNodeVisualState.Current);
+
+            if (completedRoot != null && completedXRoot == null)
+                completedRoot.SetActive(style.completedXEnabled);
+        }
+
+        private Image ResolveBgImage()
+        {
+            if (bgImage != null)
+                return bgImage;
+
+            return backgroundImage;
+        }
+
+        private static void SetImageAlpha(Image image, float alpha)
+        {
+            if (image == null)
+                return;
+
+            Color color = image.color;
+            color.a = alpha;
+            image.color = color;
+        }
+
+        private static void SetLayerActive(Image image, bool enabled)
+        {
+            if (image == null)
+                return;
+
+            image.enabled = enabled;
+            if (image.gameObject.activeSelf != enabled)
+                image.gameObject.SetActive(enabled);
+        }
+
+        private static void SetOverlayActive(
+            GameObject primaryRoot,
+            GameObject legacyRoot,
+            bool enabled)
+        {
+            if (primaryRoot != null)
+            {
+                primaryRoot.SetActive(enabled);
+                return;
+            }
+
+            if (legacyRoot != null)
+                legacyRoot.SetActive(enabled);
+        }
+
+        private void CacheBaseTransforms()
+        {
+            if (baseTransformsCached)
+                return;
+
+            if (ringImage != null)
+                ringRect = ringImage.rectTransform;
+
+            if (currentMarkerRoot != null)
+                currentMarkerRect = currentMarkerRoot.transform as RectTransform;
+            else if (currentRoot != null)
+                currentMarkerRect = currentRoot.transform as RectTransform;
+
+            baseRingScale = ringRect != null ? ringRect.localScale : Vector3.one;
+            baseMarkerAnchoredPosition =
+                currentMarkerRect != null ? currentMarkerRect.anchoredPosition : Vector2.zero;
+
+            baseTransformsCached = true;
+        }
+
+        private void UpdateStateAnimation(TreeMapNodeVisualState visualState)
+        {
+            bool wantsAnimation = enableStateAnimation &&
+                                  (visualState == TreeMapNodeVisualState.Available ||
+                                   visualState == TreeMapNodeVisualState.Current);
+
+            if (!wantsAnimation)
+            {
+                StopStateAnimation();
+                return;
+            }
+
+            if (hasActiveStateAnimation && animatingState == visualState)
+                return;
+
+            StopStateAnimation();
+
+            if (!isActiveAndEnabled)
+                return;
+
+            CacheBaseTransforms();
+            animatingState = visualState;
+            hasActiveStateAnimation = true;
+
+            if (visualState == TreeMapNodeVisualState.Available)
+            {
+                stateAnimationRoutine = StartCoroutine(AvailablePulseRoutine());
+
+                if (verboseLogs)
+                {
+                    Debug.Log(
+                        $"[TreeMapNodeUI] Node {NodeId} started Available pulse.");
+                }
+            }
+            else
+            {
+                stateAnimationRoutine = StartCoroutine(CurrentAnimationRoutine());
+
+                if (verboseLogs)
+                {
+                    Debug.Log(
+                        $"[TreeMapNodeUI] Node {NodeId} started Current animation.");
+                }
+            }
+        }
+
+        private void StopStateAnimation()
+        {
+            bool wasAnimating = hasActiveStateAnimation;
+
+            if (stateAnimationRoutine != null)
+            {
+                StopCoroutine(stateAnimationRoutine);
+                stateAnimationRoutine = null;
+            }
+
+            hasActiveStateAnimation = false;
+            ResetAnimatedTransforms();
+
+            if (wasAnimating && verboseLogs)
+            {
+                Debug.Log(
+                    $"[TreeMapNodeUI] Node {NodeId} stopped state animation.");
+            }
+        }
+
+        private void ResetAnimatedTransforms()
+        {
+            if (!baseTransformsCached)
+                return;
+
+            if (ringRect != null)
+                ringRect.localScale = baseRingScale;
+
+            if (currentMarkerRect != null)
+                currentMarkerRect.anchoredPosition = baseMarkerAnchoredPosition;
+        }
+
+        private IEnumerator AvailablePulseRoutine()
+        {
+            float elapsed = 0f;
+
+            while (true)
+            {
+                elapsed += Time.unscaledDeltaTime;
+                float sin01 = ComputeSin01(elapsed, availablePulseDuration);
+
+                if (ringRect != null)
+                {
+                    float scale = Mathf.Lerp(1f, availablePulseScale, sin01);
+                    ringRect.localScale = baseRingScale * scale;
+                }
+
+                if (glowImage != null)
+                {
+                    float glowAlpha = Mathf.Lerp(availableGlowMinAlpha, availableGlowMaxAlpha, sin01);
+                    SetImageAlpha(glowImage, glowAlpha);
+                }
+
+                yield return null;
+            }
+        }
+
+        private IEnumerator CurrentAnimationRoutine()
+        {
+            float elapsed = 0f;
+
+            while (true)
+            {
+                elapsed += Time.unscaledDeltaTime;
+                float sinSigned = ComputeSinSigned(elapsed, currentMarkerBobDuration);
+                float sin01 = ComputeSin01(elapsed, currentMarkerBobDuration);
+
+                if (currentMarkerRect != null)
+                {
+                    Vector2 offset = new Vector2(0f, sinSigned * currentMarkerBobDistance);
+                    currentMarkerRect.anchoredPosition = baseMarkerAnchoredPosition + offset;
+                }
+
+                if (glowImage != null)
+                {
+                    float glowAlpha = Mathf.Lerp(currentGlowMinAlpha, currentGlowMaxAlpha, sin01);
+                    SetImageAlpha(glowImage, glowAlpha);
+                }
+
+                yield return null;
+            }
+        }
+
+        private static float ComputeSin01(float elapsed, float duration)
+        {
+            float phase = duration > 0f ? elapsed / duration : 0f;
+            return (Mathf.Sin(phase * Mathf.PI * 2f) + 1f) * 0.5f;
+        }
+
+        private static float ComputeSinSigned(float elapsed, float duration)
+        {
+            float phase = duration > 0f ? elapsed / duration : 0f;
+            return Mathf.Sin(phase * Mathf.PI * 2f);
+        }
+
+        private void LogMissingOptionalReference(string fieldName)
+        {
+            if (!verboseLogs)
+                return;
+
+            Debug.Log(
+                $"[TreeMapNodeUI] Missing optional visual reference: {fieldName} | nodeId={NodeId}");
         }
 
         private void HandleButtonClicked()
@@ -7479,6 +7801,94 @@ namespace CardBattle.Core
                 return;
 
             OnNodeClicked?.Invoke(NodeId);
+        }
+    }
+}
+```
+
+## FILE: TreeMapNodeVisualState.cs
+**Path:** `Assets/Scripts/Run/Map/UI/TreeMapNodeVisualState.cs`
+```csharp
+namespace CardBattle.Core
+{
+    public enum TreeMapNodeVisualState
+    {
+        Locked,
+        Available,
+        Current,
+        Completed
+    }
+}
+```
+
+## FILE: TreeMapNodeVisualStyle.cs
+**Path:** `Assets/Scripts/Run/Map/UI/TreeMapNodeVisualStyle.cs`
+```csharp
+using System;
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    [Serializable]
+    public class TreeMapNodeVisualStyle
+    {
+        [Range(0f, 1f)] public float bgAlpha = 1f;
+        [Range(0f, 1f)] public float ringAlpha = 1f;
+        [Range(0f, 1f)] public float iconAlpha = 1f;
+        public bool glowEnabled;
+        public bool completedXEnabled;
+        public bool currentMarkerEnabled;
+
+        public static TreeMapNodeVisualStyle CreateLockedDefault()
+        {
+            return new TreeMapNodeVisualStyle
+            {
+                bgAlpha = 0.35f,
+                ringAlpha = 0.25f,
+                iconAlpha = 0.50f,
+                glowEnabled = false,
+                completedXEnabled = false,
+                currentMarkerEnabled = false
+            };
+        }
+
+        public static TreeMapNodeVisualStyle CreateAvailableDefault()
+        {
+            return new TreeMapNodeVisualStyle
+            {
+                bgAlpha = 1.00f,
+                ringAlpha = 0.90f,
+                iconAlpha = 1.00f,
+                glowEnabled = true,
+                completedXEnabled = false,
+                currentMarkerEnabled = false
+            };
+        }
+
+        public static TreeMapNodeVisualStyle CreateCurrentDefault()
+        {
+            return new TreeMapNodeVisualStyle
+            {
+                bgAlpha = 1.00f,
+                ringAlpha = 1.00f,
+                iconAlpha = 1.00f,
+                glowEnabled = true,
+                completedXEnabled = false,
+                currentMarkerEnabled = true
+            };
+        }
+
+        public static TreeMapNodeVisualStyle CreateCompletedDefault()
+        {
+            return new TreeMapNodeVisualStyle
+            {
+                bgAlpha = 0.55f,
+                ringAlpha = 0.45f,
+                iconAlpha = 0.65f,
+                glowEnabled = false,
+                completedXEnabled = true,
+                currentMarkerEnabled = false
+            };
         }
     }
 }
@@ -7507,6 +7917,10 @@ namespace CardBattle.Core
         [Header("Prefabs")]
         [SerializeField] private TreeMapNodeButtonUI nodeButtonPrefab;
         [SerializeField] private TreeMapLineUI linePrefab;
+
+        [Header("Node Icons")]
+        [SerializeField] private List<TreeMapNodeTypeIconEntry> nodeTypeIcons =
+            new List<TreeMapNodeTypeIconEntry>();
 
         [Header("Panel")]
         [SerializeField] private GameObject panelRoot;
@@ -7631,6 +8045,7 @@ namespace CardBattle.Core
                 }
 
                 view.Bind(node);
+                TryApplyNodeIcon(view, node);
                 view.OnNodeClicked += HandleNodeClicked;
                 nodeViews[node.NodeId] = view;
             }
@@ -7645,20 +8060,71 @@ namespace CardBattle.Core
                 return;
 
             string selectedNodeId = controller.SelectedNodeId;
+            bool hasPendingSelectedNode = controller.HasSelectedNode &&
+                                          !IsNodeCompleted(controller, selectedNodeId);
+
+            if (verboseLogs && hasPendingSelectedNode)
+            {
+                Debug.Log(
+                    $"[TreeMapUI] Pending visual lock active. Pending={selectedNodeId}");
+            }
 
             foreach (KeyValuePair<string, TreeMapNodeButtonUI> pair in nodeViews)
             {
-                MapNodeState state = controller.GetNodeState(pair.Key);
+                string nodeId = pair.Key;
+                MapNodeState state = controller.GetNodeState(nodeId);
                 bool isSelected = !string.IsNullOrWhiteSpace(selectedNodeId) &&
-                                  string.Equals(pair.Key, selectedNodeId, StringComparison.Ordinal);
-                bool canStartBattle = !isBattleStartInProgress &&
-                                      controller.CanStartBattleFromNode(pair.Key);
-                pair.Value.RefreshState(state, isSelected, canStartBattle);
+                                  string.Equals(nodeId, selectedNodeId, StringComparison.Ordinal);
+
+                TreeMapNodeVisualState visualState;
+                bool interactable;
+
+                if (hasPendingSelectedNode)
+                {
+                    if (isSelected)
+                    {
+                        visualState = TreeMapNodeVisualState.Current;
+                        interactable = !isBattleStartInProgress &&
+                                       controller.CanStartBattleFromNode(nodeId);
+                    }
+                    else if (state == MapNodeState.Completed)
+                    {
+                        visualState = TreeMapNodeVisualState.Completed;
+                        interactable = false;
+                    }
+                    else
+                    {
+                        visualState = TreeMapNodeVisualState.Locked;
+                        interactable = false;
+                    }
+                }
+                else
+                {
+                    visualState = TreeMapNodeButtonUI.MapNodeStateToVisualState(state);
+                    interactable = !isBattleStartInProgress &&
+                                   controller.CanStartBattleFromNode(nodeId);
+                }
+
+                if (verboseLogs)
+                {
+                    Debug.Log(
+                        $"[TreeMapUI] Node {nodeId}: visual={visualState}, interactable={interactable}");
+                }
+
+                pair.Value.RefreshState(state, isSelected, interactable, visualState);
             }
 
             RefreshSelectedNodeText(controller);
             RefreshStartBattleButton(controller);
             RefreshStatusText(controller);
+        }
+
+        private static bool IsNodeCompleted(MapRuntimeController controller, string nodeId)
+        {
+            if (controller == null || string.IsNullOrWhiteSpace(nodeId))
+                return false;
+
+            return controller.GetNodeState(nodeId) == MapNodeState.Completed;
         }
 
         public void SetBattleStartInProgress(bool inProgress)
@@ -7942,6 +8408,45 @@ namespace CardBattle.Core
                 return string.Empty;
 
             return string.Join(", ", nodeIds);
+        }
+
+        private void TryApplyNodeIcon(TreeMapNodeButtonUI view, MapNodeData node)
+        {
+            if (view == null || node == null)
+                return;
+
+            if (TryResolveNodeIcon(node.NodeType, out Sprite icon))
+                view.SetNodeIcon(icon);
+        }
+
+        private bool TryResolveNodeIcon(MapNodeType nodeType, out Sprite icon)
+        {
+            icon = null;
+
+            if (nodeTypeIcons == null || nodeTypeIcons.Count == 0)
+                return false;
+
+            for (int i = 0; i < nodeTypeIcons.Count; i++)
+            {
+                TreeMapNodeTypeIconEntry entry = nodeTypeIcons[i];
+                if (entry == null || entry.icon == null)
+                    continue;
+
+                if (entry.nodeType == nodeType)
+                {
+                    icon = entry.icon;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        [Serializable]
+        private class TreeMapNodeTypeIconEntry
+        {
+            public MapNodeType nodeType;
+            public Sprite icon;
         }
     }
 }

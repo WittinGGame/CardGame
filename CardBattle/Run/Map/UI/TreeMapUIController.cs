@@ -19,6 +19,10 @@ namespace CardBattle.Core
         [SerializeField] private TreeMapNodeButtonUI nodeButtonPrefab;
         [SerializeField] private TreeMapLineUI linePrefab;
 
+        [Header("Node Icons")]
+        [SerializeField] private List<TreeMapNodeTypeIconEntry> nodeTypeIcons =
+            new List<TreeMapNodeTypeIconEntry>();
+
         [Header("Panel")]
         [SerializeField] private GameObject panelRoot;
         [SerializeField] private Button startBattleButton;
@@ -142,6 +146,7 @@ namespace CardBattle.Core
                 }
 
                 view.Bind(node);
+                TryApplyNodeIcon(view, node);
                 view.OnNodeClicked += HandleNodeClicked;
                 nodeViews[node.NodeId] = view;
             }
@@ -156,20 +161,71 @@ namespace CardBattle.Core
                 return;
 
             string selectedNodeId = controller.SelectedNodeId;
+            bool hasPendingSelectedNode = controller.HasSelectedNode &&
+                                          !IsNodeCompleted(controller, selectedNodeId);
+
+            if (verboseLogs && hasPendingSelectedNode)
+            {
+                Debug.Log(
+                    $"[TreeMapUI] Pending visual lock active. Pending={selectedNodeId}");
+            }
 
             foreach (KeyValuePair<string, TreeMapNodeButtonUI> pair in nodeViews)
             {
-                MapNodeState state = controller.GetNodeState(pair.Key);
+                string nodeId = pair.Key;
+                MapNodeState state = controller.GetNodeState(nodeId);
                 bool isSelected = !string.IsNullOrWhiteSpace(selectedNodeId) &&
-                                  string.Equals(pair.Key, selectedNodeId, StringComparison.Ordinal);
-                bool canStartBattle = !isBattleStartInProgress &&
-                                      controller.CanStartBattleFromNode(pair.Key);
-                pair.Value.RefreshState(state, isSelected, canStartBattle);
+                                  string.Equals(nodeId, selectedNodeId, StringComparison.Ordinal);
+
+                TreeMapNodeVisualState visualState;
+                bool interactable;
+
+                if (hasPendingSelectedNode)
+                {
+                    if (isSelected)
+                    {
+                        visualState = TreeMapNodeVisualState.Current;
+                        interactable = !isBattleStartInProgress &&
+                                       controller.CanStartBattleFromNode(nodeId);
+                    }
+                    else if (state == MapNodeState.Completed)
+                    {
+                        visualState = TreeMapNodeVisualState.Completed;
+                        interactable = false;
+                    }
+                    else
+                    {
+                        visualState = TreeMapNodeVisualState.Locked;
+                        interactable = false;
+                    }
+                }
+                else
+                {
+                    visualState = TreeMapNodeButtonUI.MapNodeStateToVisualState(state);
+                    interactable = !isBattleStartInProgress &&
+                                   controller.CanStartBattleFromNode(nodeId);
+                }
+
+                if (verboseLogs)
+                {
+                    Debug.Log(
+                        $"[TreeMapUI] Node {nodeId}: visual={visualState}, interactable={interactable}");
+                }
+
+                pair.Value.RefreshState(state, isSelected, interactable, visualState);
             }
 
             RefreshSelectedNodeText(controller);
             RefreshStartBattleButton(controller);
             RefreshStatusText(controller);
+        }
+
+        private static bool IsNodeCompleted(MapRuntimeController controller, string nodeId)
+        {
+            if (controller == null || string.IsNullOrWhiteSpace(nodeId))
+                return false;
+
+            return controller.GetNodeState(nodeId) == MapNodeState.Completed;
         }
 
         public void SetBattleStartInProgress(bool inProgress)
@@ -453,6 +509,45 @@ namespace CardBattle.Core
                 return string.Empty;
 
             return string.Join(", ", nodeIds);
+        }
+
+        private void TryApplyNodeIcon(TreeMapNodeButtonUI view, MapNodeData node)
+        {
+            if (view == null || node == null)
+                return;
+
+            if (TryResolveNodeIcon(node.NodeType, out Sprite icon))
+                view.SetNodeIcon(icon);
+        }
+
+        private bool TryResolveNodeIcon(MapNodeType nodeType, out Sprite icon)
+        {
+            icon = null;
+
+            if (nodeTypeIcons == null || nodeTypeIcons.Count == 0)
+                return false;
+
+            for (int i = 0; i < nodeTypeIcons.Count; i++)
+            {
+                TreeMapNodeTypeIconEntry entry = nodeTypeIcons[i];
+                if (entry == null || entry.icon == null)
+                    continue;
+
+                if (entry.nodeType == nodeType)
+                {
+                    icon = entry.icon;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        [Serializable]
+        private class TreeMapNodeTypeIconEntry
+        {
+            public MapNodeType nodeType;
+            public Sprite icon;
         }
     }
 }
