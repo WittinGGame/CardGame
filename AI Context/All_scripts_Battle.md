@@ -1165,22 +1165,30 @@ namespace CardBattle.Core
             // ==============================
             // STEP A — DRAW FROM DECK FIRST
             // ==============================
+            // Use FromDeckImmediate (not DrawCardsImmediate) so overflow stays pending
+            // and cannot be reshuffled back into the deck mid-sequence.
             int availableDeck = player.DeckController.GetDeckCount();
             int firstDraw = Mathf.Min(requestedDraw, availableDeck);
 
             if (firstDraw > 0)
-                player.DeckController.DrawCardsImmediate(firstDraw);
+                player.DeckController.DrawCardsFromDeckImmediate(firstDraw);
 
             int remaining = requestedDraw - firstDraw;
             if (remaining <= 0)
+            {
+                player.DeckController.FlushPendingOverflowToGraveyard();
                 yield break;
+            }
 
             // ==============================
             // STEP B — RESHUFFLE PRESENTATION
             // ==============================
             int graveCount = player.DeckController.GetGraveyardCount();
             if (graveCount <= 0)
+            {
+                player.DeckController.FlushPendingOverflowToGraveyard();
                 yield break;
+            }
 
             if (graveyardToDeckVfx != null)
                 yield return graveyardToDeckVfx.PlayReshuffleVfx(graveCount);
@@ -1202,7 +1210,9 @@ namespace CardBattle.Core
             int secondDraw = Mathf.Min(remaining, player.DeckController.GetDeckCount());
 
             if (secondDraw > 0)
-                player.DeckController.DrawCardsImmediate(secondDraw);
+                player.DeckController.DrawCardsFromDeckImmediate(secondDraw);
+
+            player.DeckController.FlushPendingOverflowToGraveyard();
         }
 
         /// <summary>

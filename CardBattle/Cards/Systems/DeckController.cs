@@ -7,22 +7,48 @@ namespace CardBattle.Core
     /// <summary>
     /// Owns the three piles (deck, hand, graveyard) and draw/discard/shuffle rules.
     /// When the deck is empty during a draw, the graveyard is shuffled back into the deck.
+    /// Draw respects <see cref="MaxHandSize"/>; excess cards overflow to the graveyard
+    /// (deferred via pending overflow when a multi-step draw may still reshuffle).
     /// </summary>
     public class DeckController : MonoBehaviour
     {
         [Tooltip("Optional designer list consumed by BuildFromCardDataList / BuildFromInspectorBlueprint at battle setup.")]
         [SerializeField] private List<CardData> starterDeckBlueprint = new List<CardData>();
 
+        [Tooltip("Maximum number of cards allowed in hand. Drawn cards beyond this overflow to the graveyard.")]
+        [SerializeField] private int maxHandSize = 10;
+
         private readonly List<CardInstance> _deck = new List<CardInstance>();
         private readonly List<CardInstance> _hand = new List<CardInstance>();
         private readonly List<CardInstance> _graveyard = new List<CardInstance>();
+
+        /// <summary>
+        /// Cards drawn while the hand was full, held out of the graveyard until the
+        /// current draw operation finishes so they cannot be reshuffled and redrawn
+        /// in the same operation.
+        /// </summary>
+        private readonly List<CardInstance> _pendingOverflow = new List<CardInstance>();
 
         public IReadOnlyList<CardInstance> Deck => _deck;
         public IReadOnlyList<CardInstance> Hand => _hand;
         public IReadOnlyList<CardInstance> Graveyard => _graveyard;
 
+        public int MaxHandSize => Mathf.Max(0, maxHandSize);
+        public int AvailableHandSpace => Mathf.Max(0, MaxHandSize - _hand.Count);
+        public bool IsHandFull => AvailableHandSpace <= 0;
+
+        /// <summary>Cards drawn past hand capacity that are not yet committed to the graveyard.</summary>
+        public int PendingOverflowCount => _pendingOverflow.Count;
+
         /// <summary>Fired after any pile mutation so UI or VFX can subscribe later.</summary>
         public event Action OnPilesChanged;
+
+#if UNITY_EDITOR
+        private void OnValidate()
+        {
+            maxHandSize = Mathf.Max(0, maxHandSize);
+        }
+#endif
 
         /// <summary>Replace runtime piles using blueprint assets (one <see cref="CardInstance"/> per entry).</summary>
         public void BuildFromCardDataList(IEnumerable<CardData> cards)
@@ -52,6 +78,7 @@ namespace CardBattle.Core
             _deck.Clear();
             _hand.Clear();
             _graveyard.Clear();
+            _pendingOverflow.Clear();
             NotifyChanged();
         }
 
@@ -67,41 +94,78 @@ namespace CardBattle.Core
             return _graveyard.Count;
         }
 
-        /// <summary>Draw up to <paramref name="count"/> cards into the hand, reshuffling graveyard into deck as needed.</summary>
-        public void DrawCards(int count)
-        {
-            for (var i = 0; i < count; i++)
-            {
-                if (!TryDrawSingleCard())
-                    break;
-            }
-
-            NotifyChanged();
-        }
-
         /// <summary>
-        /// Draws directly from deck to hand without auto-reshuffle.
-        /// Use this for presentation-driven two-phase draws.
+        /// Draw up to <paramref name="count"/> cards, reshuffling graveyard into deck as needed.
+        /// Overflow is held pending during the operation, then committed to the graveyard once.
         /// </summary>
-        public List<CardInstance> DrawCardsImmediate(int count)
+        public CardDrawResult DrawCards(int count)
         {
-            var result = new List<CardInstance>();
-            int drawCount = Mathf.Max(0, count);
+            int requested = Mathf.Max(0, count);
+            if (requested == 0)
+                return CardDrawResult.Empty(0);
 
-            for (int i = 0; i < drawCount; i++)
+            int drawn = 0;
+            int addedToHand = 0;
+            int overflowed = 0;
+
+            for (var i = 0; i < requested; i++)
             {
+                if (_deck.Count == 0)
+                    ReshuffleGraveyardIntoDeck();
+
                 if (_deck.Count == 0)
                     break;
 
-                int index = _deck.Count - 1;
-                var card = _deck[index];
-                _deck.RemoveAt(index);
-                _hand.Add(card);
-                result.Add(card);
+                if (!TryDrawTopCardFromDeck(out _, out var placedInHand))
+                    break;
+
+                drawn++;
+                if (placedInHand)
+                    addedToHand++;
+                else
+                    overflowed++;
             }
 
+            // Commit overflow only after reshuffles for this operation are finished.
+            FlushPendingOverflowToGraveyard(notify: false);
+            NotifyChanged();
+
+            return new CardDrawResult(requested, drawn, addedToHand, overflowed);
+        }
+
+        /// <summary>
+        /// Draws directly from the current deck without auto-reshuffle, respecting hand capacity.
+        /// Overflow is flushed to the graveyard immediately (safe default for simple callers).
+        /// For presentation-driven two-phase draws, use <see cref="DrawCardsFromDeckImmediate"/>
+        /// and call <see cref="FlushPendingOverflowToGraveyard"/> after the full sequence.
+        /// </summary>
+        public List<CardInstance> DrawCardsImmediate(int count)
+        {
+            DrawFromCurrentDeckCore(count, collectDrawn: true, out var drawnCards);
+            FlushPendingOverflowToGraveyard(notify: false);
+            NotifyChanged();
+            return drawnCards;
+        }
+
+        /// <summary>
+        /// Low-level draw from the current deck only: no reshuffle, respects hand limit.
+        /// Overflow cards stay in pending overflow (not graveyard) so a later reshuffle
+        /// in the same multi-step draw cannot pick them up.
+        /// </summary>
+        public CardDrawResult DrawCardsFromDeckImmediate(int count)
+        {
+            var result = DrawFromCurrentDeckCore(count, collectDrawn: false, out _);
             NotifyChanged();
             return result;
+        }
+
+        /// <summary>
+        /// Moves pending overflow cards into the graveyard in one batch.
+        /// Call after a multi-step draw that may reshuffle between immediate draws.
+        /// </summary>
+        public int FlushPendingOverflowToGraveyard()
+        {
+            return FlushPendingOverflowToGraveyard(notify: true);
         }
 
         /// <summary>Moves all graveyard cards into deck and shuffles. Returns moved card count.</summary>
@@ -143,23 +207,95 @@ namespace CardBattle.Core
             NotifyChanged();
         }
 
-        private bool TryDrawSingleCard()
+        private CardDrawResult DrawFromCurrentDeckCore(
+            int count,
+            bool collectDrawn,
+            out List<CardInstance> drawnCards)
         {
-            if (_deck.Count == 0)
-                ReshuffleGraveyardIntoDeck();
+            int requested = Mathf.Max(0, count);
+            drawnCards = collectDrawn ? new List<CardInstance>(requested) : null;
 
+            if (requested == 0)
+                return CardDrawResult.Empty(0);
+
+            int drawn = 0;
+            int addedToHand = 0;
+            int overflowed = 0;
+
+            for (int i = 0; i < requested; i++)
+            {
+                if (_deck.Count == 0)
+                    break;
+
+                if (!TryDrawTopCardFromDeck(out var card, out var placedInHand))
+                    break;
+
+                drawn++;
+                if (placedInHand)
+                    addedToHand++;
+                else
+                    overflowed++;
+
+                if (collectDrawn)
+                    drawnCards.Add(card);
+            }
+
+            return new CardDrawResult(requested, drawn, addedToHand, overflowed);
+        }
+
+        /// <summary>
+        /// Removes the top deck card and places it in hand or pending overflow.
+        /// Does not reshuffle, notify, or flush overflow.
+        /// </summary>
+        private bool TryDrawTopCardFromDeck(out CardInstance card, out bool placedInHand)
+        {
+            card = null;
+            placedInHand = false;
             if (_deck.Count == 0)
                 return false;
 
-            var index = _deck.Count - 1;
-            var drawn = _deck[index];
+            int index = _deck.Count - 1;
+            card = _deck[index];
             _deck.RemoveAt(index);
-            _hand.Add(drawn);
+
+            if (_hand.Count < MaxHandSize)
+            {
+                _hand.Add(card);
+                placedInHand = true;
+            }
+            else
+            {
+                _pendingOverflow.Add(card);
+            }
+
             return true;
+        }
+
+        private int FlushPendingOverflowToGraveyard(bool notify)
+        {
+            int moved = _pendingOverflow.Count;
+            if (moved <= 0)
+                return 0;
+
+            for (int i = 0; i < _pendingOverflow.Count; i++)
+            {
+                var overflowCard = _pendingOverflow[i];
+                if (overflowCard != null && !_graveyard.Contains(overflowCard))
+                    _graveyard.Add(overflowCard);
+            }
+
+            _pendingOverflow.Clear();
+
+            if (notify)
+                NotifyChanged();
+
+            return moved;
         }
 
         private void ReshuffleGraveyardIntoDeck()
         {
+            // Intentionally ignores _pendingOverflow so overflow from this draw
+            // cannot re-enter the deck mid-operation.
             if (_graveyard.Count == 0)
                 return;
 
@@ -184,6 +320,7 @@ namespace CardBattle.Core
 
             _hand.Remove(card);
             _deck.Remove(card);
+            _pendingOverflow.Remove(card);
             if (!_graveyard.Contains(card))
                 _graveyard.Add(card);
         }
