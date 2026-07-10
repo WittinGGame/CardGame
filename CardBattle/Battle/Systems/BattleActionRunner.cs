@@ -226,7 +226,7 @@ namespace CardBattle.Core
             if (deckController != null)
                 deckController.DrawCards(requestedDrawCount);
 
-            handUIController?.RefreshHandUI();
+            handUIController?.SyncHandViewsExternal();
             pileCounterUI?.ForceSyncDisplayedToReal();
         }
 

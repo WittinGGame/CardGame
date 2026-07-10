@@ -4,8 +4,9 @@ using UnityEngine;
 namespace CardBattle.Core
 {
     /// <summary>
-    /// Owns presentation-driven drawing: deck-first draw, optional graveyard-to-deck VFX,
-    /// reshuffle, remaining draw, then flush pending overflow.
+    /// Owns presentation-driven drawing: one card at a time from the current deck,
+    /// optional graveyard-to-deck VFX + reshuffle, then flush pending overflow.
+    /// Relies on HandUIController incremental SyncHandViews (via OnPilesChanged).
     /// </summary>
     public class BattleDrawSequenceController : MonoBehaviour
     {
@@ -17,13 +18,17 @@ namespace CardBattle.Core
 
         [Header("Timing")]
         [SerializeField] private float postReshuffleDrawDelay = 0.08f;
+        [Tooltip("Optional short pause after an overflow draw (no hand entry animation).")]
+        [SerializeField] private float overflowDrawCadence = 0.05f;
+        [Tooltip("Extra settle time after a card is added to hand and deal unlock finishes.")]
+        [SerializeField] private float handEntrySettleDelay = 0.12f;
 
         [Header("Diagnostics")]
         [SerializeField] private bool verboseLogs;
 
         /// <summary>
-        /// Draws up to <paramref name="requestedCount"/> cards with the same two-phase
-        /// presentation flow used at player round start.
+        /// Draws up to <paramref name="requestedCount"/> cards one at a time with the same
+        /// reshuffle presentation rules used at player round start.
         /// </summary>
         public IEnumerator DrawCardsRoutine(int requestedCount)
         {
@@ -37,6 +42,13 @@ namespace CardBattle.Core
                 yield break;
             }
 
+            if (handUIController == null)
+            {
+                Debug.LogWarning(
+                    "[BattleDrawSequence] HandUIController is missing. " +
+                    "Draw logic will still complete without hand presentation waits.");
+            }
+
             int drawn = 0;
             int addedToHand = 0;
             int overflowed = 0;
@@ -45,56 +57,59 @@ namespace CardBattle.Core
 
             try
             {
-                // Phase A — draw from current deck only (overflow stays pending).
-                int availableDeck = deckController.GetDeckCount();
-                int firstDraw = Mathf.Min(requested, availableDeck);
-
-                if (firstDraw > 0)
+                for (int i = 0; i < requested; i++)
                 {
-                    drawStarted = true;
-                    var firstResult = deckController.DrawCardsFromDeckImmediate(firstDraw);
-                    drawn += firstResult.DrawnCount;
-                    addedToHand += firstResult.AddedToHandCount;
-                    overflowed += firstResult.OverflowedToGraveyardCount;
-                }
-
-                int remaining = requested - firstDraw;
-                if (remaining > 0)
-                {
-                    // Phase B/C — reshuffle presentation using the pre-overflow graveyard only.
-                    int graveCount = deckController.GetGraveyardCount();
-                    if (graveCount > 0)
+                    if (deckController.GetDeckCount() == 0)
                     {
+                        int graveCount = deckController.GetGraveyardCount();
+                        if (graveCount <= 0)
+                            break;
+
+                        // Reshuffle uses the current graveyard only — pending overflow stays out.
                         if (graveyardToDeckVfx != null)
                             yield return graveyardToDeckVfx.PlayReshuffleVfx(graveCount);
 
-                        reshuffled = deckController.ReshuffleGraveyardIntoDeckImmediate();
+                        reshuffled += deckController.ReshuffleGraveyardIntoDeckImmediate();
                         drawStarted = true;
 
                         if (postReshuffleDrawDelay > 0f)
                             yield return new WaitForSeconds(postReshuffleDrawDelay);
 
-                        // Phase E — draw remaining from reshuffled deck.
-                        int secondDraw = Mathf.Min(remaining, deckController.GetDeckCount());
-                        if (secondDraw > 0)
-                        {
-                            var secondResult = deckController.DrawCardsFromDeckImmediate(secondDraw);
-                            drawn += secondResult.DrawnCount;
-                            addedToHand += secondResult.AddedToHandCount;
-                            overflowed += secondResult.OverflowedToGraveyardCount;
-                        }
+                        if (deckController.GetDeckCount() == 0)
+                            break;
+                    }
+
+                    drawStarted = true;
+                    var step = deckController.DrawCardsFromDeckImmediate(1);
+                    if (step.DrawnCount <= 0)
+                        break;
+
+                    drawn += step.DrawnCount;
+                    addedToHand += step.AddedToHandCount;
+                    overflowed += step.OverflowedToGraveyardCount;
+
+                    if (step.AddedToHandCount > 0)
+                    {
+                        if (handUIController != null)
+                            yield return handUIController.WaitForDealPresentationComplete();
+
+                        if (handEntrySettleDelay > 0f)
+                            yield return new WaitForSeconds(handEntrySettleDelay);
+                    }
+                    else if (overflowDrawCadence > 0f)
+                    {
+                        yield return new WaitForSeconds(overflowDrawCadence);
                     }
                 }
             }
             finally
             {
-                // Always flush after any draw work so pending overflow cannot stick
-                // and cannot be reshuffled mid-operation.
                 if (drawStarted || deckController.PendingOverflowCount > 0)
                     deckController.FlushPendingOverflowToGraveyard();
 
+                // Incremental sync only — never RefreshHandUI during normal draw.
                 if (handUIController != null)
-                    handUIController.RefreshHandUI();
+                    handUIController.SyncHandViewsExternal();
 
                 if (pileCounterUI != null)
                     pileCounterUI.ForceSyncDisplayedToReal();

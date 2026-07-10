@@ -759,12 +759,14 @@ namespace CardBattle.Core
 **Path:** `Assets/Scripts/CardBattle/Cards/Debug/DrawCardsEffectDebugTest.cs`
 ```csharp
 using System.Collections;
+using System.Collections.Generic;
+using System.Text;
 using UnityEngine;
 
 namespace CardBattle.Core
 {
     /// <summary>
-    /// Lightweight Play Mode harness for presentation-driven draws (Phase 8B-1B).
+    /// Lightweight Play Mode harness for presentation-driven draws.
     /// </summary>
     public class DrawCardsEffectDebugTest : MonoBehaviour
     {
@@ -786,6 +788,12 @@ namespace CardBattle.Core
 
         [ContextMenu("Debug/Draw 2 With Presentation")]
         public void DebugDraw2WithPresentation()
+        {
+            StartDrawRoutine(2);
+        }
+
+        [ContextMenu("Debug/Draw 2 Incrementally")]
+        public void DebugDraw2Incrementally()
         {
             StartDrawRoutine(2);
         }
@@ -824,6 +832,75 @@ namespace CardBattle.Core
                 Debug.LogError($"{LogPrefix} FAIL — PendingOverflowCount={pending}");
         }
 
+        [ContextMenu("Debug/Validate Hand View Identity")]
+        public void DebugValidateHandViewIdentity()
+        {
+            if (!ValidateDeck())
+                return;
+
+            if (handUIController == null)
+            {
+                Debug.LogError($"{LogPrefix} HandUIController reference is missing.");
+                return;
+            }
+
+            var hand = deckController.Hand;
+            var views = handUIController.GetCurrentHandViewsSnapshot();
+            var fail = new StringBuilder();
+
+            int validHandCount = 0;
+            for (int i = 0; i < hand.Count; i++)
+            {
+                if (hand[i]?.Data != null)
+                    validHandCount++;
+            }
+
+            if (views.Count != validHandCount)
+            {
+                fail.Append("VisibleViews=").Append(views.Count)
+                    .Append(" ValidHandCards=").Append(validHandCount).Append(". ");
+            }
+
+            var seenCards = new HashSet<CardInstance>();
+            for (int i = 0; i < views.Count; i++)
+            {
+                var view = views[i];
+                if (view == null)
+                {
+                    fail.Append("Null view in snapshot. ");
+                    continue;
+                }
+
+                var bound = view.BoundCard;
+                if (bound == null || bound.Data == null)
+                {
+                    fail.Append("View has null BoundCard. ");
+                    continue;
+                }
+
+                if (!deckController.IsInHand(bound))
+                    fail.Append("Stale view for ").Append(bound.Data.DisplayName).Append(". ");
+
+                if (!seenCards.Add(bound))
+                    fail.Append("Duplicate view binding for ").Append(bound.Data.DisplayName).Append(". ");
+            }
+
+            for (int i = 0; i < hand.Count; i++)
+            {
+                var card = hand[i];
+                if (card?.Data == null)
+                    continue;
+
+                if (handUIController.GetViewForCard(card) == null)
+                    fail.Append("Missing view for ").Append(card.Data.DisplayName).Append(". ");
+            }
+
+            if (fail.Length == 0)
+                Debug.Log($"{LogPrefix} PASS — Hand view identity valid (Views={views.Count})");
+            else
+                Debug.LogError($"{LogPrefix} FAIL — Hand view identity\n{fail}");
+        }
+
         private void StartDrawRoutine(int amount)
         {
             if (battleDrawSequenceController == null)
@@ -853,6 +930,7 @@ namespace CardBattle.Core
 
             DebugPrintDrawState();
             DebugValidatePendingOverflowEmpty();
+            DebugValidateHandViewIdentity();
             runningRoutine = null;
         }
 
@@ -2082,6 +2160,27 @@ namespace CardBattle.Core
                 dealRoutine = StartCoroutine(CoDealInNewCards(newlyCreatedViews));
         }
 
+        /// <summary>
+        /// Incremental sync wrapper for external systems. Preserves existing CardViews
+        /// and only creates views for newly added hand cards.
+        /// </summary>
+        public void SyncHandViewsExternal()
+        {
+            SyncHandViews();
+        }
+
+        public bool IsDealPresentationRunning => dealRoutine != null;
+
+        /// <summary>
+        /// Waits until the current deal-in presentation finishes.
+        /// Returns immediately when no deal is running or this component is disabled.
+        /// </summary>
+        public IEnumerator WaitForDealPresentationComplete()
+        {
+            while (dealRoutine != null && isActiveAndEnabled)
+                yield return null;
+        }
+
         /// <summary>Syncs list of card views with the deck hand without rebuilding views for cards that are still in hand.</summary>
         private void SyncHandViews()
         {
@@ -2126,15 +2225,29 @@ namespace CardBattle.Core
                     }
                 }
 
+                bool createdNew = false;
                 if (view != null)
+                {
                     used.Add(view);
+                }
                 else
                 {
                     view = CreateCardView(card);
                     newlyCreatedViews.Add(view);
+                    createdNew = true;
                 }
 
                 newOrder.Add(view);
+
+                if (verboseLogs && createdNew)
+                {
+                    Debug.Log(
+                        "[IncrementalHandDraw]\n" +
+                        $"Card={card.Data.DisplayName}\n" +
+                        "CreatedNewView=True\n" +
+                        $"HandIndex={newOrder.Count - 1}\n" +
+                        $"VisibleViews={newOrder.Count}");
+                }
             }
 
             spawnedCards.Clear();

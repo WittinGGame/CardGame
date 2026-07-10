@@ -130,6 +130,27 @@ namespace CardBattle.Core
                 dealRoutine = StartCoroutine(CoDealInNewCards(newlyCreatedViews));
         }
 
+        /// <summary>
+        /// Incremental sync wrapper for external systems. Preserves existing CardViews
+        /// and only creates views for newly added hand cards.
+        /// </summary>
+        public void SyncHandViewsExternal()
+        {
+            SyncHandViews();
+        }
+
+        public bool IsDealPresentationRunning => dealRoutine != null;
+
+        /// <summary>
+        /// Waits until the current deal-in presentation finishes.
+        /// Returns immediately when no deal is running or this component is disabled.
+        /// </summary>
+        public IEnumerator WaitForDealPresentationComplete()
+        {
+            while (dealRoutine != null && isActiveAndEnabled)
+                yield return null;
+        }
+
         /// <summary>Syncs list of card views with the deck hand without rebuilding views for cards that are still in hand.</summary>
         private void SyncHandViews()
         {
@@ -174,15 +195,29 @@ namespace CardBattle.Core
                     }
                 }
 
+                bool createdNew = false;
                 if (view != null)
+                {
                     used.Add(view);
+                }
                 else
                 {
                     view = CreateCardView(card);
                     newlyCreatedViews.Add(view);
+                    createdNew = true;
                 }
 
                 newOrder.Add(view);
+
+                if (verboseLogs && createdNew)
+                {
+                    Debug.Log(
+                        "[IncrementalHandDraw]\n" +
+                        $"Card={card.Data.DisplayName}\n" +
+                        "CreatedNewView=True\n" +
+                        $"HandIndex={newOrder.Count - 1}\n" +
+                        $"VisibleViews={newOrder.Count}");
+                }
             }
 
             spawnedCards.Clear();
