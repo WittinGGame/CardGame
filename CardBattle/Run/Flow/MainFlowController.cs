@@ -190,8 +190,8 @@ namespace CardBattle.Core
 
             if (treeMapUIController != null)
             {
-                treeMapUIController.Show();
                 treeMapUIController.Rebuild();
+                treeMapUIController.ShowMapForRunEntry();
             }
 
             if (verboseLogs)
@@ -208,7 +208,10 @@ namespace CardBattle.Core
             SetPanelActive(gameplayRoot, false);
 
             if (treeMapUIController != null)
+            {
                 treeMapUIController.Hide();
+                treeMapUIController.ResetFirstMapOpenState();
+            }
 
             SetPanelActive(characterSelectPanel, false);
 
@@ -353,8 +356,8 @@ namespace CardBattle.Core
 
             if (treeMapUIController != null)
             {
-                treeMapUIController.Show();
                 treeMapUIController.Rebuild();
+                treeMapUIController.ShowMapForRunEntry();
             }
 
             if (verboseLogs)

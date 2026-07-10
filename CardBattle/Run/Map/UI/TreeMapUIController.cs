@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
@@ -31,10 +32,17 @@ namespace CardBattle.Core
 
         [Header("Layout")]
         [SerializeField] private float nodePositionScale = 1f;
-
-        [Header("Line Style")]
-        [SerializeField] private Color lineColor = new Color(0.55f, 0.55f, 0.6f, 0.85f);
         [SerializeField] private float lineThickness = 4f;
+
+        [Header("Transition")]
+        [SerializeField] private CanvasGroup mapCanvasGroup;
+        [SerializeField] private float fadeInDuration = 0.25f;
+        [SerializeField] private float fadeOutDuration = 0.25f;
+        [SerializeField] private bool useUnscaledTime = true;
+        [SerializeField] private bool disableInteractionDuringTransition = true;
+        [SerializeField] private bool deactivatePanelAfterFadeOut = true;
+        [SerializeField] private bool showMapImmediateOnFirstOpen = true;
+        [SerializeField] private bool verboseTransitionLogs;
 
         [Header("Options")]
         [SerializeField] private bool initializeMapOnStart = true;
@@ -48,14 +56,20 @@ namespace CardBattle.Core
         private readonly List<TreeMapLineUI> lineViews = new List<TreeMapLineUI>();
 
         public bool IsVisible { get; private set; }
+        public bool IsTransitioning { get; private set; }
 
         public event Action<string> OnNodeStartRequested;
 
         private MapRuntimeController subscribedMapController;
         private bool isBattleStartInProgress;
+        private bool isMapInputLocked;
+        private bool hasShownMapOnce;
+        private Coroutine fadeRoutine;
 
         private void Awake()
         {
+            ResolveCanvasGroup();
+
             if (startBattleButton != null)
             {
                 startBattleButton.onClick.RemoveListener(HandleStartBattleClicked);
@@ -81,23 +95,127 @@ namespace CardBattle.Core
 
         private void OnDisable()
         {
+            StopFadeRoutine();
             UnsubscribeMapController();
         }
 
         public void Show()
         {
-            if (panelRoot != null)
-                panelRoot.SetActive(true);
-
-            IsVisible = true;
+            ShowMapImmediate();
         }
 
         public void Hide()
         {
+            HideMapImmediate();
+        }
+
+        public void ShowMapImmediate()
+        {
+            StopFadeRoutine();
+            IsTransitioning = false;
+            isMapInputLocked = false;
+
+            if (panelRoot != null)
+                panelRoot.SetActive(true);
+
+            IsVisible = true;
+            SetCanvasGroupState(1f, true, true);
+        }
+
+        public void HideMapImmediate()
+        {
+            StopFadeRoutine();
+            IsTransitioning = false;
+            isMapInputLocked = false;
+
+            SetCanvasGroupState(0f, false, false);
+
             if (panelRoot != null)
                 panelRoot.SetActive(false);
 
             IsVisible = false;
+        }
+
+        public void ShowMapForRunEntry()
+        {
+            StopFadeRoutine();
+            ShowMapImmediate();
+            Refresh();
+
+            if (showMapImmediateOnFirstOpen && !hasShownMapOnce)
+            {
+                LogTransition("First map open uses immediate show.");
+                LogTransition("Map fade in skipped on first open.");
+            }
+
+            hasShownMapOnce = true;
+        }
+
+        public void ResetFirstMapOpenState()
+        {
+            hasShownMapOnce = false;
+        }
+
+        public void EnsureMapVisibleAndInteractive()
+        {
+            ShowMapImmediate();
+            Refresh();
+        }
+
+        public void SetMapVisibleImmediate(bool visible)
+        {
+            if (visible)
+                ShowMapImmediate();
+            else
+                HideMapImmediate();
+        }
+
+        public void LockMapInput()
+        {
+            isMapInputLocked = true;
+            SetBattleStartInProgress(true);
+            SetCanvasGroupInteractable(false);
+            DisableAllNodeInteraction();
+        }
+
+        public void UnlockMapInput()
+        {
+            isMapInputLocked = false;
+            SetBattleStartInProgress(false);
+            Refresh();
+        }
+
+        public Coroutine FadeInMap()
+        {
+            StopFadeRoutine();
+            fadeRoutine = StartCoroutine(FadeInMapRoutine());
+            return fadeRoutine;
+        }
+
+        public Coroutine FadeOutMap()
+        {
+            StopFadeRoutine();
+            fadeRoutine = StartCoroutine(FadeOutMapRoutine());
+            return fadeRoutine;
+        }
+
+        public void PlayFadeIn()
+        {
+            FadeInMap();
+        }
+
+        public void PrepareMapForFadeIn()
+        {
+            StopFadeRoutine();
+            IsTransitioning = false;
+            isMapInputLocked = false;
+            SetBattleStartInProgress(false);
+
+            if (panelRoot != null)
+                panelRoot.SetActive(true);
+
+            IsVisible = true;
+            SetCanvasGroupState(0f, false, false);
         }
 
         public void Rebuild()
@@ -185,8 +303,7 @@ namespace CardBattle.Core
                     if (isSelected)
                     {
                         visualState = TreeMapNodeVisualState.Current;
-                        interactable = !isBattleStartInProgress &&
-                                       controller.CanStartBattleFromNode(nodeId);
+                        interactable = IsNodeInteractionAllowed(controller, nodeId);
                     }
                     else if (state == MapNodeState.Completed)
                     {
@@ -202,8 +319,7 @@ namespace CardBattle.Core
                 else
                 {
                     visualState = TreeMapNodeButtonUI.MapNodeStateToVisualState(state);
-                    interactable = !isBattleStartInProgress &&
-                                   controller.CanStartBattleFromNode(nodeId);
+                    interactable = IsNodeInteractionAllowed(controller, nodeId);
                 }
 
                 if (verboseLogs)
@@ -215,9 +331,19 @@ namespace CardBattle.Core
                 pair.Value.RefreshState(state, isSelected, interactable, visualState);
             }
 
+            RefreshLineStates(controller, hasPendingSelectedNode, selectedNodeId);
+
             RefreshSelectedNodeText(controller);
             RefreshStartBattleButton(controller);
             RefreshStatusText(controller);
+        }
+
+        private bool IsNodeInteractionAllowed(MapRuntimeController controller, string nodeId)
+        {
+            if (isBattleStartInProgress || isMapInputLocked || IsTransitioning)
+                return false;
+
+            return controller.CanStartBattleFromNode(nodeId);
         }
 
         private static bool IsNodeCompleted(MapRuntimeController controller, string nodeId)
@@ -226,6 +352,123 @@ namespace CardBattle.Core
                 return false;
 
             return controller.GetNodeState(nodeId) == MapNodeState.Completed;
+        }
+
+        private static bool IsNodeAvailable(MapRuntimeController controller, string nodeId)
+        {
+            if (controller == null || string.IsNullOrWhiteSpace(nodeId))
+                return false;
+
+            return controller.GetNodeState(nodeId) == MapNodeState.Available;
+        }
+
+        private static bool HasUnresolvedPendingNode(MapRuntimeController controller)
+        {
+            if (controller == null || !controller.HasSelectedNode)
+                return false;
+
+            return !IsNodeCompleted(controller, controller.SelectedNodeId);
+        }
+
+        private static bool IsPendingSelectedNode(
+            MapRuntimeController controller,
+            string nodeId,
+            string pendingNodeId)
+        {
+            if (controller == null || string.IsNullOrWhiteSpace(nodeId) ||
+                string.IsNullOrWhiteSpace(pendingNodeId))
+            {
+                return false;
+            }
+
+            return string.Equals(nodeId, pendingNodeId, StringComparison.Ordinal);
+        }
+
+        private void RefreshLineStates(
+            MapRuntimeController controller,
+            bool hasPendingSelectedNode,
+            string pendingNodeId)
+        {
+            for (int i = 0; i < lineViews.Count; i++)
+            {
+                TreeMapLineUI line = lineViews[i];
+                if (line == null)
+                    continue;
+
+                TreeMapLineVisualState lineVisualState = ResolveLineVisualState(
+                    controller,
+                    line.FromNodeId,
+                    line.ToNodeId,
+                    hasPendingSelectedNode,
+                    pendingNodeId);
+
+                line.SetVisualState(lineVisualState);
+
+                if (verboseLogs)
+                {
+                    Debug.Log(
+                        $"[TreeMapUI] Line {line.FromNodeId}->{line.ToNodeId}: visual={lineVisualState}");
+                }
+            }
+        }
+
+        private static TreeMapLineVisualState ResolveLineVisualState(
+            MapRuntimeController controller,
+            string fromNodeId,
+            string toNodeId,
+            bool hasPendingSelectedNode,
+            string pendingNodeId)
+        {
+            if (controller == null ||
+                string.IsNullOrWhiteSpace(fromNodeId) ||
+                string.IsNullOrWhiteSpace(toNodeId))
+            {
+                return TreeMapLineVisualState.Locked;
+            }
+
+            MapNodeState fromState = controller.GetNodeState(fromNodeId);
+            MapNodeState toState = controller.GetNodeState(toNodeId);
+
+            if (hasPendingSelectedNode)
+            {
+                if (IsLineCurrentPath(fromState, toState, fromNodeId, toNodeId, pendingNodeId))
+                    return TreeMapLineVisualState.Current;
+
+                if (IsLineCompletedPath(fromState, toState))
+                    return TreeMapLineVisualState.Completed;
+
+                return TreeMapLineVisualState.Locked;
+            }
+
+            if (IsLineCompletedPath(fromState, toState))
+                return TreeMapLineVisualState.Completed;
+
+            if (fromState == MapNodeState.Completed && toState == MapNodeState.Available)
+                return TreeMapLineVisualState.Available;
+
+            return TreeMapLineVisualState.Locked;
+        }
+
+        private static bool IsLineCurrentPath(
+            MapNodeState fromState,
+            MapNodeState toState,
+            string fromNodeId,
+            string toNodeId,
+            string pendingNodeId)
+        {
+            if (string.IsNullOrWhiteSpace(pendingNodeId))
+                return false;
+
+            if (!string.Equals(toNodeId, pendingNodeId, StringComparison.Ordinal))
+                return false;
+
+            return fromState == MapNodeState.Completed &&
+                   (toState == MapNodeState.Current || toState == MapNodeState.Available);
+        }
+
+        private static bool IsLineCompletedPath(MapNodeState fromState, MapNodeState toState)
+        {
+            return fromState == MapNodeState.Completed && toState == MapNodeState.Completed;
         }
 
         public void SetBattleStartInProgress(bool inProgress)
@@ -270,7 +513,8 @@ namespace CardBattle.Core
                         SetCenterAnchors(lineRect);
 
                     Vector2 end = connectedNode.UiPosition * nodePositionScale;
-                    line.Bind(start, end, lineColor, lineThickness);
+                    line.Bind(start, end, lineThickness, node.NodeId, connectedId);
+                    line.SetVisualState(TreeMapLineVisualState.Locked);
                     lineViews.Add(line);
                 }
             }
@@ -330,12 +574,23 @@ namespace CardBattle.Core
 
         private void HandleNodeClicked(string nodeId)
         {
-            if (isBattleStartInProgress)
+            if (IsTransitioning)
             {
-                if (verboseLogs)
+                if (verboseTransitionLogs)
                 {
                     Debug.Log(
-                        $"[TreeMapUIController] Node click ignored: battle start already in progress. nodeId={nodeId}");
+                        "[TreeMapTransition] Click rejected because transition is active.");
+                }
+
+                return;
+            }
+
+            if (isMapInputLocked || isBattleStartInProgress)
+            {
+                if (verboseLogs || verboseTransitionLogs)
+                {
+                    Debug.Log(
+                        $"[TreeMapUIController] Node click ignored: map input is locked. nodeId={nodeId}");
                 }
 
                 return;
@@ -548,6 +803,180 @@ namespace CardBattle.Core
         {
             public MapNodeType nodeType;
             public Sprite icon;
+        }
+
+        private void ResolveCanvasGroup()
+        {
+            if (mapCanvasGroup != null)
+                return;
+
+            if (panelRoot != null)
+                mapCanvasGroup = panelRoot.GetComponent<CanvasGroup>();
+
+            if (mapCanvasGroup == null)
+                mapCanvasGroup = GetComponent<CanvasGroup>();
+
+            if (mapCanvasGroup == null && panelRoot != null)
+            {
+                mapCanvasGroup = panelRoot.AddComponent<CanvasGroup>();
+
+                if (verboseTransitionLogs)
+                {
+                    Debug.Log(
+                        "[TreeMapTransition] Added CanvasGroup to MapPanel at runtime.");
+                }
+            }
+            else if (mapCanvasGroup == null && verboseTransitionLogs)
+            {
+                Debug.LogWarning(
+                    "[TreeMapTransition] Map CanvasGroup is missing. Fade transitions will be skipped.");
+            }
+        }
+
+        private IEnumerator FadeInMapRoutine()
+        {
+            IsTransitioning = true;
+            ResolveCanvasGroup();
+
+            if (panelRoot != null)
+                panelRoot.SetActive(true);
+
+            IsVisible = true;
+            isMapInputLocked = false;
+
+            if (disableInteractionDuringTransition)
+                SetCanvasGroupInteractable(false);
+
+            LogTransition("Fade in started.");
+
+            if (mapCanvasGroup == null || fadeInDuration <= 0f)
+            {
+                SetCanvasGroupState(1f, true, true);
+                IsTransitioning = false;
+                fadeRoutine = null;
+                Refresh();
+                LogTransition("Fade in complete.");
+                yield break;
+            }
+
+            float startAlpha = mapCanvasGroup.alpha;
+            float elapsed = 0f;
+
+            while (elapsed < fadeInDuration)
+            {
+                elapsed += useUnscaledTime ? Time.unscaledDeltaTime : Time.deltaTime;
+                float t = Mathf.Clamp01(elapsed / fadeInDuration);
+                SetCanvasGroupAlpha(Mathf.Lerp(startAlpha, 1f, t));
+                yield return null;
+            }
+
+            SetCanvasGroupState(1f, true, true);
+            IsTransitioning = false;
+            fadeRoutine = null;
+            Refresh();
+            LogTransition("Fade in complete.");
+        }
+
+        private IEnumerator FadeOutMapRoutine()
+        {
+            IsTransitioning = true;
+            isMapInputLocked = true;
+            ResolveCanvasGroup();
+
+            SetBattleStartInProgress(true);
+            SetCanvasGroupInteractable(false);
+            DisableAllNodeInteraction();
+
+            LogTransition("Fade out started.");
+
+            if (mapCanvasGroup == null || fadeOutDuration <= 0f)
+            {
+                SetCanvasGroupState(0f, false, false);
+
+                if (deactivatePanelAfterFadeOut && panelRoot != null)
+                    panelRoot.SetActive(false);
+
+                IsVisible = false;
+                IsTransitioning = false;
+                fadeRoutine = null;
+                LogTransition("Fade out complete.");
+                yield break;
+            }
+
+            float startAlpha = mapCanvasGroup.alpha;
+            float elapsed = 0f;
+
+            while (elapsed < fadeOutDuration)
+            {
+                elapsed += useUnscaledTime ? Time.unscaledDeltaTime : Time.deltaTime;
+                float t = Mathf.Clamp01(elapsed / fadeOutDuration);
+                SetCanvasGroupAlpha(Mathf.Lerp(startAlpha, 0f, t));
+                yield return null;
+            }
+
+            SetCanvasGroupState(0f, false, false);
+
+            if (deactivatePanelAfterFadeOut && panelRoot != null)
+                panelRoot.SetActive(false);
+
+            IsVisible = false;
+            IsTransitioning = false;
+            fadeRoutine = null;
+            LogTransition("Fade out complete.");
+        }
+
+        private void StopFadeRoutine()
+        {
+            if (fadeRoutine == null)
+                return;
+
+            StopCoroutine(fadeRoutine);
+            fadeRoutine = null;
+            IsTransitioning = false;
+        }
+
+        private void SetCanvasGroupState(float alpha, bool interactable, bool blocksRaycasts)
+        {
+            if (mapCanvasGroup == null)
+                return;
+
+            mapCanvasGroup.alpha = alpha;
+            mapCanvasGroup.interactable = interactable;
+            mapCanvasGroup.blocksRaycasts = blocksRaycasts;
+        }
+
+        private void SetCanvasGroupAlpha(float alpha)
+        {
+            if (mapCanvasGroup == null)
+                return;
+
+            mapCanvasGroup.alpha = alpha;
+        }
+
+        private void SetCanvasGroupInteractable(bool interactable)
+        {
+            if (mapCanvasGroup == null)
+                return;
+
+            mapCanvasGroup.interactable = interactable;
+            mapCanvasGroup.blocksRaycasts = interactable;
+        }
+
+        private void DisableAllNodeInteraction()
+        {
+            foreach (KeyValuePair<string, TreeMapNodeButtonUI> pair in nodeViews)
+            {
+                if (pair.Value != null)
+                    pair.Value.SetInteractable(false);
+            }
+        }
+
+        private void LogTransition(string message)
+        {
+            if (!verboseTransitionLogs)
+                return;
+
+            Debug.Log($"[TreeMapTransition] {message}");
         }
     }
 }
