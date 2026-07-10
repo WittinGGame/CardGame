@@ -20,6 +20,7 @@ namespace CardBattle.Core
         [SerializeField] private BattleHUDController battleHUDController;
         [SerializeField] private CardToGraveyardVFXController graveyardVfx;
         [SerializeField] private PileCounterUI pileCounterUI;
+        [SerializeField] private BattleDrawSequenceController battleDrawSequenceController;
 
         [Header("Battle State")]
         [SerializeField] private BattleOutcomeController battleOutcomeController;
@@ -52,6 +53,7 @@ namespace CardBattle.Core
         private bool playerAttackResolved;
         private CardPlayContext pendingPlayerCardContext;
         private EnemyBattleUnit pendingPrimaryTarget;
+        private int pendingAttackDrawCount;
         private Coroutine runningActionRoutine;
 
         private void OnEnable()
@@ -142,17 +144,19 @@ namespace CardBattle.Core
 
                 bool isAttack = card.Data.CardType == CardType.Attack;
                 pendingPrimaryTarget = primaryTarget;
+                int requestedDrawCount = 0;
 
                 if (isAttack)
                 {
                     if (player?.View == null)
                     {
                         Debug.LogWarning("BattleActionRunner: Player view is missing, falling back to immediate resolve.");
-                        ResolvePlayerCardImmediate(card, primaryTarget);
+                        requestedDrawCount = ResolvePlayerCardImmediate(card, primaryTarget).RequestedDrawCount;
                     }
                     else
                     {
                         pendingPlayerCardContext = new CardPlayContext(player, card, enemyActionSystem.Enemies, primaryTarget);
+                        pendingAttackDrawCount = 0;
                         waitingForPlayerHit = true;
                         waitingForPlayerFinish = true;
                         playerAttackResolved = false;
@@ -162,14 +166,18 @@ namespace CardBattle.Core
 
                         yield return new WaitUntil(() => !waitingForPlayerFinish);
 
+                        requestedDrawCount = pendingAttackDrawCount;
                         CleanupPlayerAttackState();
                     }
                 }
                 else
                 {
-                    ResolvePlayerCardImmediate(card, primaryTarget);
+                    requestedDrawCount = ResolvePlayerCardImmediate(card, primaryTarget).RequestedDrawCount;
                     yield return new WaitForSeconds(nonAttackResolvePause);
                 }
+
+                if (requestedDrawCount > 0)
+                    yield return ExecuteDeferredDraw(requestedDrawCount);
 
                 if (HasBattleEnded)
                 {
@@ -198,6 +206,28 @@ namespace CardBattle.Core
             {
                 runningActionRoutine = null;
             }
+        }
+
+        private IEnumerator ExecuteDeferredDraw(int requestedDrawCount)
+        {
+            if (requestedDrawCount <= 0)
+                yield break;
+
+            if (battleDrawSequenceController != null)
+            {
+                yield return battleDrawSequenceController.DrawCardsRoutine(requestedDrawCount);
+                yield break;
+            }
+
+            Debug.LogError(
+                "BattleActionRunner: BattleDrawSequenceController is missing. " +
+                "Falling back to immediate DrawCards.");
+
+            if (deckController != null)
+                deckController.DrawCards(requestedDrawCount);
+
+            handUIController?.RefreshHandUI();
+            pileCounterUI?.ForceSyncDisplayedToReal();
         }
 
         private IEnumerator EndTurnSequence()
@@ -250,10 +280,10 @@ namespace CardBattle.Core
             RefreshExternalUI();
         }
 
-        private void ResolvePlayerCardImmediate(CardInstance card, EnemyBattleUnit primaryTarget)
+        private CardResolutionResult ResolvePlayerCardImmediate(CardInstance card, EnemyBattleUnit primaryTarget)
         {
             var context = new CardPlayContext(player, card, enemyActionSystem.Enemies, primaryTarget);
-            cardResolver.Resolve(context);
+            return cardResolver.Resolve(context);
         }
 
         private void SubscribePlayerViewEvents()
@@ -289,7 +319,8 @@ namespace CardBattle.Core
             if (HasValidAttackHitTarget(pendingPlayerCardContext))
                 combatSfx?.PlayAttackHit();
 
-            cardResolver.Resolve(pendingPlayerCardContext);
+            var result = cardResolver.Resolve(pendingPlayerCardContext);
+            pendingAttackDrawCount = result.RequestedDrawCount;
         }
 
         private void HandlePlayerActionFinished()
@@ -303,7 +334,10 @@ namespace CardBattle.Core
                 playerAttackResolved = true;
 
                 if (pendingPlayerCardContext != null)
-                    cardResolver.Resolve(pendingPlayerCardContext);
+                {
+                    var result = cardResolver.Resolve(pendingPlayerCardContext);
+                    pendingAttackDrawCount = result.RequestedDrawCount;
+                }
             }
 
             waitingForPlayerFinish = false;
@@ -317,6 +351,7 @@ namespace CardBattle.Core
             playerAttackResolved = false;
             pendingPlayerCardContext = null;
             pendingPrimaryTarget = null;
+            pendingAttackDrawCount = 0;
         }
 
         private void HandleBattleEnded(BattleOutcome outcome)

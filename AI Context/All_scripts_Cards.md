@@ -755,6 +755,119 @@ namespace CardBattle.Core
 }
 ```
 
+## FILE: DrawCardsEffectDebugTest.cs
+**Path:** `Assets/Scripts/CardBattle/Cards/Debug/DrawCardsEffectDebugTest.cs`
+```csharp
+using System.Collections;
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    /// <summary>
+    /// Lightweight Play Mode harness for presentation-driven draws (Phase 8B-1B).
+    /// </summary>
+    public class DrawCardsEffectDebugTest : MonoBehaviour
+    {
+        private const string LogPrefix = "[DrawCardsEffectDebugTest]";
+
+        [Header("References")]
+        [SerializeField] private BattleDrawSequenceController battleDrawSequenceController;
+        [SerializeField] private DeckController deckController;
+        [SerializeField] private HandUIController handUIController;
+        [SerializeField] private CardResolver cardResolver;
+        [SerializeField] private PlayerBattleUnit player;
+        [SerializeField] private EnemyActionSystem enemyActionSystem;
+
+        [Header("Test Values")]
+        [SerializeField] private int customDrawAmount = 2;
+        [SerializeField] private bool verboseLogs = true;
+
+        private Coroutine runningRoutine;
+
+        [ContextMenu("Debug/Draw 2 With Presentation")]
+        public void DebugDraw2WithPresentation()
+        {
+            StartDrawRoutine(2);
+        }
+
+        [ContextMenu("Debug/Draw Custom Amount With Presentation")]
+        public void DebugDrawCustomAmountWithPresentation()
+        {
+            StartDrawRoutine(customDrawAmount);
+        }
+
+        [ContextMenu("Debug/Print Draw State")]
+        public void DebugPrintDrawState()
+        {
+            if (!ValidateDeck())
+                return;
+
+            Debug.Log(
+                $"{LogPrefix}\n" +
+                $"Deck={deckController.Deck.Count}\n" +
+                $"Hand={deckController.Hand.Count}/{deckController.MaxHandSize}\n" +
+                $"AvailableHandSpace={deckController.AvailableHandSpace}\n" +
+                $"Graveyard={deckController.Graveyard.Count}\n" +
+                $"PendingOverflow={deckController.PendingOverflowCount}");
+        }
+
+        [ContextMenu("Debug/Validate Pending Overflow Empty")]
+        public void DebugValidatePendingOverflowEmpty()
+        {
+            if (!ValidateDeck())
+                return;
+
+            int pending = deckController.PendingOverflowCount;
+            if (pending == 0)
+                Debug.Log($"{LogPrefix} PASS — PendingOverflowCount=0");
+            else
+                Debug.LogError($"{LogPrefix} FAIL — PendingOverflowCount={pending}");
+        }
+
+        private void StartDrawRoutine(int amount)
+        {
+            if (battleDrawSequenceController == null)
+            {
+                Debug.LogError($"{LogPrefix} BattleDrawSequenceController reference is missing.");
+                return;
+            }
+
+            if (runningRoutine != null)
+            {
+                StopCoroutine(runningRoutine);
+                runningRoutine = null;
+            }
+
+            runningRoutine = StartCoroutine(CoDraw(amount));
+        }
+
+        private IEnumerator CoDraw(int amount)
+        {
+            if (verboseLogs)
+                Debug.Log($"{LogPrefix} Starting DrawCardsRoutine({amount})");
+
+            yield return battleDrawSequenceController.DrawCardsRoutine(amount);
+
+            if (handUIController != null)
+                handUIController.RefreshInteractivityExternal();
+
+            DebugPrintDrawState();
+            DebugValidatePendingOverflowEmpty();
+            runningRoutine = null;
+        }
+
+        private bool ValidateDeck()
+        {
+            if (deckController != null)
+                return true;
+
+            Debug.LogError($"{LogPrefix} DeckController reference is missing.");
+            return false;
+        }
+    }
+}
+```
+
 ## FILE: CardEffectData.cs
 **Path:** `Assets/Scripts/CardBattle/Cards/Effects/CardEffectData.cs`
 ```csharp
@@ -1029,6 +1142,38 @@ namespace CardBattle.Core
 }
 ```
 
+## FILE: DrawCardsEffectData.cs
+**Path:** `Assets/Scripts/CardBattle/Cards/Effects/DrawCardsEffectData.cs`
+```csharp
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    [CreateAssetMenu(fileName = "DrawCardsEffect", menuName = "Card Battle/Effects/Draw Cards")]
+    public class DrawCardsEffectData : CardEffectData
+    {
+        [SerializeField] private int amount = 2;
+
+        public override string GetDescriptionText()
+        {
+            int value = Mathf.Max(0, amount);
+            if (value == 1)
+                return "Draw 1 card";
+
+            return $"Draw {value} cards";
+        }
+
+        public override void Apply(CardPlayContext context, CardEffectExecutionContext executionContext)
+        {
+            if (executionContext == null)
+                return;
+
+            executionContext.RequestDraw(Mathf.Max(0, amount));
+        }
+    }
+}
+```
+
 ## FILE: HealEffectData.cs
 **Path:** `Assets/Scripts/CardBattle/Cards/Effects/HealEffectData.cs`
 ```csharp
@@ -1112,14 +1257,29 @@ namespace CardBattle.Core
 {
     /// <summary>
     /// Runtime execution payload containing resolved targets for one effect application.
+    /// Also accumulates deferred draw requests for the battle runner to present later.
     /// </summary>
     public class CardEffectExecutionContext
     {
+        private int requestedDrawCount;
+
         public IReadOnlyList<EnemyBattleUnit> EnemyTargets { get; }
+        public int RequestedDrawCount => requestedDrawCount;
+        public bool HasDrawRequest => requestedDrawCount > 0;
 
         public CardEffectExecutionContext(IReadOnlyList<EnemyBattleUnit> enemyTargets)
         {
             EnemyTargets = enemyTargets;
+            requestedDrawCount = 0;
+        }
+
+        /// <summary>Accumulates a deferred draw request. Ignores amount &lt;= 0.</summary>
+        public void RequestDraw(int amount)
+        {
+            if (amount <= 0)
+                return;
+
+            requestedDrawCount += amount;
         }
     }
 }
@@ -1192,10 +1352,33 @@ namespace CardBattle.Core
 }
 ```
 
+## FILE: CardResolutionResult.cs
+**Path:** `Assets/Scripts/CardBattle/Cards/Runtime/CardResolutionResult.cs`
+```csharp
+namespace CardBattle.Core
+{
+    /// <summary>
+    /// Immutable summary of one <see cref="CardResolver"/> resolution pass.
+    /// </summary>
+    public readonly struct CardResolutionResult
+    {
+        public bool UsedEffectsPipeline { get; }
+        public int RequestedDrawCount { get; }
+        public bool HasDrawRequest => RequestedDrawCount > 0;
+
+        public CardResolutionResult(bool usedEffectsPipeline, int requestedDrawCount)
+        {
+            UsedEffectsPipeline = usedEffectsPipeline;
+            RequestedDrawCount = requestedDrawCount < 0 ? 0 : requestedDrawCount;
+        }
+
+        public static CardResolutionResult Empty { get; } = new CardResolutionResult(false, 0);
+    }
+}
+```
+
 ## FILE: ICardModifier.cs
-
 **Path:** `Assets/Scripts/CardBattle/Cards/Runtime/ICardModifier.cs`
-
 ```csharp
 namespace CardBattle.Core
 {
@@ -1229,10 +1412,14 @@ namespace CardBattle.Core
     {
         [SerializeField] private bool logResolution;
 
-        public void Resolve(CardPlayContext context)
+        /// <summary>
+        /// Resolves the card synchronously and returns deferred requests (e.g. draw)
+        /// for the battle runner to present afterward.
+        /// </summary>
+        public CardResolutionResult Resolve(CardPlayContext context)
         {
             if (context?.Card?.Data == null || context.Player == null)
-                return;
+                return CardResolutionResult.Empty;
 
             foreach (var modifier in context.Card.Modifiers)
             {
@@ -1241,11 +1428,13 @@ namespace CardBattle.Core
             }
 
             bool usedEffectsPipeline = false;
+            int requestedDrawCount = 0;
+
             if (context.ApplyBaseCardLogic)
             {
                 if (context.Card.Data.HasEffects)
                 {
-                    ApplyEffectCardLogic(context);
+                    requestedDrawCount = ApplyEffectCardLogic(context);
                     usedEffectsPipeline = true;
                 }
                 else
@@ -1260,14 +1449,18 @@ namespace CardBattle.Core
             if (logResolution)
             {
                 string path = usedEffectsPipeline ? "Effects pipeline" : "Legacy CardType pipeline";
-                Debug.Log($"Resolved {context.Card.Data.DisplayName} via {path}.");
+                Debug.Log(
+                    $"Resolved {context.Card.Data.DisplayName} via {path}. " +
+                    $"RequestedDraw={requestedDrawCount}");
             }
+
+            return new CardResolutionResult(usedEffectsPipeline, requestedDrawCount);
         }
 
-        private static void ApplyEffectCardLogic(CardPlayContext context)
+        private static int ApplyEffectCardLogic(CardPlayContext context)
         {
             if (context?.Card?.Data == null)
-                return;
+                return 0;
 
             var data = context.Card.Data;
             var enemyTargets = TargetResolver.ResolveEnemyTargets(context, data.TargetMode);
@@ -1275,7 +1468,7 @@ namespace CardBattle.Core
 
             var effects = data.Effects;
             if (effects == null)
-                return;
+                return 0;
 
             for (int i = 0; i < effects.Count; i++)
             {
@@ -1285,6 +1478,8 @@ namespace CardBattle.Core
 
                 effect.Apply(context, executionContext);
             }
+
+            return executionContext.RequestedDrawCount;
         }
 
         private static void ApplyCoreCardLogic(CardPlayContext context)

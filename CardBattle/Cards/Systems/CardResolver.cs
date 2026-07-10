@@ -10,10 +10,14 @@ namespace CardBattle.Core
     {
         [SerializeField] private bool logResolution;
 
-        public void Resolve(CardPlayContext context)
+        /// <summary>
+        /// Resolves the card synchronously and returns deferred requests (e.g. draw)
+        /// for the battle runner to present afterward.
+        /// </summary>
+        public CardResolutionResult Resolve(CardPlayContext context)
         {
             if (context?.Card?.Data == null || context.Player == null)
-                return;
+                return CardResolutionResult.Empty;
 
             foreach (var modifier in context.Card.Modifiers)
             {
@@ -22,11 +26,13 @@ namespace CardBattle.Core
             }
 
             bool usedEffectsPipeline = false;
+            int requestedDrawCount = 0;
+
             if (context.ApplyBaseCardLogic)
             {
                 if (context.Card.Data.HasEffects)
                 {
-                    ApplyEffectCardLogic(context);
+                    requestedDrawCount = ApplyEffectCardLogic(context);
                     usedEffectsPipeline = true;
                 }
                 else
@@ -41,14 +47,18 @@ namespace CardBattle.Core
             if (logResolution)
             {
                 string path = usedEffectsPipeline ? "Effects pipeline" : "Legacy CardType pipeline";
-                Debug.Log($"Resolved {context.Card.Data.DisplayName} via {path}.");
+                Debug.Log(
+                    $"Resolved {context.Card.Data.DisplayName} via {path}. " +
+                    $"RequestedDraw={requestedDrawCount}");
             }
+
+            return new CardResolutionResult(usedEffectsPipeline, requestedDrawCount);
         }
 
-        private static void ApplyEffectCardLogic(CardPlayContext context)
+        private static int ApplyEffectCardLogic(CardPlayContext context)
         {
             if (context?.Card?.Data == null)
-                return;
+                return 0;
 
             var data = context.Card.Data;
             var enemyTargets = TargetResolver.ResolveEnemyTargets(context, data.TargetMode);
@@ -56,7 +66,7 @@ namespace CardBattle.Core
 
             var effects = data.Effects;
             if (effects == null)
-                return;
+                return 0;
 
             for (int i = 0; i < effects.Count; i++)
             {
@@ -66,6 +76,8 @@ namespace CardBattle.Core
 
                 effect.Apply(context, executionContext);
             }
+
+            return executionContext.RequestedDrawCount;
         }
 
         private static void ApplyCoreCardLogic(CardPlayContext context)

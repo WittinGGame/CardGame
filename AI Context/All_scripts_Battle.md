@@ -636,6 +636,7 @@ namespace CardBattle.Core
         [SerializeField] private BattleHUDController battleHUDController;
         [SerializeField] private CardToGraveyardVFXController graveyardVfx;
         [SerializeField] private PileCounterUI pileCounterUI;
+        [SerializeField] private BattleDrawSequenceController battleDrawSequenceController;
 
         [Header("Battle State")]
         [SerializeField] private BattleOutcomeController battleOutcomeController;
@@ -668,6 +669,7 @@ namespace CardBattle.Core
         private bool playerAttackResolved;
         private CardPlayContext pendingPlayerCardContext;
         private EnemyBattleUnit pendingPrimaryTarget;
+        private int pendingAttackDrawCount;
         private Coroutine runningActionRoutine;
 
         private void OnEnable()
@@ -758,17 +760,19 @@ namespace CardBattle.Core
 
                 bool isAttack = card.Data.CardType == CardType.Attack;
                 pendingPrimaryTarget = primaryTarget;
+                int requestedDrawCount = 0;
 
                 if (isAttack)
                 {
                     if (player?.View == null)
                     {
                         Debug.LogWarning("BattleActionRunner: Player view is missing, falling back to immediate resolve.");
-                        ResolvePlayerCardImmediate(card, primaryTarget);
+                        requestedDrawCount = ResolvePlayerCardImmediate(card, primaryTarget).RequestedDrawCount;
                     }
                     else
                     {
                         pendingPlayerCardContext = new CardPlayContext(player, card, enemyActionSystem.Enemies, primaryTarget);
+                        pendingAttackDrawCount = 0;
                         waitingForPlayerHit = true;
                         waitingForPlayerFinish = true;
                         playerAttackResolved = false;
@@ -778,14 +782,18 @@ namespace CardBattle.Core
 
                         yield return new WaitUntil(() => !waitingForPlayerFinish);
 
+                        requestedDrawCount = pendingAttackDrawCount;
                         CleanupPlayerAttackState();
                     }
                 }
                 else
                 {
-                    ResolvePlayerCardImmediate(card, primaryTarget);
+                    requestedDrawCount = ResolvePlayerCardImmediate(card, primaryTarget).RequestedDrawCount;
                     yield return new WaitForSeconds(nonAttackResolvePause);
                 }
+
+                if (requestedDrawCount > 0)
+                    yield return ExecuteDeferredDraw(requestedDrawCount);
 
                 if (HasBattleEnded)
                 {
@@ -814,6 +822,28 @@ namespace CardBattle.Core
             {
                 runningActionRoutine = null;
             }
+        }
+
+        private IEnumerator ExecuteDeferredDraw(int requestedDrawCount)
+        {
+            if (requestedDrawCount <= 0)
+                yield break;
+
+            if (battleDrawSequenceController != null)
+            {
+                yield return battleDrawSequenceController.DrawCardsRoutine(requestedDrawCount);
+                yield break;
+            }
+
+            Debug.LogError(
+                "BattleActionRunner: BattleDrawSequenceController is missing. " +
+                "Falling back to immediate DrawCards.");
+
+            if (deckController != null)
+                deckController.DrawCards(requestedDrawCount);
+
+            handUIController?.RefreshHandUI();
+            pileCounterUI?.ForceSyncDisplayedToReal();
         }
 
         private IEnumerator EndTurnSequence()
@@ -866,10 +896,10 @@ namespace CardBattle.Core
             RefreshExternalUI();
         }
 
-        private void ResolvePlayerCardImmediate(CardInstance card, EnemyBattleUnit primaryTarget)
+        private CardResolutionResult ResolvePlayerCardImmediate(CardInstance card, EnemyBattleUnit primaryTarget)
         {
             var context = new CardPlayContext(player, card, enemyActionSystem.Enemies, primaryTarget);
-            cardResolver.Resolve(context);
+            return cardResolver.Resolve(context);
         }
 
         private void SubscribePlayerViewEvents()
@@ -905,7 +935,8 @@ namespace CardBattle.Core
             if (HasValidAttackHitTarget(pendingPlayerCardContext))
                 combatSfx?.PlayAttackHit();
 
-            cardResolver.Resolve(pendingPlayerCardContext);
+            var result = cardResolver.Resolve(pendingPlayerCardContext);
+            pendingAttackDrawCount = result.RequestedDrawCount;
         }
 
         private void HandlePlayerActionFinished()
@@ -919,7 +950,10 @@ namespace CardBattle.Core
                 playerAttackResolved = true;
 
                 if (pendingPlayerCardContext != null)
-                    cardResolver.Resolve(pendingPlayerCardContext);
+                {
+                    var result = cardResolver.Resolve(pendingPlayerCardContext);
+                    pendingAttackDrawCount = result.RequestedDrawCount;
+                }
             }
 
             waitingForPlayerFinish = false;
@@ -933,6 +967,7 @@ namespace CardBattle.Core
             playerAttackResolved = false;
             pendingPlayerCardContext = null;
             pendingPrimaryTarget = null;
+            pendingAttackDrawCount = 0;
         }
 
         private void HandleBattleEnded(BattleOutcome outcome)
@@ -1048,6 +1083,130 @@ namespace CardBattle.Core
 }
 ```
 
+## FILE: BattleDrawSequenceController.cs
+**Path:** `Assets/Scripts/CardBattle/Battle/Systems/BattleDrawSequenceController.cs`
+```csharp
+using System.Collections;
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    /// <summary>
+    /// Owns presentation-driven drawing: deck-first draw, optional graveyard-to-deck VFX,
+    /// reshuffle, remaining draw, then flush pending overflow.
+    /// </summary>
+    public class BattleDrawSequenceController : MonoBehaviour
+    {
+        [Header("References")]
+        [SerializeField] private DeckController deckController;
+        [SerializeField] private GraveyardToDeckVFXController graveyardToDeckVfx;
+        [SerializeField] private HandUIController handUIController;
+        [SerializeField] private PileCounterUI pileCounterUI;
+
+        [Header("Timing")]
+        [SerializeField] private float postReshuffleDrawDelay = 0.08f;
+
+        [Header("Diagnostics")]
+        [SerializeField] private bool verboseLogs;
+
+        /// <summary>
+        /// Draws up to <paramref name="requestedCount"/> cards with the same two-phase
+        /// presentation flow used at player round start.
+        /// </summary>
+        public IEnumerator DrawCardsRoutine(int requestedCount)
+        {
+            int requested = Mathf.Max(0, requestedCount);
+            if (requested == 0)
+                yield break;
+
+            if (deckController == null)
+            {
+                Debug.LogError("[BattleDrawSequence] DeckController reference is missing.");
+                yield break;
+            }
+
+            int drawn = 0;
+            int addedToHand = 0;
+            int overflowed = 0;
+            int reshuffled = 0;
+            bool drawStarted = false;
+
+            try
+            {
+                // Phase A — draw from current deck only (overflow stays pending).
+                int availableDeck = deckController.GetDeckCount();
+                int firstDraw = Mathf.Min(requested, availableDeck);
+
+                if (firstDraw > 0)
+                {
+                    drawStarted = true;
+                    var firstResult = deckController.DrawCardsFromDeckImmediate(firstDraw);
+                    drawn += firstResult.DrawnCount;
+                    addedToHand += firstResult.AddedToHandCount;
+                    overflowed += firstResult.OverflowedToGraveyardCount;
+                }
+
+                int remaining = requested - firstDraw;
+                if (remaining > 0)
+                {
+                    // Phase B/C — reshuffle presentation using the pre-overflow graveyard only.
+                    int graveCount = deckController.GetGraveyardCount();
+                    if (graveCount > 0)
+                    {
+                        if (graveyardToDeckVfx != null)
+                            yield return graveyardToDeckVfx.PlayReshuffleVfx(graveCount);
+
+                        reshuffled = deckController.ReshuffleGraveyardIntoDeckImmediate();
+                        drawStarted = true;
+
+                        if (postReshuffleDrawDelay > 0f)
+                            yield return new WaitForSeconds(postReshuffleDrawDelay);
+
+                        // Phase E — draw remaining from reshuffled deck.
+                        int secondDraw = Mathf.Min(remaining, deckController.GetDeckCount());
+                        if (secondDraw > 0)
+                        {
+                            var secondResult = deckController.DrawCardsFromDeckImmediate(secondDraw);
+                            drawn += secondResult.DrawnCount;
+                            addedToHand += secondResult.AddedToHandCount;
+                            overflowed += secondResult.OverflowedToGraveyardCount;
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                // Always flush after any draw work so pending overflow cannot stick
+                // and cannot be reshuffled mid-operation.
+                if (drawStarted || deckController.PendingOverflowCount > 0)
+                    deckController.FlushPendingOverflowToGraveyard();
+
+                if (handUIController != null)
+                    handUIController.RefreshHandUI();
+
+                if (pileCounterUI != null)
+                    pileCounterUI.ForceSyncDisplayedToReal();
+
+                if (verboseLogs)
+                {
+                    Debug.Log(
+                        "[BattleDrawSequence]\n" +
+                        $"Requested={requested}\n" +
+                        $"Drawn={drawn}\n" +
+                        $"AddedToHand={addedToHand}\n" +
+                        $"Overflowed={overflowed}\n" +
+                        $"Reshuffled={reshuffled}\n" +
+                        $"Deck={deckController.Deck.Count}\n" +
+                        $"Hand={deckController.Hand.Count}/{deckController.MaxHandSize}\n" +
+                        $"Graveyard={deckController.Graveyard.Count}\n" +
+                        $"PendingOverflow={deckController.PendingOverflowCount}");
+                }
+            }
+        }
+    }
+}
+```
+
 ## FILE: EnemyActionSystem.cs
 **Path:** `Assets/Scripts/CardBattle/Battle/Systems/EnemyActionSystem.cs`
 ```csharp
@@ -1067,8 +1226,7 @@ namespace CardBattle.Core
     {
         [SerializeField] private PlayerBattleUnit player;
         [SerializeField] private List<EnemyBattleUnit> enemies = new List<EnemyBattleUnit>();
-        [SerializeField] private GraveyardToDeckVFXController graveyardToDeckVfx;
-        [SerializeField] private float postReshuffleDrawDelay = 0.08f;
+        [SerializeField] private BattleDrawSequenceController battleDrawSequenceController;
 
         [Header("Turn Presentation")]
         [SerializeField] private TurnPresentationController turnPresentation;
@@ -1161,58 +1319,17 @@ namespace CardBattle.Core
             }
 
             int requestedDraw = Mathf.Max(0, player.DrawPerRound);
-
-            // ==============================
-            // STEP A — DRAW FROM DECK FIRST
-            // ==============================
-            // Use FromDeckImmediate (not DrawCardsImmediate) so overflow stays pending
-            // and cannot be reshuffled back into the deck mid-sequence.
-            int availableDeck = player.DeckController.GetDeckCount();
-            int firstDraw = Mathf.Min(requestedDraw, availableDeck);
-
-            if (firstDraw > 0)
-                player.DeckController.DrawCardsFromDeckImmediate(firstDraw);
-
-            int remaining = requestedDraw - firstDraw;
-            if (remaining <= 0)
+            if (battleDrawSequenceController != null)
             {
-                player.DeckController.FlushPendingOverflowToGraveyard();
-                yield break;
+                yield return battleDrawSequenceController.DrawCardsRoutine(requestedDraw);
             }
-
-            // ==============================
-            // STEP B — RESHUFFLE PRESENTATION
-            // ==============================
-            int graveCount = player.DeckController.GetGraveyardCount();
-            if (graveCount <= 0)
+            else
             {
-                player.DeckController.FlushPendingOverflowToGraveyard();
-                yield break;
+                Debug.LogError(
+                    "EnemyActionSystem: BattleDrawSequenceController is missing. " +
+                    "Falling back to immediate DrawCards.");
+                player.DeckController.DrawCards(requestedDraw);
             }
-
-            if (graveyardToDeckVfx != null)
-                yield return graveyardToDeckVfx.PlayReshuffleVfx(graveCount);
-
-            // ==============================
-            // STEP C — APPLY REAL RESHUFFLE
-            // ==============================
-            player.DeckController.ReshuffleGraveyardIntoDeckImmediate();
-
-            // ==============================
-            // STEP D — SMALL DELAY (POLISH)
-            // ==============================
-            if (postReshuffleDrawDelay > 0f)
-                yield return new WaitForSeconds(postReshuffleDrawDelay);
-
-            // ==============================
-            // STEP E — DRAW REMAINING CARDS
-            // ==============================
-            int secondDraw = Mathf.Min(remaining, player.DeckController.GetDeckCount());
-
-            if (secondDraw > 0)
-                player.DeckController.DrawCardsFromDeckImmediate(secondDraw);
-
-            player.DeckController.FlushPendingOverflowToGraveyard();
         }
 
         /// <summary>
