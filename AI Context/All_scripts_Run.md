@@ -7046,7 +7046,7 @@ namespace CardBattle.Core
         {
             UnsubscribeTreeMapUI();
             UnsubscribeEncounterCompletion();
-            ResetBattleStartRuntimeState();
+            ClearBattleStartRuntimeStateOnly();
         }
 
         public void HandleNodeClickedForBattle(string nodeId)
@@ -7168,10 +7168,22 @@ namespace CardBattle.Core
             }
         }
 
+        private void ClearBattleStartRuntimeStateOnly()
+        {
+            isStartingBattle = false;
+        }
+
         public void ResetBattleStartRuntimeState()
         {
             isStartingBattle = false;
-            treeMapUIController?.SetBattleStartInProgress(false);
+
+            if (treeMapUIController != null && treeMapUIController.isActiveAndEnabled)
+                treeMapUIController.SetBattleStartInProgress(false);
+
+            if (verboseLogs)
+            {
+                Debug.Log("[TreeMapBattleFlow] Battle start runtime state reset.");
+            }
         }
 
         private void HandleNodeStartRequested(string nodeId)
@@ -7632,6 +7644,12 @@ namespace CardBattle.Core
 
         private void UpdateStateAnimation(TreeMapNodeVisualState visualState)
         {
+            if (!isActiveAndEnabled)
+            {
+                StopStateAnimation();
+                return;
+            }
+
             bool wantsAnimation = enableStateAnimation &&
                                   (visualState == TreeMapNodeVisualState.Available ||
                                    visualState == TreeMapNodeVisualState.Current);
@@ -7646,9 +7664,6 @@ namespace CardBattle.Core
                 return;
 
             StopStateAnimation();
-
-            if (!isActiveAndEnabled)
-                return;
 
             CacheBaseTransforms();
             animatingState = visualState;
@@ -7682,7 +7697,9 @@ namespace CardBattle.Core
 
             if (stateAnimationRoutine != null)
             {
-                StopCoroutine(stateAnimationRoutine);
+                if (isActiveAndEnabled)
+                    StopCoroutine(stateAnimationRoutine);
+
                 stateAnimationRoutine = null;
             }
 
@@ -7990,6 +8007,10 @@ namespace CardBattle.Core
         {
             isBattleStartInProgress = false;
             SetCanvasGroupState(IsVisible ? 1f : 0f, IsVisible, IsVisible);
+
+            if (!isActiveAndEnabled)
+                return;
+
             Refresh();
         }
 
@@ -8050,8 +8071,13 @@ namespace CardBattle.Core
 
         public void Refresh()
         {
+            if (!isActiveAndEnabled)
+                return;
+
             if (!TryGetMapController(out MapRuntimeController controller))
                 return;
+
+            RemoveDestroyedViewReferences();
 
             string selectedNodeId = controller.SelectedNodeId;
             bool hasPendingSelectedNode = controller.HasSelectedNode &&
@@ -8065,6 +8091,9 @@ namespace CardBattle.Core
 
             foreach (KeyValuePair<string, TreeMapNodeButtonUI> pair in nodeViews)
             {
+                if (pair.Value == null)
+                    continue;
+
                 string nodeId = pair.Key;
                 MapNodeState state = controller.GetNodeState(nodeId);
 
@@ -8215,6 +8244,10 @@ namespace CardBattle.Core
         public void SetBattleStartInProgress(bool inProgress)
         {
             isBattleStartInProgress = inProgress;
+
+            if (!isActiveAndEnabled)
+                return;
+
             Refresh();
         }
 
@@ -8416,6 +8449,29 @@ namespace CardBattle.Core
             }
 
             return false;
+        }
+
+        private void RemoveDestroyedViewReferences()
+        {
+            if (nodeViews.Count > 0)
+            {
+                var destroyedNodeIds = new List<string>();
+
+                foreach (KeyValuePair<string, TreeMapNodeButtonUI> pair in nodeViews)
+                {
+                    if (pair.Value == null)
+                        destroyedNodeIds.Add(pair.Key);
+                }
+
+                for (int i = 0; i < destroyedNodeIds.Count; i++)
+                    nodeViews.Remove(destroyedNodeIds[i]);
+            }
+
+            for (int i = lineViews.Count - 1; i >= 0; i--)
+            {
+                if (lineViews[i] == null)
+                    lineViews.RemoveAt(i);
+            }
         }
 
         private void ResolveCanvasGroup()

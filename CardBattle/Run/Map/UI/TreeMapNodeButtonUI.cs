@@ -230,6 +230,12 @@ namespace CardBattle.Core
 
         private void UpdateStateAnimation(TreeMapNodeVisualState visualState)
         {
+            if (!isActiveAndEnabled)
+            {
+                StopStateAnimation();
+                return;
+            }
+
             bool wantsAnimation = enableStateAnimation &&
                                   (visualState == TreeMapNodeVisualState.Available ||
                                    visualState == TreeMapNodeVisualState.Current);
@@ -244,9 +250,6 @@ namespace CardBattle.Core
                 return;
 
             StopStateAnimation();
-
-            if (!isActiveAndEnabled)
-                return;
 
             CacheBaseTransforms();
             animatingState = visualState;
@@ -280,7 +283,9 @@ namespace CardBattle.Core
 
             if (stateAnimationRoutine != null)
             {
-                StopCoroutine(stateAnimationRoutine);
+                if (isActiveAndEnabled)
+                    StopCoroutine(stateAnimationRoutine);
+
                 stateAnimationRoutine = null;
             }
 

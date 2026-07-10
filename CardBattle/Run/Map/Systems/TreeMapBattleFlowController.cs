@@ -44,7 +44,7 @@ namespace CardBattle.Core
         {
             UnsubscribeTreeMapUI();
             UnsubscribeEncounterCompletion();
-            ResetBattleStartRuntimeState();
+            ClearBattleStartRuntimeStateOnly();
         }
 
         public void HandleNodeClickedForBattle(string nodeId)
@@ -166,10 +166,22 @@ namespace CardBattle.Core
             }
         }
 
+        private void ClearBattleStartRuntimeStateOnly()
+        {
+            isStartingBattle = false;
+        }
+
         public void ResetBattleStartRuntimeState()
         {
             isStartingBattle = false;
-            treeMapUIController?.SetBattleStartInProgress(false);
+
+            if (treeMapUIController != null && treeMapUIController.isActiveAndEnabled)
+                treeMapUIController.SetBattleStartInProgress(false);
+
+            if (verboseLogs)
+            {
+                Debug.Log("[TreeMapBattleFlow] Battle start runtime state reset.");
+            }
         }
 
         private void HandleNodeStartRequested(string nodeId)

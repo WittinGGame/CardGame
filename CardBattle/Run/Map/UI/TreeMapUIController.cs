@@ -106,6 +106,10 @@ namespace CardBattle.Core
         {
             isBattleStartInProgress = false;
             SetCanvasGroupState(IsVisible ? 1f : 0f, IsVisible, IsVisible);
+
+            if (!isActiveAndEnabled)
+                return;
+
             Refresh();
         }
 
@@ -166,8 +170,13 @@ namespace CardBattle.Core
 
         public void Refresh()
         {
+            if (!isActiveAndEnabled)
+                return;
+
             if (!TryGetMapController(out MapRuntimeController controller))
                 return;
+
+            RemoveDestroyedViewReferences();
 
             string selectedNodeId = controller.SelectedNodeId;
             bool hasPendingSelectedNode = controller.HasSelectedNode &&
@@ -181,6 +190,9 @@ namespace CardBattle.Core
 
             foreach (KeyValuePair<string, TreeMapNodeButtonUI> pair in nodeViews)
             {
+                if (pair.Value == null)
+                    continue;
+
                 string nodeId = pair.Key;
                 MapNodeState state = controller.GetNodeState(nodeId);
 
@@ -331,6 +343,10 @@ namespace CardBattle.Core
         public void SetBattleStartInProgress(bool inProgress)
         {
             isBattleStartInProgress = inProgress;
+
+            if (!isActiveAndEnabled)
+                return;
+
             Refresh();
         }
 
@@ -532,6 +548,29 @@ namespace CardBattle.Core
             }
 
             return false;
+        }
+
+        private void RemoveDestroyedViewReferences()
+        {
+            if (nodeViews.Count > 0)
+            {
+                var destroyedNodeIds = new List<string>();
+
+                foreach (KeyValuePair<string, TreeMapNodeButtonUI> pair in nodeViews)
+                {
+                    if (pair.Value == null)
+                        destroyedNodeIds.Add(pair.Key);
+                }
+
+                for (int i = 0; i < destroyedNodeIds.Count; i++)
+                    nodeViews.Remove(destroyedNodeIds[i]);
+            }
+
+            for (int i = lineViews.Count - 1; i >= 0; i--)
+            {
+                if (lineViews[i] == null)
+                    lineViews.RemoveAt(i);
+            }
         }
 
         private void ResolveCanvasGroup()
