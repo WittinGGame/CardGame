@@ -1,4 +1,3 @@
-using System.Collections;
 using UnityEngine;
 
 namespace CardBattle.Core
@@ -34,7 +33,6 @@ namespace CardBattle.Core
         private TreeMapUIController subscribedTreeMapUI;
         private EncounterCompletionController subscribedEncounterCompletion;
         private bool isStartingBattle;
-        private Coroutine battleStartRoutine;
 
         private void OnEnable()
         {
@@ -46,18 +44,10 @@ namespace CardBattle.Core
         {
             UnsubscribeTreeMapUI();
             UnsubscribeEncounterCompletion();
-            StopBattleStartRoutine();
+            ResetBattleStartRuntimeState();
         }
 
         public void HandleNodeClickedForBattle(string nodeId)
-        {
-            if (battleStartRoutine != null)
-                return;
-
-            battleStartRoutine = StartCoroutine(HandleNodeClickedForBattleRoutine(nodeId));
-        }
-
-        private IEnumerator HandleNodeClickedForBattleRoutine(string nodeId)
         {
             if (isStartingBattle)
             {
@@ -67,27 +57,13 @@ namespace CardBattle.Core
                         $"[TreeMapBattleFlow] Node click ignored: battle start already in progress. nodeId={nodeId}");
                 }
 
-                battleStartRoutine = null;
-                yield break;
-            }
-
-            if (treeMapUIController != null && treeMapUIController.IsTransitioning)
-            {
-                if (verboseLogs)
-                {
-                    Debug.Log(
-                        "[TreeMapTransition] Click rejected because transition is active.");
-                }
-
-                battleStartRoutine = null;
-                yield break;
+                return;
             }
 
             if (string.IsNullOrWhiteSpace(nodeId))
             {
                 LogError("Cannot start battle: node ID is blank.");
-                battleStartRoutine = null;
-                yield break;
+                return;
             }
 
             if (verboseLogs)
@@ -99,8 +75,7 @@ namespace CardBattle.Core
             if (mapRuntimeController == null)
             {
                 LogError("Cannot start battle: MapRuntimeController is missing.");
-                battleStartRoutine = null;
-                yield break;
+                return;
             }
 
             if (!mapRuntimeController.CanStartBattleFromNode(nodeId))
@@ -108,18 +83,14 @@ namespace CardBattle.Core
                 if (verboseLogs)
                 {
                     Debug.Log(
-                        $"[TreeMapBattleFlow] Node click rejected: unavailable, completed, locked, " +
-                        $"or pending different node. nodeId={nodeId}");
+                        $"[TreeMapBattleFlow] Node click rejected: node is not startable. nodeId={nodeId}");
                 }
 
-                battleStartRoutine = null;
-                yield break;
+                return;
             }
 
             isStartingBattle = true;
-            treeMapUIController?.LockMapInput();
-
-            bool battleStarted = false;
+            treeMapUIController?.SetBattleStartInProgress(true);
 
             try
             {
@@ -131,7 +102,7 @@ namespace CardBattle.Core
                             $"[TreeMapBattleFlow] Node click rejected: selection failed. nodeId={nodeId}");
                     }
 
-                    yield break;
+                    return;
                 }
 
                 if (verboseLogs)
@@ -153,7 +124,7 @@ namespace CardBattle.Core
                                 "[TreeMapBattleFlow] Active run save failed before battle start. Aborting battle start.");
                         }
 
-                        yield break;
+                        return;
                     }
 
                     if (verboseLogs)
@@ -166,13 +137,11 @@ namespace CardBattle.Core
                 if (battleTestBootstrap == null)
                 {
                     LogError("Cannot start battle: BattleTestBootstrap is missing.");
-                    yield break;
+                    return;
                 }
 
                 if (hideMapWhenBattleStarts && treeMapUIController != null)
-                {
-                    yield return treeMapUIController.FadeOutMap();
-                }
+                    treeMapUIController.Hide();
 
                 if (verboseLogs)
                 {
@@ -190,16 +159,17 @@ namespace CardBattle.Core
                 }
 
                 battleTestBootstrap.StartTestBattle();
-                battleStarted = true;
             }
             finally
             {
-                if (!battleStarted)
-                    treeMapUIController?.UnlockMapInput();
-
-                isStartingBattle = false;
-                battleStartRoutine = null;
+                ResetBattleStartRuntimeState();
             }
+        }
+
+        public void ResetBattleStartRuntimeState()
+        {
+            isStartingBattle = false;
+            treeMapUIController?.SetBattleStartInProgress(false);
         }
 
         private void HandleNodeStartRequested(string nodeId)
@@ -264,9 +234,8 @@ namespace CardBattle.Core
 
             if (showMapAfterEncounterCompletion && treeMapUIController != null)
             {
-                treeMapUIController.PrepareMapForFadeIn();
+                treeMapUIController.Show();
                 treeMapUIController.Refresh();
-                treeMapUIController.PlayFadeIn();
             }
 
             if (verboseLogs)
@@ -274,16 +243,6 @@ namespace CardBattle.Core
                 Debug.Log(
                     "[TreeMapBattleFlow] Encounter completed. Returning to map.");
             }
-        }
-
-        private void StopBattleStartRoutine()
-        {
-            if (battleStartRoutine == null)
-                return;
-
-            StopCoroutine(battleStartRoutine);
-            battleStartRoutine = null;
-            isStartingBattle = false;
         }
 
         private void SubscribeTreeMapUI()
