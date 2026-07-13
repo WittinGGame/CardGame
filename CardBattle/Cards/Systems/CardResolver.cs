@@ -3,8 +3,8 @@ using UnityEngine;
 namespace CardBattle.Core
 {
     /// <summary>
-    /// Central place for card effect execution. Add branching per <see cref="CardType"/> here,
-    /// and let <see cref="ICardModifier"/> adjust <see cref="CardPlayContext"/> before/after.
+    /// Central place for card effect execution via <see cref="CardData.Effects"/>.
+    /// Modifiers may still skip base resolution through <see cref="CardPlayContext.ApplyBaseCardLogic"/>.
     /// </summary>
     public class CardResolver : MonoBehaviour
     {
@@ -25,34 +25,22 @@ namespace CardBattle.Core
                     context.ApplyBaseCardLogic = false;
             }
 
-            bool usedEffectsPipeline = false;
             int requestedDrawCount = 0;
 
             if (context.ApplyBaseCardLogic)
-            {
-                if (context.Card.Data.HasEffects)
-                {
-                    requestedDrawCount = ApplyEffectCardLogic(context);
-                    usedEffectsPipeline = true;
-                }
-                else
-                {
-                    ApplyCoreCardLogic(context);
-                }
-            }
+                requestedDrawCount = ApplyEffectCardLogic(context);
 
             foreach (var modifier in context.Card.Modifiers)
                 modifier?.PostResolve(context);
 
             if (logResolution)
             {
-                string path = usedEffectsPipeline ? "Effects pipeline" : "Legacy CardType pipeline";
                 Debug.Log(
-                    $"Resolved {context.Card.Data.DisplayName} via {path}. " +
+                    $"Resolved {context.Card.Data.DisplayName} via Effects pipeline. " +
                     $"RequestedDraw={requestedDrawCount}");
             }
 
-            return new CardResolutionResult(usedEffectsPipeline, requestedDrawCount);
+            return new CardResolutionResult(requestedDrawCount);
         }
 
         private static int ApplyEffectCardLogic(CardPlayContext context)
@@ -61,12 +49,18 @@ namespace CardBattle.Core
                 return 0;
 
             var data = context.Card.Data;
+            var effects = data.Effects;
+
+            if (!HasAnyValidEffect(effects))
+            {
+                Debug.LogWarning(
+                    $"[CardResolver] Card '{data.CardId}' has no valid effects. " +
+                    "No gameplay effect was applied.");
+                return 0;
+            }
+
             var enemyTargets = TargetResolver.ResolveEnemyTargets(context, data.TargetMode);
             var executionContext = new CardEffectExecutionContext(enemyTargets);
-
-            var effects = data.Effects;
-            if (effects == null)
-                return 0;
 
             for (int i = 0; i < effects.Count; i++)
             {
@@ -80,65 +74,18 @@ namespace CardBattle.Core
             return executionContext.RequestedDrawCount;
         }
 
-        private static void ApplyCoreCardLogic(CardPlayContext context)
+        private static bool HasAnyValidEffect(System.Collections.Generic.IReadOnlyList<CardEffectData> effects)
         {
-            var data = context.Card.Data;
-            switch (data.CardType)
+            if (effects == null || effects.Count == 0)
+                return false;
+
+            for (int i = 0; i < effects.Count; i++)
             {
-                case CardType.Attack:
-                    ResolveAttack(context, data);
-                    break;
-                case CardType.Heal:
-                    context.Player.Heal(data.HealAmount);
-                    break;
-                case CardType.Buff:
-                    context.Player.ApplyBuffFromCard(data);
-                    break;
-                case CardType.Defend:
-                    context.Player.AddBlock(data.BlockAmount);
-                    break;
-                default:
-                    Debug.LogWarning($"Unhandled card type {data.CardType}.");
-                    break;
-            }
-        }
-
-        private static void ResolveAttack(CardPlayContext context, CardData data)
-        {
-            var target = ChooseAttackTarget(context);
-            if (target == null || !target.IsAlive)
-                return;
-
-            var bonus = context.Player.ConsumeDamageBonus();
-            var total = data.AttackDamage + bonus;
-            bool wasAliveBeforeHit = target.IsAlive;
-
-            int hpDamage = target.TakeAttackDamage(context.Player, total);
-
-            if (wasAliveBeforeHit)
-            {
-                if (!target.IsAlive)
-                    target.View?.PlayDead();
-                else if (hpDamage > 0)
-                    target.View?.PlayHurt();
-            }
-        }
-
-        private static EnemyBattleUnit ChooseAttackTarget(CardPlayContext context)
-        {
-            if (context.PrimaryTarget != null && context.PrimaryTarget.IsAlive)
-                return context.PrimaryTarget;
-
-            if (context.Enemies == null)
-                return null;
-
-            foreach (var enemy in context.Enemies)
-            {
-                if (enemy != null && enemy.IsAlive)
-                    return enemy;
+                if (effects[i] != null)
+                    return true;
             }
 
-            return null;
+            return false;
         }
     }
 }

@@ -440,27 +440,6 @@ namespace CardBattle.Core
                 return false;
             }
 
-            // Legacy attack cards without the Effects pipeline
-            if (cardData.CardType == CardType.Attack)
-            {
-                if (context.PrimaryTarget != null &&
-                    context.PrimaryTarget.IsAlive)
-                {
-                    return true;
-                }
-
-                if (context.Enemies == null)
-                    return false;
-
-                for (int i = 0; i < context.Enemies.Count; i++)
-                {
-                    EnemyBattleUnit enemy = context.Enemies[i];
-
-                    if (enemy != null && enemy.IsAlive)
-                        return true;
-                }
-            }
-
             return false;
         }
     }

@@ -107,10 +107,7 @@ namespace CardBattle.Core
             if (data == null)
                 return false;
 
-            if (data.HasEffects)
-                return data.TargetMode == CardTargetMode.SingleEnemy;
-
-            return data.CardType == CardType.Attack;
+            return data.TargetMode == CardTargetMode.SingleEnemy;
         }
 
         public void BeginTargetSelection(CardInstance card)

@@ -106,17 +106,7 @@ namespace CardBattle.Core
             enemyActionSystem.ResolveEndTurnAttacks();
         }
 
-        /// <summary>Buff cards add to the next attack's damage; consumed when an attack card resolves.</summary>
-        public void ApplyBuffFromCard(CardData data)
-        {
-            if (data == null)
-                return;
-
-            _pendingAttackBonus += Mathf.Max(0, data.BuffPotency);
-            OnDebugBuffChanged?.Invoke(DebugBuffCount);
-        }
-
-        /// <summary>Called by <see cref="CardResolver"/> when applying attack damage.</summary>
+        /// <summary>Called by attack effects when applying damage.</summary>
         public int ConsumeDamageBonus()
         {
             var bonus = _pendingAttackBonus;

@@ -1056,27 +1056,6 @@ namespace CardBattle.Core
                 return false;
             }
 
-            // Legacy attack cards without the Effects pipeline
-            if (cardData.CardType == CardType.Attack)
-            {
-                if (context.PrimaryTarget != null &&
-                    context.PrimaryTarget.IsAlive)
-                {
-                    return true;
-                }
-
-                if (context.Enemies == null)
-                    return false;
-
-                for (int i = 0; i < context.Enemies.Count; i++)
-                {
-                    EnemyBattleUnit enemy = context.Enemies[i];
-
-                    if (enemy != null && enemy.IsAlive)
-                        return true;
-                }
-            }
-
             return false;
         }
     }
@@ -1662,10 +1641,7 @@ namespace CardBattle.Core
             if (data == null)
                 return false;
 
-            if (data.HasEffects)
-                return data.TargetMode == CardTargetMode.SingleEnemy;
-
-            return data.CardType == CardType.Attack;
+            return data.TargetMode == CardTargetMode.SingleEnemy;
         }
 
         public void BeginTargetSelection(CardInstance card)
@@ -2782,17 +2758,7 @@ namespace CardBattle.Core
             enemyActionSystem.ResolveEndTurnAttacks();
         }
 
-        /// <summary>Buff cards add to the next attack's damage; consumed when an attack card resolves.</summary>
-        public void ApplyBuffFromCard(CardData data)
-        {
-            if (data == null)
-                return;
-
-            _pendingAttackBonus += Mathf.Max(0, data.BuffPotency);
-            OnDebugBuffChanged?.Invoke(DebugBuffCount);
-        }
-
-        /// <summary>Called by <see cref="CardResolver"/> when applying attack damage.</summary>
+        /// <summary>Called by attack effects when applying damage.</summary>
         public int ConsumeDamageBonus()
         {
             var bonus = _pendingAttackBonus;

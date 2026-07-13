@@ -74,7 +74,6 @@ namespace CardBattle.Core
                 $"{LogPrefix} Resolve test card '{testCard.DisplayName}'\n" +
                 $"Before={before}\n" +
                 $"After={player.CurrentAp}\n" +
-                $"UsedEffectsPipeline={result.UsedEffectsPipeline}\n" +
                 $"RequestedDraw={result.RequestedDrawCount}");
         }
 

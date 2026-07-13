@@ -1011,25 +1011,7 @@ namespace CardBattle.Core
             if (data == null)
                 return false;
 
-            if (data.HasEffects)
-                return data.TargetMode == CardTargetMode.SingleEnemy;
-
-            return data.CardType == CardType.Attack;
-        }
-
-        /// <summary>Primary target for immediate <see cref="BattleActionRunner.TryPlayCard"/> when not entering target selection.</summary>
-        private EnemyBattleUnit ResolveImmediateDefaultTarget(CardData data)
-        {
-            if (data == null)
-                return null;
-
-            if (data.HasEffects)
-                return null;
-
-            if (data.CardType == CardType.Attack)
-                return GetDefaultAliveEnemy();
-
-            return null;
+            return data.TargetMode == CardTargetMode.SingleEnemy;
         }
 
         private void TryPlayCardFromView(CardInstance card)
@@ -1052,14 +1034,13 @@ namespace CardBattle.Core
                 }
             }
 
-            EnemyBattleUnit target = ResolveImmediateDefaultTarget(card.Data);
-            battleActionRunner.TryPlayCard(card, target);
+            battleActionRunner.TryPlayCard(card, null);
 
             if (verboseLogs)
             {
-                string targetName = target != null ? target.name : "None";
-                string modeNote = card.Data.HasEffects ? $"TargetMode: {card.Data.TargetMode}" : $"CardType: {card.Data.CardType}";
-                Debug.Log($"[HandUI] Clicked {card.Data.DisplayName} | Immediate resolve | {modeNote} | Target: {targetName}");
+                Debug.Log(
+                    $"[HandUI] Clicked {card.Data.DisplayName} | Immediate resolve | " +
+                    $"TargetMode: {card.Data.TargetMode} | Target: None");
             }
         }
 
@@ -1118,21 +1099,6 @@ namespace CardBattle.Core
             DeselectCurrentCard();
             hoveredCardView = null;
             ClearSpawnedCards();
-        }
-
-        private EnemyBattleUnit GetDefaultAliveEnemy()
-        {
-            if (enemyActionSystem == null)
-                return null;
-
-            var enemies = enemyActionSystem.Enemies;
-            for (int i = 0; i < enemies.Count; i++)
-            {
-                if (enemies[i] != null && enemies[i].IsAlive)
-                    return enemies[i];
-            }
-
-            return null;
         }
 
         private void ClearSpawnedCards()
