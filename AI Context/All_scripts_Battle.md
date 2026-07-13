@@ -2815,6 +2815,27 @@ namespace CardBattle.Core
             NotifyApChanged();
         }
 
+        /// <summary>
+        /// Gains AP for card effects. May exceed <see cref="ApPerRound"/>;
+        /// round start still resets to the per-round value.
+        /// </summary>
+        /// <returns>The actual amount gained (0 if blocked or amount is non-positive).</returns>
+        public int GainAp(int amount)
+        {
+            if (amount <= 0 || !IsAlive || _turnCommitted)
+                return 0;
+
+            int before = CurrentAp;
+            long resolved = (long)CurrentAp + amount;
+            CurrentAp = resolved >= int.MaxValue ? int.MaxValue : (int)resolved;
+
+            int gained = CurrentAp - before;
+            if (gained > 0)
+                NotifyApChanged();
+
+            return gained;
+        }
+
         public void CommitEndTurnFromRunner()
         {
             if (!IsAlive || _turnCommitted)
