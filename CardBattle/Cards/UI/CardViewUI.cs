@@ -30,6 +30,10 @@ namespace CardBattle.Core
         [SerializeField] private CanvasGroup canvasGroup;
         [SerializeField] private Button button;
 
+        [Header("Pointer Hit Area")]
+        [Tooltip("Transparent Image on the CardViewUI root. Stays fixed in the fan slot while VisualRoot moves.")]
+        [SerializeField] private Graphic pointerHitTarget;
+
         [Header("Visual Tuning")]
         [SerializeField] private float normalScale = 1f;
         [SerializeField] private float hoveredScale = 1.08f;
@@ -41,6 +45,8 @@ namespace CardBattle.Core
 
         [SerializeField] private float hoveredYOffset = 25f;
         [SerializeField] private float selectedYOffset = 40f;
+        private float hoveredXOffset;
+        private float selectedXOffset;
 
         [SerializeField] private float scaleLerpSpeed = 12f;
         [SerializeField] private float moveLerpSpeed = 12f;
@@ -111,6 +117,61 @@ namespace CardBattle.Core
             _rectTransform = GetComponent<RectTransform>();
             if (_rectTransform != null)
                 targetLayoutAnchoredPos = _rectTransform.anchoredPosition;
+
+            // Keep pointer hits on the fixed fan slot (root). Visual raise/scale must not
+            // expand the raycast area and block adjacent cards in large hands.
+            ConfigureStablePointerHitTarget();
+        }
+
+#if UNITY_EDITOR
+        private void OnValidate()
+        {
+            if (pointerHitTarget == null)
+                pointerHitTarget = GetComponent<Graphic>();
+
+            if (pointerHitTarget == null)
+            {
+                Debug.LogWarning(
+                    "[CardViewUI] Pointer hit target is missing. " +
+                    "Assign a transparent Image on the CardViewUI root.",
+                    this);
+            }
+        }
+#endif
+
+        /// <summary>
+        /// Disables raycasts on VisualRoot graphics and routes hover/click through
+        /// a dedicated root pointerHitTarget that does not move with hover presentation.
+        /// </summary>
+        private void ConfigureStablePointerHitTarget()
+        {
+            if (pointerHitTarget == null)
+                pointerHitTarget = GetComponent<Graphic>();
+
+            if (visualRoot != null)
+            {
+                Graphic[] visualGraphics = visualRoot.GetComponentsInChildren<Graphic>(true);
+                for (int i = 0; i < visualGraphics.Length; i++)
+                {
+                    Graphic graphic = visualGraphics[i];
+                    if (graphic != null && graphic != pointerHitTarget)
+                        graphic.raycastTarget = false;
+                }
+            }
+
+            if (pointerHitTarget == null)
+            {
+                Debug.LogError(
+                    "[CardViewUI] Pointer hit target is missing. " +
+                    "Assign a transparent Image on the CardViewUI root.",
+                    this);
+                return;
+            }
+
+            pointerHitTarget.raycastTarget = true;
+
+            if (button != null)
+                button.targetGraphic = pointerHitTarget;
         }
 
         private void OnDisable()
@@ -367,6 +428,27 @@ namespace CardBattle.Core
             ApplyStateVisuals();
         }
 
+        /// <summary>
+        /// Applies hand-level hover/selected presentation tuning without recreating the view.
+        /// X offsets move VisualRoot only — the root pointer hit area stays fixed.
+        /// </summary>
+        public void ApplyHandPresentationTuning(
+            float hoverRaiseY,
+            float hoverScaleMul,
+            float selectedRaiseY,
+            float selectedScaleMul,
+            float hoverOffsetX = 0f,
+            float selectedOffsetX = 0f)
+        {
+            hoveredYOffset = Mathf.Max(0f, hoverRaiseY);
+            hoveredScale = Mathf.Max(1f, hoverScaleMul);
+            selectedYOffset = Mathf.Max(0f, selectedRaiseY);
+            selectedScale = Mathf.Max(1f, selectedScaleMul);
+            hoveredXOffset = hoverOffsetX;
+            selectedXOffset = selectedOffsetX;
+            ApplyStateVisuals();
+        }
+
         private void ApplyStateVisuals()
         {
             if (visualRoot == null)
@@ -384,13 +466,19 @@ namespace CardBattle.Core
 
                 case CardVisualState.Hovered:
                     targetScale = baseScale * hoveredScale;
-                    targetLocalPosition = baseLocalPosition + new Vector3(0f, hoveredYOffset, 0f);
+                    targetLocalPosition = baseLocalPosition + new Vector3(
+                        hoveredXOffset,
+                        hoveredYOffset,
+                        0f);
                     SetAlpha(normalAlpha);
                     break;
 
                 case CardVisualState.Selected:
                     targetScale = baseScale * selectedScale;
-                    targetLocalPosition = baseLocalPosition + new Vector3(0f, selectedYOffset, 0f);
+                    targetLocalPosition = baseLocalPosition + new Vector3(
+                        selectedXOffset,
+                        selectedYOffset,
+                        0f);
                     SetAlpha(normalAlpha);
                     break;
 

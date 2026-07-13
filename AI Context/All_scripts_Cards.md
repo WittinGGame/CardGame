@@ -2025,6 +2025,607 @@ namespace CardBattle.Core
 }
 ```
 
+## FILE: CardTypeBadgeSet.cs
+**Path:** `Assets/Scripts/CardBattle/Cards/UI/CardTypeBadgeSet.cs`
+```csharp
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    [CreateAssetMenu(fileName = "CardTypeBadgeSet", menuName = "Card Battle/Visuals/Card Type Badge Set")]
+    public class CardTypeBadgeSet : ScriptableObject
+    {
+        [Header("Card Type Badges")]
+        [SerializeField] private Sprite attackBadge;
+        [SerializeField] private Sprite defendBadge;
+        [SerializeField] private Sprite healBadge;
+        [SerializeField] private Sprite buffBadge;
+
+        public Sprite GetBadge(CardType type)
+        {
+            switch (type)
+            {
+                case CardType.Attack:
+                    return attackBadge;
+
+                case CardType.Defend:
+                    return defendBadge;
+
+                case CardType.Heal:
+                    return healBadge;
+
+                case CardType.Buff:
+                    return buffBadge;
+
+                default:
+                    return null;
+            }
+        }
+    }
+}
+```
+
+## FILE: CardViewUI.cs
+**Path:** `Assets/Scripts/CardBattle/Cards/UI/CardViewUI.cs`
+```csharp
+using System.Collections;
+using TMPro;
+using UnityEngine;
+using UnityEngine.UI;
+using UnityEngine.EventSystems;
+
+namespace CardBattle.Core
+{
+    public class CardViewUI : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler
+    {
+        public enum CardVisualState
+        {
+            Normal,
+            Hovered,
+            Selected,
+            Disabled
+        }
+
+        [Header("UI References")]
+        [SerializeField] private Image artworkImage;
+        [SerializeField] private TextMeshProUGUI costText;
+        [SerializeField] private TextMeshProUGUI nameText;
+        [SerializeField] private Image typeBadgeImage;
+        [SerializeField] private CardTypeBadgeSet typeBadgeSet;
+        [SerializeField] private TextMeshProUGUI descriptionText;
+
+        [Header("Core References")]
+        [SerializeField] private RectTransform visualRoot;
+        [SerializeField] private RectTransform guideStartAnchor;
+        [SerializeField] private CanvasGroup canvasGroup;
+        [SerializeField] private Button button;
+
+        [Header("Pointer Hit Area")]
+        [Tooltip("Transparent Image on the CardViewUI root. Stays fixed in the fan slot while VisualRoot moves.")]
+        [SerializeField] private Graphic pointerHitTarget;
+
+        [Header("Visual Tuning")]
+        [SerializeField] private float normalScale = 1f;
+        [SerializeField] private float hoveredScale = 1.08f;
+        [SerializeField] private float selectedScale = 1.14f;
+        [SerializeField] private float disabledScale = 0.96f;
+
+        [SerializeField] private float normalAlpha = 1f;
+        [SerializeField] private float disabledAlpha = 0.5f;
+
+        [SerializeField] private float hoveredYOffset = 25f;
+        [SerializeField] private float selectedYOffset = 40f;
+        private float hoveredXOffset;
+        private float selectedXOffset;
+
+        [SerializeField] private float scaleLerpSpeed = 12f;
+        [SerializeField] private float moveLerpSpeed = 12f;
+        [SerializeField] private float layoutLerpSpeed = 12f;
+        [SerializeField] private float rotationLerpSpeed = 14f;
+
+        [Header("Deal-In Presentation")]
+        [SerializeField] private bool useDealFadeIn = true;
+        [SerializeField] private float dealSpawnAlpha = 0f;
+        [SerializeField] private float dealFadeDuration = 0.12f;
+
+        private CardInstance boundCard;
+        private CardVisualState currentState = CardVisualState.Normal;
+
+        private RectTransform _rectTransform;
+        private Vector2 targetLayoutAnchoredPos;
+        private float _layoutRotationZ;
+        private float targetRotationZ;
+
+        private Vector3 baseScale = Vector3.one;
+        private Vector3 targetScale = Vector3.one;
+
+        private Vector3 baseLocalPosition = Vector3.zero;
+        private Vector3 targetLocalPosition = Vector3.zero;
+
+        private bool isInteractable = true;
+        private bool isSelected = false;
+        private bool isPointerOver;
+        private bool layoutMovementBlocked;
+        private bool pendingDealFadeIn;
+        private Coroutine dealFadeRoutine;
+
+        public CardInstance BoundCard => boundCard;
+        /// <summary>Root layout rect (anchored fan position). Used by presentation VFX.</summary>
+        public RectTransform LayoutRect => _rectTransform;
+        public RectTransform GuideStartAnchor => guideStartAnchor;
+        public bool IsSelected => isSelected;
+        public bool IsInteractable => isInteractable;
+        public bool IsPointerOver => isPointerOver;
+        public bool IsDealPresentationPending => layoutMovementBlocked || pendingDealFadeIn || dealFadeRoutine != null;
+
+        public event System.Action<CardViewUI> OnHoverStarted;
+        public event System.Action<CardViewUI> OnHoverEnded;
+
+        private void Awake()
+        {
+            if (visualRoot == null)
+                visualRoot = transform.Find("VisualRoot") as RectTransform;
+
+            if (canvasGroup == null)
+                canvasGroup = GetComponent<CanvasGroup>();
+
+            if (button == null)
+                button = GetComponent<Button>();
+
+            if (visualRoot != null)
+            {
+                baseScale = visualRoot.localScale;
+                targetScale = baseScale * normalScale;
+
+                baseLocalPosition = visualRoot.localPosition;
+                targetLocalPosition = baseLocalPosition;
+
+                targetRotationZ = visualRoot.localEulerAngles.z;
+                _layoutRotationZ = targetRotationZ;
+            }
+
+            _rectTransform = GetComponent<RectTransform>();
+            if (_rectTransform != null)
+                targetLayoutAnchoredPos = _rectTransform.anchoredPosition;
+
+            // Keep pointer hits on the fixed fan slot (root). Visual raise/scale must not
+            // expand the raycast area and block adjacent cards in large hands.
+            ConfigureStablePointerHitTarget();
+        }
+
+#if UNITY_EDITOR
+        private void OnValidate()
+        {
+            if (pointerHitTarget == null)
+                pointerHitTarget = GetComponent<Graphic>();
+
+            if (pointerHitTarget == null)
+            {
+                Debug.LogWarning(
+                    "[CardViewUI] Pointer hit target is missing. " +
+                    "Assign a transparent Image on the CardViewUI root.",
+                    this);
+            }
+        }
+#endif
+
+        /// <summary>
+        /// Disables raycasts on VisualRoot graphics and routes hover/click through
+        /// a dedicated root pointerHitTarget that does not move with hover presentation.
+        /// </summary>
+        private void ConfigureStablePointerHitTarget()
+        {
+            if (pointerHitTarget == null)
+                pointerHitTarget = GetComponent<Graphic>();
+
+            if (visualRoot != null)
+            {
+                Graphic[] visualGraphics = visualRoot.GetComponentsInChildren<Graphic>(true);
+                for (int i = 0; i < visualGraphics.Length; i++)
+                {
+                    Graphic graphic = visualGraphics[i];
+                    if (graphic != null && graphic != pointerHitTarget)
+                        graphic.raycastTarget = false;
+                }
+            }
+
+            if (pointerHitTarget == null)
+            {
+                Debug.LogError(
+                    "[CardViewUI] Pointer hit target is missing. " +
+                    "Assign a transparent Image on the CardViewUI root.",
+                    this);
+                return;
+            }
+
+            pointerHitTarget.raycastTarget = true;
+
+            if (button != null)
+                button.targetGraphic = pointerHitTarget;
+        }
+
+        private void OnDisable()
+        {
+            StopDealFadeRoutine();
+        }
+
+        /// <summary>Tuning from <see cref="HandUIController"/> so hand and card share one layout motion speed.</summary>
+        public void SetLayoutLerpSpeed(float speed)
+        {
+            layoutLerpSpeed = Mathf.Max(0f, speed);
+        }
+
+        /// <summary>Targets root layout position and idle fan rotation; motion is smoothed in <see cref="Update"/>.</summary>
+        public void SetLayoutPose(Vector2 anchoredPos, float rotationZ)
+        {
+            targetLayoutAnchoredPos = anchoredPos;
+            _layoutRotationZ = rotationZ;
+            SyncRotationTargetToState();
+        }
+
+        /// <summary>
+        /// Sets an immediate spawn pose before the normal layout lerp pulls this card toward its target slot.
+        /// </summary>
+        public void PrepareForDealIn(Vector2 startAnchoredPos, float startRotationZ, float startScale)
+        {
+            if (_rectTransform == null)
+                _rectTransform = GetComponent<RectTransform>();
+
+            if (_rectTransform != null)
+                _rectTransform.anchoredPosition = startAnchoredPos;
+
+            if (visualRoot != null)
+            {
+                float clampedScale = Mathf.Max(0.01f, startScale);
+                visualRoot.localScale = baseScale * clampedScale;
+                visualRoot.localEulerAngles = new Vector3(0f, 0f, startRotationZ);
+            }
+
+            StopDealFadeRoutine();
+            pendingDealFadeIn = useDealFadeIn && canvasGroup != null;
+            if (pendingDealFadeIn && canvasGroup != null)
+                canvasGroup.alpha = Mathf.Clamp01(dealSpawnAlpha);
+        }
+
+        public void SetLayoutMovementBlocked(bool value)
+        {
+            bool wasBlocked = layoutMovementBlocked;
+            layoutMovementBlocked = value;
+
+            if (layoutMovementBlocked)
+            {
+                StopDealFadeRoutine();
+                return;
+            }
+
+            if (wasBlocked && pendingDealFadeIn)
+                StartDealFadeIn();
+        }
+
+        public void ForceCompleteDealPresentation()
+        {
+            layoutMovementBlocked = false;
+            pendingDealFadeIn = false;
+
+            StopDealFadeRoutine();
+
+            if (canvasGroup != null)
+                canvasGroup.alpha = ResolveTargetAlphaForCurrentState();
+
+            if (visualRoot != null)
+            {
+                visualRoot.localScale = targetScale;
+                visualRoot.localPosition = targetLocalPosition;
+                visualRoot.localEulerAngles = new Vector3(0f, 0f, targetRotationZ);
+            }
+        }
+
+        private void SyncRotationTargetToState()
+        {
+            if (currentState == CardVisualState.Hovered || currentState == CardVisualState.Selected)
+                targetRotationZ = 0f;
+            else
+                targetRotationZ = _layoutRotationZ;
+        }
+
+        private void Update()
+        {
+            if (_rectTransform == null)
+                _rectTransform = GetComponent<RectTransform>();
+
+            if (_rectTransform != null)
+            {
+                if (!layoutMovementBlocked)
+                {
+                    _rectTransform.anchoredPosition = Vector2.Lerp(
+                        _rectTransform.anchoredPosition,
+                        targetLayoutAnchoredPos,
+                        Time.deltaTime * layoutLerpSpeed
+                    );
+                }
+            }
+
+            if (visualRoot == null)
+                return;
+
+            visualRoot.localScale = Vector3.Lerp(
+                visualRoot.localScale,
+                targetScale,
+                Time.deltaTime * scaleLerpSpeed
+            );
+
+            visualRoot.localPosition = Vector3.Lerp(
+                visualRoot.localPosition,
+                targetLocalPosition,
+                Time.deltaTime * moveLerpSpeed
+            );
+
+            float currentZ = visualRoot.localEulerAngles.z;
+            float newZ = Mathf.LerpAngle(currentZ, targetRotationZ, Time.deltaTime * rotationLerpSpeed);
+            visualRoot.localEulerAngles = new Vector3(0f, 0f, newZ);
+        }
+
+        public void Bind(CardInstance card)
+        {
+            boundCard = card;
+
+            if (card?.Data == null)
+                return;
+
+            var data = card.Data;
+
+            if (costText != null)
+                costText.text = data.ApCost.ToString();
+
+            if (nameText != null)
+                nameText.text = data.DisplayName;
+
+            if (typeBadgeImage != null)
+            {
+                Sprite badge = typeBadgeSet != null ? typeBadgeSet.GetBadge(data.CardType) : null;
+
+                typeBadgeImage.sprite = badge;
+                typeBadgeImage.enabled = badge != null;
+            }
+
+            if (artworkImage != null)
+                artworkImage.sprite = data.Artwork;
+
+            if (descriptionText != null)
+                descriptionText.text = CardDescriptionBuilder.Build(data);
+
+            ApplyStateVisuals();
+        }
+
+        /// <summary>Artwork sprite for flying ghost VFX (presentation only).</summary>
+        public Sprite GetArtworkSnapshotForVfx()
+        {
+            return artworkImage != null ? artworkImage.sprite : null;
+        }
+
+        public void SetInteractable(bool value)
+        {
+            isInteractable = value;
+
+            if (button != null)
+                button.interactable = value;
+
+            if (!isInteractable)
+            {
+                isSelected = false;
+                currentState = CardVisualState.Disabled;
+            }
+            else
+            {
+                currentState = isSelected
+                    ? CardVisualState.Selected
+                    : (isPointerOver ? CardVisualState.Hovered : CardVisualState.Normal);
+            }
+
+            ApplyStateVisuals();
+        }
+
+        public void SetClickAction(UnityEngine.Events.UnityAction action)
+        {
+            if (button == null)
+                return;
+
+            button.onClick.RemoveAllListeners();
+
+            if (action != null)
+            {
+                button.onClick.AddListener(() =>
+                {
+                    Select();
+                    action.Invoke();
+                });
+            }
+        }
+
+        public void Select()
+        {
+            if (!isInteractable)
+                return;
+
+            isSelected = true;
+            currentState = CardVisualState.Selected;
+            ApplyStateVisuals();
+        }
+
+        public void Deselect()
+        {
+            isSelected = false;
+
+            if (!isInteractable)
+                currentState = CardVisualState.Disabled;
+            else if (isPointerOver)
+            {
+                currentState = CardVisualState.Hovered;
+                OnHoverStarted?.Invoke(this);
+            }
+            else
+                currentState = CardVisualState.Normal;
+
+            ApplyStateVisuals();
+        }
+
+        public void OnPointerEnter(PointerEventData eventData)
+        {
+            isPointerOver = true;
+
+            if (!isInteractable || isSelected)
+                return;
+
+            OnHoverStarted?.Invoke(this);
+
+            currentState = CardVisualState.Hovered;
+            ApplyStateVisuals();
+        }
+
+        public void OnPointerExit(PointerEventData eventData)
+        {
+            isPointerOver = false;
+
+            if (!isInteractable)
+                return;
+
+            if (isSelected)
+                return;
+
+            OnHoverEnded?.Invoke(this);
+
+            currentState = CardVisualState.Normal;
+            ApplyStateVisuals();
+        }
+
+        /// <summary>
+        /// Applies hand-level hover/selected presentation tuning without recreating the view.
+        /// X offsets move VisualRoot only — the root pointer hit area stays fixed.
+        /// </summary>
+        public void ApplyHandPresentationTuning(
+            float hoverRaiseY,
+            float hoverScaleMul,
+            float selectedRaiseY,
+            float selectedScaleMul,
+            float hoverOffsetX = 0f,
+            float selectedOffsetX = 0f)
+        {
+            hoveredYOffset = Mathf.Max(0f, hoverRaiseY);
+            hoveredScale = Mathf.Max(1f, hoverScaleMul);
+            selectedYOffset = Mathf.Max(0f, selectedRaiseY);
+            selectedScale = Mathf.Max(1f, selectedScaleMul);
+            hoveredXOffset = hoverOffsetX;
+            selectedXOffset = selectedOffsetX;
+            ApplyStateVisuals();
+        }
+
+        private void ApplyStateVisuals()
+        {
+            if (visualRoot == null)
+                return;
+
+            SyncRotationTargetToState();
+
+            switch (currentState)
+            {
+                case CardVisualState.Normal:
+                    targetScale = baseScale * normalScale;
+                    targetLocalPosition = baseLocalPosition;
+                    SetAlpha(normalAlpha);
+                    break;
+
+                case CardVisualState.Hovered:
+                    targetScale = baseScale * hoveredScale;
+                    targetLocalPosition = baseLocalPosition + new Vector3(
+                        hoveredXOffset,
+                        hoveredYOffset,
+                        0f);
+                    SetAlpha(normalAlpha);
+                    break;
+
+                case CardVisualState.Selected:
+                    targetScale = baseScale * selectedScale;
+                    targetLocalPosition = baseLocalPosition + new Vector3(
+                        selectedXOffset,
+                        selectedYOffset,
+                        0f);
+                    SetAlpha(normalAlpha);
+                    break;
+
+                case CardVisualState.Disabled:
+                    targetScale = baseScale * disabledScale;
+                    targetLocalPosition = baseLocalPosition;
+                    SetAlpha(disabledAlpha);
+                    break;
+            }
+        }
+
+        private void SetAlpha(float value)
+        {
+            if (canvasGroup != null)
+            {
+                if (layoutMovementBlocked && pendingDealFadeIn)
+                    canvasGroup.alpha = Mathf.Min(Mathf.Clamp01(value), Mathf.Clamp01(dealSpawnAlpha));
+                else
+                    canvasGroup.alpha = value;
+            }
+        }
+
+        private void StartDealFadeIn()
+        {
+            if (canvasGroup == null)
+            {
+                pendingDealFadeIn = false;
+                return;
+            }
+
+            StopDealFadeRoutine();
+            dealFadeRoutine = StartCoroutine(CoDealFadeIn(ResolveDealFadeTargetAlpha()));
+        }
+
+        private IEnumerator CoDealFadeIn(float targetAlpha)
+        {
+            float duration = Mathf.Max(0.01f, dealFadeDuration);
+            float elapsed = 0f;
+            float startAlpha = canvasGroup.alpha;
+            float endAlpha = Mathf.Clamp01(targetAlpha);
+
+            while (elapsed < duration)
+            {
+                elapsed += Time.deltaTime;
+                float t = Mathf.Clamp01(elapsed / duration);
+                canvasGroup.alpha = Mathf.Lerp(startAlpha, endAlpha, t);
+                yield return null;
+            }
+
+            canvasGroup.alpha = endAlpha;
+            pendingDealFadeIn = false;
+            dealFadeRoutine = null;
+        }
+
+        private float ResolveTargetAlphaForCurrentState()
+        {
+            return currentState == CardVisualState.Disabled ? disabledAlpha : normalAlpha;
+        }
+
+        private float ResolveDealFadeTargetAlpha()
+        {
+            return normalAlpha;
+        }
+
+        private void StopDealFadeRoutine()
+        {
+            if (dealFadeRoutine != null)
+            {
+                StopCoroutine(dealFadeRoutine);
+                dealFadeRoutine = null;
+            }
+        }
+
+    }
+}
+```
+
 ## FILE: HandUIController.cs
 **Path:** `Assets/Scripts/CardBattle/Cards/UI/HandUIController.cs`
 ```csharp
@@ -2064,7 +2665,7 @@ namespace CardBattle.Core
         [Header("Responsive Card Size")]
         [SerializeField] private Vector2 baseCardSize = new Vector2(200f, 300f);
         [SerializeField] private float maxCardScale = 1.1f; // 200 -> 220
-        [SerializeField] private float minCardScale = 0.8f; // 200 -> 160
+        [SerializeField] private float minCardScale = 0.9f;
         [SerializeField] private int maxScaleCardCount = 5;
         [SerializeField] private int minScaleCardCount = 10;
         [SerializeField] private bool scaleSpacingWithCard = true;
@@ -2073,13 +2674,75 @@ namespace CardBattle.Core
         [SerializeField] private float spacing = 135f;
         [SerializeField] private float curveHeight = 14f;
         [SerializeField] private float rotationStep = 6f;
-        [SerializeField] private float hoverGap = 90f;
+        [SerializeField] private float hoverGap = 60f;
         [SerializeField] private float layoutLerpSpeed = 12f;
+
+        [Header("Adaptive Fan Layout")]
+        [SerializeField] private bool useAdaptiveFanLayout = true;
+        [SerializeField] private float maxHandWidth = 1080f;
+        [SerializeField] private float minimumSpacing = 90f;
+        [SerializeField] private float maximumSpacing = 145f;
+        [SerializeField] private float maxEdgeRotation = 8f;
+        [SerializeField] private float maxEdgeDrop = 30f;
+        [SerializeField] private float largeHandRaise = 55f;
+        [SerializeField] private int largeHandStartCount = 8;
+
+        [Header("Fixed Size Fan Layout")]
+        [SerializeField] private bool useFixedSizeAdaptiveFan = true;
+        [SerializeField] private float fixedCardScale = 1f;
+        [SerializeField] private float preferredCenterSpacing = 140f;
+        [SerializeField] private float minimumCenterSpacing = 80f;
+        [SerializeField] private float hoverRaise = 150f;
+        [SerializeField] private float hoverScale = 1.08f;
+
+        [Header("Fan Strength By Hand Count")]
+        [SerializeField] private bool useCustomFanStrengthByCount = true;
+        [Tooltip("Index = card count. Values may exceed 1.0 (e.g. 1.12 = 112% of max edge drop/rotation).")]
+        [SerializeField] private float[] fanStrengthByCardCount =
+        {
+            0f,    // 0
+            0f,    // 1
+            0.15f, // 2
+            0.35f, // 3
+            0.65f, // 4
+            1.00f, // 5 baseline
+            1.02f, // 6
+            1.05f, // 7
+            1.08f, // 8
+            1.10f, // 9
+            1.12f  // 10
+        };
+
+        [Header("Large Hand Hover")]
+        [SerializeField] private int largeHandHoverStartCount = 8;
+        [SerializeField] private float largeHandHoverGap = 85f;
+        [SerializeField] private float largeHandHoverRaise = 175f;
+        [SerializeField] private float largeHandHoverScale = 1.10f;
+        [SerializeField] private float neighborPushFalloff = 0.55f;
+        [SerializeField] private bool keepHoveredCardOnTop = true;
+        [SerializeField] private float edgeHoverInwardOffset = 30f;
 
         private readonly List<CardViewUI> spawnedCards = new List<CardViewUI>();
         private CardViewUI selectedView;
         private CardViewUI hoveredCardView;
         private Coroutine dealRoutine;
+
+        private int lastLoggedLayoutCount = -1;
+        private float lastLoggedCardScale;
+        private float lastLoggedCardWidth;
+        private float lastLoggedPreferredSpacing;
+        private float lastLoggedFitSpacing;
+        private float lastLoggedSpacing;
+        private float lastLoggedTotalSpan;
+        private float lastLoggedTotalWidth;
+        private float lastLoggedEdgeDrop;
+        private float lastLoggedHandRaise;
+        private float lastLoggedEdgeRotation;
+        private float lastLoggedFanStrength;
+        private float lastLoggedHoverGap;
+        private float lastLoggedHoverRaise;
+        private float lastLoggedHoverScale;
+        private int lastLoggedHoveredIndex = -1;
 
         private void OnEnable()
         {
@@ -2124,6 +2787,128 @@ namespace CardBattle.Core
         {
             float t = Mathf.InverseLerp(maxScaleCardCount, minScaleCardCount, count);
             return Mathf.Lerp(maxCardScale, minCardScale, t);
+        }
+
+#if UNITY_EDITOR
+        private void OnValidate()
+        {
+            maxHandWidth = Mathf.Max(1f, maxHandWidth);
+            minimumSpacing = Mathf.Max(0.01f, minimumSpacing);
+            maximumSpacing = Mathf.Max(minimumSpacing, maximumSpacing);
+            maxEdgeRotation = Mathf.Max(0f, maxEdgeRotation);
+            maxEdgeDrop = Mathf.Max(0f, maxEdgeDrop);
+            largeHandRaise = Mathf.Max(0f, largeHandRaise);
+            largeHandStartCount = Mathf.Max(2, largeHandStartCount);
+            minCardScale = Mathf.Max(0.01f, minCardScale);
+            maxCardScale = Mathf.Max(minCardScale, maxCardScale);
+            spacing = Mathf.Max(0.01f, spacing);
+            hoverGap = Mathf.Max(0f, hoverGap);
+            curveHeight = Mathf.Max(0f, curveHeight);
+            layoutLerpSpeed = Mathf.Max(0f, layoutLerpSpeed);
+
+            fixedCardScale = Mathf.Max(0.01f, fixedCardScale);
+            preferredCenterSpacing = Mathf.Max(0.01f, preferredCenterSpacing);
+            minimumCenterSpacing = Mathf.Max(0.01f, minimumCenterSpacing);
+            if (minimumCenterSpacing > preferredCenterSpacing)
+                minimumCenterSpacing = preferredCenterSpacing;
+            hoverRaise = Mathf.Max(0f, hoverRaise);
+            hoverScale = Mathf.Max(1f, hoverScale);
+
+            largeHandHoverStartCount = Mathf.Max(2, largeHandHoverStartCount);
+            largeHandHoverGap = Mathf.Max(hoverGap, largeHandHoverGap);
+            largeHandHoverRaise = Mathf.Max(hoverRaise, largeHandHoverRaise);
+            largeHandHoverScale = Mathf.Max(hoverScale, largeHandHoverScale);
+            neighborPushFalloff = Mathf.Clamp01(neighborPushFalloff);
+            edgeHoverInwardOffset = Mathf.Max(0f, edgeHoverInwardOffset);
+
+            EnsureFanStrengthArraySize();
+            if (fanStrengthByCardCount != null)
+            {
+                for (int i = 0; i < fanStrengthByCardCount.Length; i++)
+                    fanStrengthByCardCount[i] = Mathf.Max(0f, fanStrengthByCardCount[i]);
+            }
+        }
+#endif
+
+        private void EnsureFanStrengthArraySize()
+        {
+            const int needed = 11; // indices 0..10
+            if (fanStrengthByCardCount != null && fanStrengthByCardCount.Length >= needed)
+                return;
+
+            float[] defaults =
+            {
+                0f, 0f, 0.15f, 0.35f, 0.65f, 1.00f, 1.02f, 1.05f, 1.08f, 1.10f, 1.12f
+            };
+
+            if (fanStrengthByCardCount == null || fanStrengthByCardCount.Length == 0)
+            {
+                fanStrengthByCardCount = defaults;
+                return;
+            }
+
+            var expanded = new float[needed];
+            for (int i = 0; i < needed; i++)
+            {
+                if (i < fanStrengthByCardCount.Length)
+                    expanded[i] = Mathf.Max(0f, fanStrengthByCardCount[i]);
+                else
+                    expanded[i] = defaults[i];
+            }
+
+            fanStrengthByCardCount = expanded;
+        }
+
+        [ContextMenu("Debug/Print Adaptive Hand Layout")]
+        private void DebugPrintAdaptiveHandLayout()
+        {
+            if (spawnedCards.Count == 0)
+            {
+                Debug.Log("[AdaptiveHandLayout] No cards in hand.");
+                return;
+            }
+
+            LayoutCards();
+            LogAdaptiveHandLayout(force: true);
+        }
+
+        [ContextMenu("Debug/Print Fixed Fan Layout")]
+        private void DebugPrintFixedFanLayout()
+        {
+            if (spawnedCards.Count == 0)
+            {
+                Debug.Log("[FixedFanLayout] No cards in hand.");
+                return;
+            }
+
+            LayoutCards();
+            LogFixedFanLayout(force: true);
+        }
+
+        [ContextMenu("Debug/Print Fan Strength")]
+        private void DebugPrintFanStrength()
+        {
+            if (spawnedCards.Count == 0)
+            {
+                Debug.Log("[FanStrength] No cards in hand.");
+                return;
+            }
+
+            LayoutCards();
+            LogFanStrength(force: true);
+        }
+
+        [ContextMenu("Debug/Print Current Fan And Hover Settings")]
+        private void DebugPrintCurrentFanAndHoverSettings()
+        {
+            if (spawnedCards.Count == 0)
+            {
+                Debug.Log("[HandPresentation] No cards in hand.");
+                return;
+            }
+
+            LayoutCards();
+            LogHandPresentation(force: true);
         }
 
         [ContextMenu("Refresh Hand UI")]
@@ -2315,6 +3100,8 @@ namespace CardBattle.Core
 
             view.Bind(card);
             view.SetLayoutLerpSpeed(layoutLerpSpeed);
+            if (useFixedSizeAdaptiveFan)
+                ApplyFixedSizePresentationTuning(view, hoverRaise, hoverScale, 0f);
             SetupCardView(view, card);
 
             view.OnHoverStarted += HandleCardHoverStarted;
@@ -2379,15 +3166,16 @@ namespace CardBattle.Core
 
         private CardViewUI GetFocusedCardView()
         {
+            // Selected > Hovered > Normal
+            if (selectedView != null && spawnedCards.Contains(selectedView))
+                return selectedView;
+
             if (hoveredCardView != null &&
                 spawnedCards.Contains(hoveredCardView) &&
                 hoveredCardView.IsPointerOver)
             {
                 return hoveredCardView;
             }
-
-            if (selectedView != null && spawnedCards.Contains(selectedView))
-                return selectedView;
 
             return null;
         }
@@ -2405,8 +3193,19 @@ namespace CardBattle.Core
             if (container == null || spawnedCards.Count == 0)
                 return;
 
-            int count = spawnedCards.Count;
+            if (useFixedSizeAdaptiveFan)
+                LayoutCardsFixedSize();
+            else if (useAdaptiveFanLayout)
+                LayoutCardsAdaptive();
+            else
+                LayoutCardsLegacy();
 
+            UpdateHandSiblingOrder();
+        }
+
+        private void LayoutCardsLegacy()
+        {
+            int count = spawnedCards.Count;
             float cardScale = GetResponsiveCardScale(count);
 
             float resolvedSpacing = scaleSpacingWithCard ? spacing * cardScale : spacing;
@@ -2443,9 +3242,370 @@ namespace CardBattle.Core
                 }
 
                 float rotZ = -relative * rotationStep;
-
                 view.SetLayoutPose(new Vector2(x, y), rotZ);
             }
+        }
+
+        private void LayoutCardsFixedSize()
+        {
+            int count = spawnedCards.Count;
+            float cardScale = Mathf.Max(0.01f, fixedCardScale);
+            float cardWidth = ResolveFixedCardWidth(cardScale);
+
+            float preferredSpacing = Mathf.Max(0.01f, preferredCenterSpacing);
+            float fitSpacing = count > 1
+                ? Mathf.Max(0f, (maxHandWidth - cardWidth) / (count - 1))
+                : preferredSpacing;
+
+            // Small hands keep preferred spacing and stay grouped (do not stretch to maxHandWidth).
+            // Large hands compress only as far as needed to fit.
+            float resolvedSpacing = count <= 1
+                ? 0f
+                : Mathf.Min(preferredSpacing, fitSpacing);
+
+            if (fitSpacing >= minimumCenterSpacing)
+                resolvedSpacing = Mathf.Max(minimumCenterSpacing, resolvedSpacing);
+
+            resolvedSpacing = Mathf.Max(0f, resolvedSpacing);
+
+            int maxHandSize = deckController != null ? Mathf.Max(5, deckController.MaxHandSize) : 10;
+            float largeHandT = Mathf.InverseLerp(largeHandHoverStartCount, maxHandSize, count);
+            float resolvedHoverGap = Mathf.Lerp(hoverGap, largeHandHoverGap, largeHandT);
+            float resolvedHoverRaise = Mathf.Lerp(hoverRaise, largeHandHoverRaise, largeHandT);
+            float resolvedHoverScale = Mathf.Lerp(hoverScale, largeHandHoverScale, largeHandT);
+
+            float centerIndex = count > 1 ? (count - 1) * 0.5f : 0f;
+            int focusedIndex = GetFocusedCardIndex();
+
+            float fanStrength = GetFanStrength(count);
+            float resolvedEdgeDrop = maxEdgeDrop * fanStrength;
+            float resolvedEdgeRotation = maxEdgeRotation * fanStrength;
+
+            float totalSpan = count > 1 ? resolvedSpacing * (count - 1) : 0f;
+            float totalWidth = cardWidth + totalSpan;
+
+            lastLoggedCardScale = cardScale;
+            lastLoggedCardWidth = cardWidth;
+            lastLoggedPreferredSpacing = preferredSpacing;
+            lastLoggedFitSpacing = fitSpacing;
+            lastLoggedSpacing = resolvedSpacing;
+            lastLoggedTotalSpan = totalSpan;
+            lastLoggedTotalWidth = totalWidth;
+            lastLoggedEdgeDrop = resolvedEdgeDrop;
+            lastLoggedHandRaise = 0f;
+            lastLoggedEdgeRotation = resolvedEdgeRotation;
+            lastLoggedFanStrength = fanStrength;
+            lastLoggedHoverGap = resolvedHoverGap;
+            lastLoggedHoverRaise = resolvedHoverRaise;
+            lastLoggedHoverScale = resolvedHoverScale;
+            lastLoggedHoveredIndex = focusedIndex;
+
+            for (int i = 0; i < count; i++)
+            {
+                var view = spawnedCards[i];
+                if (view == null)
+                    continue;
+
+                float edgeHoverOffsetX = 0f;
+                if (focusedIndex >= 0 &&
+                    i == focusedIndex &&
+                    count > 1 &&
+                    edgeHoverInwardOffset > 0f)
+                {
+                    if (i == 0)
+                        edgeHoverOffsetX = edgeHoverInwardOffset;
+                    else if (i == count - 1)
+                        edgeHoverOffsetX = -edgeHoverInwardOffset;
+                }
+
+                // Edge inward correction moves VisualRoot only — root hit slot stays fixed.
+                ApplyFixedSizePresentationTuning(
+                    view,
+                    resolvedHoverRaise,
+                    resolvedHoverScale,
+                    edgeHoverOffsetX);
+
+                var rt = view.LayoutRect;
+                if (rt != null)
+                {
+                    rt.sizeDelta = baseCardSize;
+                    rt.localScale = Vector3.one * cardScale;
+                }
+
+                float relative = i - centerIndex;
+                float normalized = centerIndex > 0f ? relative / centerIndex : 0f;
+                float edgeFactor = normalized * normalized;
+
+                float x = relative * resolvedSpacing;
+                float y = -edgeFactor * resolvedEdgeDrop;
+
+                if (focusedIndex >= 0 && i != focusedIndex)
+                {
+                    int distance = Mathf.Abs(i - focusedIndex);
+                    float distanceMultiplier = distance <= 1
+                        ? 1f
+                        : Mathf.Pow(neighborPushFalloff, distance - 1);
+                    float push = resolvedHoverGap * 0.5f * distanceMultiplier;
+
+                    if (i < focusedIndex)
+                        x -= push;
+                    else
+                        x += push;
+                }
+
+                float rotZ = -normalized * resolvedEdgeRotation;
+                view.SetLayoutPose(new Vector2(x, y), rotZ);
+            }
+
+            if (verboseLogs && count != lastLoggedLayoutCount)
+                LogFixedFanLayout(force: false);
+
+            lastLoggedLayoutCount = count;
+        }
+
+        private float GetFanStrength(int cardCount)
+        {
+            if (!useCustomFanStrengthByCount)
+                return 1f;
+
+            if (cardCount <= 0)
+                return 0f;
+
+            if (fanStrengthByCardCount == null || fanStrengthByCardCount.Length == 0)
+                return 1f;
+
+            int index = Mathf.Clamp(cardCount, 0, fanStrengthByCardCount.Length - 1);
+            return Mathf.Max(0f, fanStrengthByCardCount[index]);
+        }
+
+        private float ResolveFixedCardWidth(float cardScale)
+        {
+            float width = baseCardSize.x;
+
+            for (int i = 0; i < spawnedCards.Count; i++)
+            {
+                var view = spawnedCards[i];
+                var rt = view != null ? view.LayoutRect : null;
+                if (rt == null)
+                    continue;
+
+                float rectWidth = rt.rect.width;
+                if (rectWidth > 1f)
+                {
+                    width = rectWidth;
+                    break;
+                }
+
+                if (rt.sizeDelta.x > 1f)
+                {
+                    width = rt.sizeDelta.x;
+                    break;
+                }
+            }
+
+            if (width <= 1f && cardViewPrefab != null)
+            {
+                var prefabRt = cardViewPrefab.LayoutRect != null
+                    ? cardViewPrefab.LayoutRect
+                    : cardViewPrefab.GetComponent<RectTransform>();
+                if (prefabRt != null && prefabRt.sizeDelta.x > 1f)
+                    width = prefabRt.sizeDelta.x;
+            }
+
+            if (width <= 1f)
+                width = 200f;
+
+            return width * Mathf.Max(0.01f, cardScale);
+        }
+
+        private void ApplyFixedSizePresentationTuning(
+            CardViewUI view,
+            float resolvedHoverRaise,
+            float resolvedHoverScale,
+            float edgeHoverOffsetX)
+        {
+            if (view == null)
+                return;
+
+            float selectedRaise = Mathf.Max(resolvedHoverRaise, resolvedHoverRaise + 20f);
+            float selectedScaleMul = Mathf.Max(resolvedHoverScale, resolvedHoverScale + 0.04f);
+            // Same inward X for hover and selected — ApplyStateVisuals uses one state at a time.
+            view.ApplyHandPresentationTuning(
+                resolvedHoverRaise,
+                resolvedHoverScale,
+                selectedRaise,
+                selectedScaleMul,
+                edgeHoverOffsetX,
+                edgeHoverOffsetX);
+        }
+
+        private void UpdateHandSiblingOrder()
+        {
+            for (int i = 0; i < spawnedCards.Count; i++)
+            {
+                var view = spawnedCards[i];
+                if (view != null)
+                    view.transform.SetSiblingIndex(i);
+            }
+
+            if (!keepHoveredCardOnTop)
+                return;
+
+            // Selected > Hovered > Normal fan order for draw order only (not DeckController.Hand).
+            var focused = GetFocusedCardView();
+            if (focused != null)
+                focused.transform.SetAsLastSibling();
+        }
+
+        private void LayoutCardsAdaptive()
+        {
+            int count = spawnedCards.Count;
+            float cardScale = GetResponsiveCardScale(count);
+
+            float preferredSpacing = scaleSpacingWithCard ? spacing * cardScale : spacing;
+            preferredSpacing = Mathf.Clamp(preferredSpacing, minimumSpacing, maximumSpacing);
+
+            float widthLimitedSpacing = count > 1
+                ? maxHandWidth / (count - 1)
+                : preferredSpacing;
+
+            // Prefer fitting within maxHandWidth; never allow zero/negative spacing.
+            float resolvedSpacing = Mathf.Max(0.01f, Mathf.Min(preferredSpacing, widthLimitedSpacing));
+
+            float preferredHoverGap = scaleSpacingWithCard ? hoverGap * cardScale : hoverGap;
+            float safeHoverGap = preferredHoverGap;
+
+            int maxHandSize = deckController != null ? Mathf.Max(largeHandStartCount, deckController.MaxHandSize) : 10;
+            if (count >= largeHandStartCount)
+            {
+                float compression = Mathf.InverseLerp(largeHandStartCount, maxHandSize, count);
+                safeHoverGap = Mathf.Lerp(preferredHoverGap, preferredHoverGap * 0.65f, compression);
+            }
+
+            float centerIndex = count > 1 ? (count - 1) * 0.5f : 0f;
+            int focusedIndex = GetFocusedCardIndex();
+
+            float preferredEdgeDrop = curveHeight * centerIndex * centerIndex;
+            if (scaleSpacingWithCard)
+                preferredEdgeDrop *= cardScale;
+            float resolvedEdgeDrop = Mathf.Min(maxEdgeDrop, preferredEdgeDrop);
+
+            float preferredEdgeRotation = rotationStep * centerIndex;
+            float resolvedEdgeRotation = Mathf.Min(maxEdgeRotation, preferredEdgeRotation);
+
+            float largeHandT = Mathf.InverseLerp(largeHandStartCount, maxHandSize, count);
+            float handRaise = Mathf.Lerp(0f, largeHandRaise, largeHandT);
+
+            float totalSpan = count > 1 ? resolvedSpacing * (count - 1) : 0f;
+
+            lastLoggedCardScale = cardScale;
+            lastLoggedSpacing = resolvedSpacing;
+            lastLoggedTotalSpan = totalSpan;
+            lastLoggedEdgeDrop = resolvedEdgeDrop;
+            lastLoggedHandRaise = handRaise;
+            lastLoggedEdgeRotation = resolvedEdgeRotation;
+
+            for (int i = 0; i < count; i++)
+            {
+                var view = spawnedCards[i];
+                if (view == null)
+                    continue;
+
+                var rt = view.LayoutRect;
+                if (rt != null)
+                {
+                    rt.sizeDelta = baseCardSize;
+                    rt.localScale = Vector3.one * cardScale;
+                }
+
+                float relative = i - centerIndex;
+                float normalized = centerIndex > 0f ? relative / centerIndex : 0f;
+                float edgeFactor = normalized * normalized;
+
+                float x = relative * resolvedSpacing;
+                float y = -edgeFactor * resolvedEdgeDrop + handRaise;
+
+                if (focusedIndex >= 0)
+                {
+                    if (i < focusedIndex)
+                        x -= safeHoverGap * 0.5f;
+                    else if (i > focusedIndex)
+                        x += safeHoverGap * 0.5f;
+                }
+
+                float rotZ = -normalized * resolvedEdgeRotation;
+                view.SetLayoutPose(new Vector2(x, y), rotZ);
+            }
+
+            if (verboseLogs && count != lastLoggedLayoutCount)
+                LogAdaptiveHandLayout(force: false);
+
+            lastLoggedLayoutCount = count;
+        }
+
+        private void LogAdaptiveHandLayout(bool force)
+        {
+            if (!force && !verboseLogs)
+                return;
+
+            Debug.Log(
+                "[AdaptiveHandLayout]\n" +
+                $"Count={spawnedCards.Count}\n" +
+                $"CardScale={lastLoggedCardScale:0.##}\n" +
+                $"Spacing={lastLoggedSpacing:0.##}\n" +
+                $"TotalSpan={lastLoggedTotalSpan:0.##}\n" +
+                $"EdgeDrop={lastLoggedEdgeDrop:0.##}\n" +
+                $"HandRaise={lastLoggedHandRaise:0.##}\n" +
+                $"EdgeRotation={lastLoggedEdgeRotation:0.##}");
+        }
+
+        private void LogFixedFanLayout(bool force)
+        {
+            if (!force && !verboseLogs)
+                return;
+
+            Debug.Log(
+                "[FixedFanLayout]\n" +
+                $"Count={spawnedCards.Count}\n" +
+                $"CardWidth={lastLoggedCardWidth:0.##}\n" +
+                $"Scale={lastLoggedCardScale:0.##}\n" +
+                $"PreferredSpacing={lastLoggedPreferredSpacing:0.##}\n" +
+                $"FitSpacing={lastLoggedFitSpacing:0.##}\n" +
+                $"ResolvedSpacing={lastLoggedSpacing:0.##}\n" +
+                $"TotalWidth={lastLoggedTotalWidth:0.##}\n" +
+                $"FanStrength={lastLoggedFanStrength:0.##}\n" +
+                $"EdgeDrop={lastLoggedEdgeDrop:0.##}\n" +
+                $"EdgeRotation={lastLoggedEdgeRotation:0.##}");
+        }
+
+        private void LogFanStrength(bool force)
+        {
+            if (!force && !verboseLogs)
+                return;
+
+            Debug.Log(
+                "[FanStrength]\n" +
+                $"Count={spawnedCards.Count}\n" +
+                $"Strength={lastLoggedFanStrength:0.##}\n" +
+                $"ResolvedEdgeRotation={lastLoggedEdgeRotation:0.##}\n" +
+                $"ResolvedEdgeDrop={lastLoggedEdgeDrop:0.##}");
+        }
+
+        private void LogHandPresentation(bool force)
+        {
+            if (!force && !verboseLogs)
+                return;
+
+            Debug.Log(
+                "[HandPresentation]\n" +
+                $"Count={spawnedCards.Count}\n" +
+                $"FanStrength={lastLoggedFanStrength:0.##}\n" +
+                $"ResolvedEdgeDrop={lastLoggedEdgeDrop:0.##}\n" +
+                $"ResolvedEdgeRotation={lastLoggedEdgeRotation:0.##}\n" +
+                $"HoverGap={lastLoggedHoverGap:0.##}\n" +
+                $"HoverRaise={lastLoggedHoverRaise:0.##}\n" +
+                $"HoverScale={lastLoggedHoverScale:0.##}\n" +
+                $"HoveredIndex={lastLoggedHoveredIndex}");
         }
 
         private void SelectView(CardViewUI view)
@@ -2755,46 +3915,6 @@ namespace CardBattle.Core
             }
 
             return valid;
-        }
-    }
-}
-```
-
-## FILE: CardTypeBadgeSet.cs
-**Path:** `Assets/Scripts/CardBattle/Cards/UI/CardTypeBadgeSet.cs`
-```csharp
-using UnityEngine;
-
-namespace CardBattle.Core
-{
-    [CreateAssetMenu(fileName = "CardTypeBadgeSet", menuName = "Card Battle/Visuals/Card Type Badge Set")]
-    public class CardTypeBadgeSet : ScriptableObject
-    {
-        [Header("Card Type Badges")]
-        [SerializeField] private Sprite attackBadge;
-        [SerializeField] private Sprite defendBadge;
-        [SerializeField] private Sprite healBadge;
-        [SerializeField] private Sprite buffBadge;
-
-        public Sprite GetBadge(CardType type)
-        {
-            switch (type)
-            {
-                case CardType.Attack:
-                    return attackBadge;
-
-                case CardType.Defend:
-                    return defendBadge;
-
-                case CardType.Heal:
-                    return healBadge;
-
-                case CardType.Buff:
-                    return buffBadge;
-
-                default:
-                    return null;
-            }
         }
     }
 }
