@@ -79,6 +79,13 @@ namespace CardBattle.Core
         private bool pendingDealFadeIn;
         private Coroutine dealFadeRoutine;
 
+        private bool handSelectionMode;
+        private bool handSelectionSelected;
+        private bool handSelectionSelectable;
+        [SerializeField] private GameObject handSelectionOutlineRoot;
+        [SerializeField] private float handSelectionYOffset = 36f;
+        [SerializeField] private float handSelectionScale = 1.12f;
+
         public CardInstance BoundCard => boundCard;
         /// <summary>Root layout rect (anchored fan position). Used by presentation VFX.</summary>
         public RectTransform LayoutRect => _rectTransform;
@@ -297,6 +304,7 @@ namespace CardBattle.Core
 
         public void Bind(CardInstance card)
         {
+            ClearHandSelectionState();
             boundCard = card;
 
             if (card?.Data == null)
@@ -345,6 +353,14 @@ namespace CardBattle.Core
                 isSelected = false;
                 currentState = CardVisualState.Disabled;
             }
+            else if (handSelectionMode)
+            {
+                currentState = handSelectionSelected
+                    ? CardVisualState.Selected
+                    : (isPointerOver && handSelectionSelectable
+                        ? CardVisualState.Hovered
+                        : CardVisualState.Normal);
+            }
             else
             {
                 currentState = isSelected
@@ -353,6 +369,62 @@ namespace CardBattle.Core
             }
 
             ApplyStateVisuals();
+        }
+
+        /// <summary>
+        /// Hand selection presentation without coupling to discard controllers.
+        /// Uses VisualRoot only — root pointer hit target stays fixed.
+        /// </summary>
+        public void SetHandSelectionState(bool selectionMode, bool selected, bool selectable)
+        {
+            handSelectionMode = selectionMode;
+            handSelectionSelected = selected;
+            handSelectionSelectable = selectable;
+
+            if (handSelectionOutlineRoot != null)
+                handSelectionOutlineRoot.SetActive(selectionMode && selected);
+
+            if (!selectionMode)
+            {
+                handSelectionSelected = false;
+                handSelectionSelectable = false;
+                if (handSelectionOutlineRoot != null)
+                    handSelectionOutlineRoot.SetActive(false);
+
+                if (!isInteractable)
+                    currentState = CardVisualState.Disabled;
+                else if (isSelected)
+                    currentState = CardVisualState.Selected;
+                else if (isPointerOver)
+                    currentState = CardVisualState.Hovered;
+                else
+                    currentState = CardVisualState.Normal;
+
+                ApplyStateVisuals();
+                return;
+            }
+
+            if (button != null)
+                button.interactable = selectable;
+
+            isInteractable = selectable;
+            isSelected = selected;
+
+            if (!selectable)
+                currentState = CardVisualState.Disabled;
+            else if (selected)
+                currentState = CardVisualState.Selected;
+            else if (isPointerOver)
+                currentState = CardVisualState.Hovered;
+            else
+                currentState = CardVisualState.Normal;
+
+            ApplyStateVisuals();
+        }
+
+        public void ClearHandSelectionState()
+        {
+            SetHandSelectionState(false, false, false);
         }
 
         public void SetClickAction(UnityEngine.Events.UnityAction action)
@@ -366,7 +438,8 @@ namespace CardBattle.Core
             {
                 button.onClick.AddListener(() =>
                 {
-                    Select();
+                    if (!handSelectionMode)
+                        Select();
                     action.Invoke();
                 });
             }
@@ -474,11 +547,19 @@ namespace CardBattle.Core
                     break;
 
                 case CardVisualState.Selected:
-                    targetScale = baseScale * selectedScale;
-                    targetLocalPosition = baseLocalPosition + new Vector3(
-                        selectedXOffset,
-                        selectedYOffset,
-                        0f);
+                    if (handSelectionMode && handSelectionSelected)
+                    {
+                        targetScale = baseScale * Mathf.Max(1f, handSelectionScale);
+                        targetLocalPosition = baseLocalPosition + new Vector3(0f, handSelectionYOffset, 0f);
+                    }
+                    else
+                    {
+                        targetScale = baseScale * selectedScale;
+                        targetLocalPosition = baseLocalPosition + new Vector3(
+                            selectedXOffset,
+                            selectedYOffset,
+                            0f);
+                    }
                     SetAlpha(normalAlpha);
                     break;
 

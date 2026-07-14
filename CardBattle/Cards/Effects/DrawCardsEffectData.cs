@@ -7,21 +7,31 @@ namespace CardBattle.Core
     {
         [SerializeField] private int amount = 2;
 
+        public int Amount => Mathf.Max(0, amount);
+
+        public override CardEffectExecutionKind ExecutionKind => CardEffectExecutionKind.DrawPresentation;
+
         public override string GetDescriptionText()
         {
-            int value = Mathf.Max(0, amount);
-            if (value == 1)
-                return "Draw 1 card";
+            int value = Amount;
+            if (value <= 0)
+                return string.Empty;
 
-            return $"Draw {value} cards";
+            if (value == 1)
+                return "Draw 1 card.";
+
+            return $"Draw {value} cards.";
         }
 
+        /// <summary>
+        /// Legacy/debug sync path only. Production sequential execution draws via presentation.
+        /// </summary>
         public override void Apply(CardPlayContext context, CardEffectExecutionContext executionContext)
         {
             if (executionContext == null)
                 return;
 
-            executionContext.RequestDraw(Mathf.Max(0, amount));
+            executionContext.RequestDraw(Amount);
         }
     }
 }

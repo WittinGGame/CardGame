@@ -12,11 +12,15 @@ namespace CardBattle.Core
         [SerializeField] private EnemyActionSystem enemyActionSystem;
         [SerializeField] private TargetSelectionSystem targetSelectionSystem;
         [SerializeField] private BattleActionRunner battleActionRunner;
+        [SerializeField] private HandCardSelectionController handCardSelectionController;
 
         [Header("UI References")]
         [SerializeField] private Transform handContainer;
         [SerializeField] private CardViewUI cardViewPrefab;
         [SerializeField] private RectTransform drawSpawnAnchor;
+        [Tooltip("Optional Canvas on Hand/HandPanel. During selection, override sorting so cards stay above the dim overlay.")]
+        [SerializeField] private Canvas handSortingCanvas;
+        [SerializeField] private int handSelectionSortingOrder = 50;
 
         [Header("Audio")]
         [SerializeField] private CardSFXController cardSfx;
@@ -95,6 +99,12 @@ namespace CardBattle.Core
         private CardViewUI selectedView;
         private CardViewUI hoveredCardView;
         private Coroutine dealRoutine;
+
+        private bool handSelectionActive;
+        private HandCardSelectionController activeHandSelection;
+        private int previousHandCanvasSortingOrder;
+        private bool previousHandCanvasOverrideSorting;
+        private bool handCanvasSortBoosted;
 
         private int lastLoggedLayoutCount = -1;
         private float lastLoggedCardScale;
@@ -414,6 +424,9 @@ namespace CardBattle.Core
             RefreshCardInteractivity();
             LayoutCards();
 
+            if (handSelectionActive && activeHandSelection != null && activeHandSelection.IsSelecting)
+                activeHandSelection.RefreshSelectionVisuals();
+
             if (shouldPlayDeal)
                 dealRoutine = StartCoroutine(CoDealInNewCards(newlyCreatedViews));
         }
@@ -507,12 +520,115 @@ namespace CardBattle.Core
 
             view.SetClickAction(() =>
             {
+                if (handSelectionActive)
+                {
+                    HandleHandSelectionClick(view, card);
+                    return;
+                }
+
                 if (!view.IsInteractable)
                     return;
 
                 SelectView(view);
                 TryPlayCardFromView(card);
             });
+        }
+
+        private void HandleHandSelectionClick(CardViewUI view, CardInstance card)
+        {
+            if (activeHandSelection == null || card == null)
+                return;
+
+            activeHandSelection.TryToggleCard(card);
+        }
+
+        /// <summary>Enter hand selection mode without rebuilding card views.</summary>
+        public void BeginHandSelection(HandCardSelectionController controller)
+        {
+            activeHandSelection = controller;
+            handSelectionActive = controller != null && controller.IsSelecting;
+            DeselectCurrentCard();
+            BoostHandCanvasSorting(true);
+            RefreshCardInteractivity();
+        }
+
+        public void EndHandSelection()
+        {
+            handSelectionActive = false;
+            activeHandSelection = null;
+
+            for (int i = 0; i < spawnedCards.Count; i++)
+            {
+                var view = spawnedCards[i];
+                if (view != null)
+                    view.ClearHandSelectionState();
+            }
+
+            BoostHandCanvasSorting(false);
+            RefreshCardInteractivity();
+        }
+
+        public void RefreshHandSelectionVisuals(
+            IReadOnlyList<CardInstance> candidates,
+            IReadOnlyList<CardInstance> selected,
+            int requiredCount)
+        {
+            handSelectionActive = true;
+            int selectedCount = selected != null ? selected.Count : 0;
+            bool selectionFull = selectedCount >= requiredCount && requiredCount > 0;
+
+            for (int i = 0; i < spawnedCards.Count; i++)
+            {
+                var view = spawnedCards[i];
+                if (view == null)
+                    continue;
+
+                var card = view.BoundCard;
+                bool isCandidate = card != null && candidates != null && ContainsCard(candidates, card);
+                bool isSelected = card != null && selected != null && ContainsCard(selected, card);
+                bool selectable = isCandidate && (isSelected || !selectionFull);
+
+                view.SetHandSelectionState(true, isSelected, selectable);
+            }
+        }
+
+        private static bool ContainsCard(IReadOnlyList<CardInstance> list, CardInstance card)
+        {
+            if (list == null || card == null)
+                return false;
+
+            for (int i = 0; i < list.Count; i++)
+            {
+                if (list[i] == card)
+                    return true;
+            }
+
+            return false;
+        }
+
+        private void BoostHandCanvasSorting(bool enable)
+        {
+            if (handSortingCanvas == null)
+                return;
+
+            if (enable)
+            {
+                if (!handCanvasSortBoosted)
+                {
+                    previousHandCanvasOverrideSorting = handSortingCanvas.overrideSorting;
+                    previousHandCanvasSortingOrder = handSortingCanvas.sortingOrder;
+                    handCanvasSortBoosted = true;
+                }
+
+                handSortingCanvas.overrideSorting = true;
+                handSortingCanvas.sortingOrder = handSelectionSortingOrder;
+            }
+            else if (handCanvasSortBoosted)
+            {
+                handSortingCanvas.overrideSorting = previousHandCanvasOverrideSorting;
+                handSortingCanvas.sortingOrder = previousHandCanvasSortingOrder;
+                handCanvasSortBoosted = false;
+            }
         }
 
         private void HandleCardHoverStarted(CardViewUI view)
@@ -1061,6 +1177,12 @@ namespace CardBattle.Core
 
         private void RefreshCardInteractivity()
         {
+            if (handSelectionActive && activeHandSelection != null && activeHandSelection.IsSelecting)
+            {
+                activeHandSelection.RefreshSelectionVisuals();
+                return;
+            }
+
             for (int i = 0; i < spawnedCards.Count; i++)
             {
                 var view = spawnedCards[i];
@@ -1096,6 +1218,8 @@ namespace CardBattle.Core
             if (dealRoutine != null)
                 StopDealRoutineAndReleaseLocks();
 
+            handCardSelectionController?.ForceCancelSelection();
+            EndHandSelection();
             DeselectCurrentCard();
             hoveredCardView = null;
             ClearSpawnedCards();

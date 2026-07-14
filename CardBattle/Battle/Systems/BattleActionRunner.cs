@@ -8,6 +8,7 @@ namespace CardBattle.Core
     /// Player attack timing is controlled by BattleUnitView animation events:
     /// - AnimEvent_AttackHit
     /// - AnimEvent_ActionFinished
+    /// Card effects execute sequentially via <see cref="CardEffectSequenceRunner"/>.
     /// </summary>
     public class BattleActionRunner : MonoBehaviour
     {
@@ -15,12 +16,13 @@ namespace CardBattle.Core
         [SerializeField] private PlayerBattleUnit player;
         [SerializeField] private DeckController deckController;
         [SerializeField] private CardResolver cardResolver;
+        [SerializeField] private CardEffectSequenceRunner cardEffectSequenceRunner;
         [SerializeField] private EnemyActionSystem enemyActionSystem;
         [SerializeField] private HandUIController handUIController;
+        [SerializeField] private HandCardSelectionController handCardSelectionController;
         [SerializeField] private BattleHUDController battleHUDController;
         [SerializeField] private CardToGraveyardVFXController graveyardVfx;
         [SerializeField] private PileCounterUI pileCounterUI;
-        [SerializeField] private BattleDrawSequenceController battleDrawSequenceController;
 
         [Header("Battle State")]
         [SerializeField] private BattleOutcomeController battleOutcomeController;
@@ -51,10 +53,11 @@ namespace CardBattle.Core
         private bool waitingForPlayerHit;
         private bool waitingForPlayerFinish;
         private bool playerAttackResolved;
+        private bool effectSequenceStarted;
+        private bool effectSequenceComplete;
         private CardPlayContext pendingPlayerCardContext;
-        private EnemyBattleUnit pendingPrimaryTarget;
-        private int pendingAttackDrawCount;
         private Coroutine runningActionRoutine;
+        private Coroutine pendingEffectSequenceRoutine;
 
         private void OnEnable()
         {
@@ -73,6 +76,8 @@ namespace CardBattle.Core
                 runningActionRoutine = null;
             }
 
+            StopPendingEffectSequence();
+            handCardSelectionController?.ForceCancelSelection();
             CleanupPlayerAttackState();
             SetBusy(false);
         }
@@ -99,6 +104,8 @@ namespace CardBattle.Core
                 runningActionRoutine = null;
             }
 
+            StopPendingEffectSequence();
+            handCardSelectionController?.ForceCancelSelection();
             CleanupPlayerAttackState();
             SetBusy(false);
             RefreshExternalUI();
@@ -143,44 +150,47 @@ namespace CardBattle.Core
                     pileCounterUI?.ForceSyncDisplayedToReal();
 
                 bool isAttack = card.Data.CardType == CardType.Attack;
-                pendingPrimaryTarget = primaryTarget;
-                int requestedDrawCount = 0;
 
                 if (isAttack)
                 {
                     if (player?.View == null)
                     {
                         Debug.LogWarning("BattleActionRunner: Player view is missing, falling back to immediate resolve.");
-                        requestedDrawCount = ResolvePlayerCardImmediate(card, primaryTarget).RequestedDrawCount;
+                        var fallbackContext = new CardPlayContext(
+                            player, card, enemyActionSystem.Enemies, primaryTarget);
+                        yield return ExecuteEffectSequence(fallbackContext);
                     }
                     else
                     {
-                        pendingPlayerCardContext = new CardPlayContext(player, card, enemyActionSystem.Enemies, primaryTarget);
-                        pendingAttackDrawCount = 0;
+                        pendingPlayerCardContext = new CardPlayContext(
+                            player, card, enemyActionSystem.Enemies, primaryTarget);
                         waitingForPlayerHit = true;
                         waitingForPlayerFinish = true;
                         playerAttackResolved = false;
+                        effectSequenceStarted = false;
+                        effectSequenceComplete = false;
 
                         SubscribePlayerViewEvents();
                         player.View.PlayAttack();
 
-                        yield return new WaitUntil(() => !waitingForPlayerFinish);
+                        yield return new WaitUntil(() =>
+                            !waitingForPlayerFinish &&
+                            (!effectSequenceStarted || effectSequenceComplete));
 
-                        requestedDrawCount = pendingAttackDrawCount;
                         CleanupPlayerAttackState();
                     }
                 }
                 else
                 {
-                    requestedDrawCount = ResolvePlayerCardImmediate(card, primaryTarget).RequestedDrawCount;
+                    var context = new CardPlayContext(
+                        player, card, enemyActionSystem.Enemies, primaryTarget);
+                    yield return ExecuteEffectSequence(context);
                     yield return new WaitForSeconds(nonAttackResolvePause);
                 }
 
-                if (requestedDrawCount > 0)
-                    yield return ExecuteDeferredDraw(requestedDrawCount);
-
                 if (HasBattleEnded)
                 {
+                    handCardSelectionController?.ForceCancelSelection();
                     RefreshExternalUI();
                     SetBusy(false);
                     RefreshExternalUI();
@@ -208,26 +218,20 @@ namespace CardBattle.Core
             }
         }
 
-        private IEnumerator ExecuteDeferredDraw(int requestedDrawCount)
+        private IEnumerator ExecuteEffectSequence(CardPlayContext context)
         {
-            if (requestedDrawCount <= 0)
-                yield break;
-
-            if (battleDrawSequenceController != null)
+            if (cardEffectSequenceRunner != null)
             {
-                yield return battleDrawSequenceController.DrawCardsRoutine(requestedDrawCount);
+                yield return cardEffectSequenceRunner.ExecuteEffectsSequentially(context);
                 yield break;
             }
 
             Debug.LogError(
-                "BattleActionRunner: BattleDrawSequenceController is missing. " +
-                "Falling back to immediate DrawCards.");
+                "BattleActionRunner: CardEffectSequenceRunner is missing. " +
+                "Falling back to sync CardResolver (draws will not present).");
 
-            if (deckController != null)
-                deckController.DrawCards(requestedDrawCount);
-
-            handUIController?.SyncHandViewsExternal();
-            pileCounterUI?.ForceSyncDisplayedToReal();
+            if (cardResolver != null)
+                cardResolver.Resolve(context);
         }
 
         private IEnumerator EndTurnSequence()
@@ -280,12 +284,6 @@ namespace CardBattle.Core
             RefreshExternalUI();
         }
 
-        private CardResolutionResult ResolvePlayerCardImmediate(CardInstance card, EnemyBattleUnit primaryTarget)
-        {
-            var context = new CardPlayContext(player, card, enemyActionSystem.Enemies, primaryTarget);
-            return cardResolver.Resolve(context);
-        }
-
         private void SubscribePlayerViewEvents()
         {
             if (player?.View == null)
@@ -319,8 +317,7 @@ namespace CardBattle.Core
             if (HasValidAttackHitTarget(pendingPlayerCardContext))
                 combatSfx?.PlayAttackHit();
 
-            var result = cardResolver.Resolve(pendingPlayerCardContext);
-            pendingAttackDrawCount = result.RequestedDrawCount;
+            BeginPendingEffectSequenceOnce(pendingPlayerCardContext);
         }
 
         private void HandlePlayerActionFinished()
@@ -334,13 +331,58 @@ namespace CardBattle.Core
                 playerAttackResolved = true;
 
                 if (pendingPlayerCardContext != null)
-                {
-                    var result = cardResolver.Resolve(pendingPlayerCardContext);
-                    pendingAttackDrawCount = result.RequestedDrawCount;
-                }
+                    BeginPendingEffectSequenceOnce(pendingPlayerCardContext);
             }
 
             waitingForPlayerFinish = false;
+        }
+
+        /// <summary>
+        /// Starts sequential effects exactly once for the current attack card
+        /// (hit event or finish-event fallback).
+        /// </summary>
+        private void BeginPendingEffectSequenceOnce(CardPlayContext context)
+        {
+            if (effectSequenceStarted || context == null)
+                return;
+
+            // Cancel any leftover coroutine without flipping started/complete flags.
+            CancelPendingEffectCoroutine();
+
+            effectSequenceStarted = true;
+            effectSequenceComplete = false;
+            pendingEffectSequenceRoutine = StartCoroutine(CoRunPendingEffectSequence(context));
+        }
+
+        private IEnumerator CoRunPendingEffectSequence(CardPlayContext context)
+        {
+            try
+            {
+                yield return ExecuteEffectSequence(context);
+            }
+            finally
+            {
+                effectSequenceComplete = true;
+                pendingEffectSequenceRoutine = null;
+            }
+        }
+
+        /// <summary>Stops the pending effect coroutine without mutating start/complete flags.</summary>
+        private void CancelPendingEffectCoroutine()
+        {
+            if (pendingEffectSequenceRoutine == null)
+                return;
+
+            StopCoroutine(pendingEffectSequenceRoutine);
+            pendingEffectSequenceRoutine = null;
+        }
+
+        /// <summary>Stops the pending effect sequence and marks it complete (reset / disable).</summary>
+        private void StopPendingEffectSequence()
+        {
+            CancelPendingEffectCoroutine();
+            effectSequenceStarted = false;
+            effectSequenceComplete = true;
         }
 
         private void CleanupPlayerAttackState()
@@ -350,18 +392,24 @@ namespace CardBattle.Core
             waitingForPlayerFinish = false;
             playerAttackResolved = false;
             pendingPlayerCardContext = null;
-            pendingPrimaryTarget = null;
-            pendingAttackDrawCount = 0;
+            // Do not stop an in-flight effect sequence from here during normal wait completion;
+            // ResetRuntimeActionState / OnDisable stop it explicitly.
+            effectSequenceStarted = false;
+            effectSequenceComplete = false;
         }
 
         private void HandleBattleEnded(BattleOutcome outcome)
         {
+            handCardSelectionController?.ForceCancelSelection();
             RefreshExternalUI();
         }
 
         private bool ValidateCardPlay(CardInstance card)
         {
-            if (player == null || deckController == null || cardResolver == null || enemyActionSystem == null)
+            if (player == null ||
+                deckController == null ||
+                enemyActionSystem == null ||
+                (cardEffectSequenceRunner == null && cardResolver == null))
             {
                 Debug.LogError("BattleActionRunner missing references.");
                 return false;
@@ -416,14 +464,12 @@ namespace CardBattle.Core
 
             CardData cardData = context.Card.Data;
 
-            // Single-target attack
             if (cardData.TargetMode == CardTargetMode.SingleEnemy)
             {
                 return context.PrimaryTarget != null &&
                     context.PrimaryTarget.IsAlive;
             }
 
-            // All-enemy attack
             if (cardData.TargetMode == CardTargetMode.AllEnemies)
             {
                 if (context.Enemies == null)

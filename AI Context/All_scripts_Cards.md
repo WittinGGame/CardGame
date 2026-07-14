@@ -1096,20 +1096,292 @@ namespace CardBattle.Core
 }
 ```
 
-## FILE: CardEffectData.cs
-**Path:** `Assets/Scripts/CardBattle/Cards/Effects/CardEffectData.cs`
+## FILE: ManualDiscardEffectDebugTest.cs
+**Path:** `Assets/Scripts/CardBattle/Cards/Debug/ManualDiscardEffectDebugTest.cs`
 ```csharp
+using System.Collections.Generic;
+using System.Text;
 using UnityEngine;
 
 namespace CardBattle.Core
 {
     /// <summary>
-    /// Designer-facing base class for effect-driven card behavior.
+    /// Play Mode harness for manual discard selection and Cycle-style sequences.
     /// </summary>
-    public abstract class CardEffectData : ScriptableObject
+    public class ManualDiscardEffectDebugTest : MonoBehaviour
     {
-        public abstract string GetDescriptionText();
-        public abstract void Apply(CardPlayContext context, CardEffectExecutionContext executionContext);
+        private const string LogPrefix = "[ManualDiscardDebug]";
+
+        [Header("References")]
+        [SerializeField] private PlayerBattleUnit player;
+        [SerializeField] private DeckController deckController;
+        [SerializeField] private HandCardSelectionController handCardSelectionController;
+        [SerializeField] private HandUIController handUIController;
+        [SerializeField] private BattleActionRunner battleActionRunner;
+        [SerializeField] private EnemyActionSystem enemyActionSystem;
+        [SerializeField] private CardData cycleTestCard;
+
+        [Header("Options")]
+        [SerializeField] private bool verboseLogs = true;
+
+        [ContextMenu("Debug/Print Selection State")]
+        public void DebugPrintSelectionState()
+        {
+            if (handCardSelectionController == null || deckController == null)
+            {
+                Debug.LogError($"{LogPrefix} Missing selection or deck reference.");
+                return;
+            }
+
+            Debug.Log(
+                $"{LogPrefix}\n" +
+                $"IsSelecting={handCardSelectionController.IsSelecting}\n" +
+                $"Requested={handCardSelectionController.RequestedCount}\n" +
+                $"Required={handCardSelectionController.RequiredCount}\n" +
+                $"Selected={handCardSelectionController.SelectedCount}\n" +
+                $"Hand={deckController.Hand.Count}\n" +
+                $"Graveyard={deckController.Graveyard.Count}\n" +
+                $"PendingOverflow={deckController.PendingOverflowCount}\n" +
+                $"RunnerBusy={(battleActionRunner != null && battleActionRunner.IsBusy)}");
+        }
+
+        [ContextMenu("Debug/Begin Discard 1")]
+        public void DebugBeginDiscard1()
+        {
+            BeginDiscardFromCurrentHand(1);
+        }
+
+        [ContextMenu("Debug/Begin Discard 2 With One Card")]
+        public void DebugBeginDiscard2WithOneCard()
+        {
+            if (!ValidateSelectionRefs())
+                return;
+
+            int handCount = CountValidHandCards();
+            handCardSelectionController.BeginSelection(
+                HandCardSelectionPurpose.ManualDiscard,
+                BuildHandCandidates(),
+                2,
+                "Select cards to discard");
+
+            int required = handCardSelectionController.RequiredCount;
+            bool pass = required == Mathf.Min(2, handCount);
+
+            if (pass)
+                Debug.Log($"{LogPrefix} PASS — Requested=2 Hand={handCount} Required={required}");
+            else
+                Debug.LogError($"{LogPrefix} FAIL — Requested=2 Hand={handCount} Required={required}");
+
+            DebugPrintSelectionState();
+        }
+
+        [ContextMenu("Debug/Begin Discard With Empty Hand")]
+        public void DebugBeginDiscardWithEmptyHand()
+        {
+            if (!ValidateSelectionRefs())
+                return;
+
+            // Intentionally request discard against current hand (may not be empty — prints result).
+            int beforeBusy = battleActionRunner != null && battleActionRunner.IsBusy ? 1 : 0;
+
+            handCardSelectionController.BeginSelection(
+                HandCardSelectionPurpose.ManualDiscard,
+                BuildHandCandidates(),
+                2,
+                "Select cards to discard");
+
+            bool isSelecting = handCardSelectionController.IsSelecting;
+            int required = handCardSelectionController.RequiredCount;
+
+            if (CountValidHandCards() == 0)
+            {
+                bool pass = !isSelecting && required <= 0 && beforeBusy == 0;
+                if (pass)
+                    Debug.Log($"{LogPrefix} PASS — Empty hand skips selection, overlay stays hidden, runner not locked by debug begin.");
+                else
+                    Debug.LogError($"{LogPrefix} FAIL — Empty hand selection IsSelecting={isSelecting} Required={required}");
+            }
+            else
+            {
+                Debug.LogWarning(
+                    $"{LogPrefix} Hand is not empty (count={CountValidHandCards()}). " +
+                    "Empty-hand pass requires 0 valid cards in Hand.");
+            }
+
+            DebugPrintSelectionState();
+        }
+
+        [ContextMenu("Debug/Validate Discard Move")]
+        public void DebugValidateDiscardMove()
+        {
+            if (!ValidateSelectionRefs() || deckController == null)
+                return;
+
+            var hand = deckController.Hand;
+            CardInstance pick = null;
+            for (int i = 0; i < hand.Count; i++)
+            {
+                if (hand[i]?.Data != null)
+                {
+                    pick = hand[i];
+                    break;
+                }
+            }
+
+            if (pick == null)
+            {
+                Debug.LogError($"{LogPrefix} No hand card available to discard.");
+                return;
+            }
+
+            var id = pick.InstanceId;
+            int totalBefore = deckController.Deck.Count + deckController.Hand.Count +
+                              deckController.Graveyard.Count + deckController.PendingOverflowCount;
+
+            bool moved = deckController.DiscardCardFromHand(pick);
+            handUIController?.SyncHandViewsExternal();
+
+            bool stillInHand = deckController.IsInHand(pick);
+            int gyCount = 0;
+            for (int i = 0; i < deckController.Graveyard.Count; i++)
+            {
+                if (deckController.Graveyard[i] != null &&
+                    deckController.Graveyard[i].InstanceId == id)
+                {
+                    gyCount++;
+                }
+            }
+
+            int totalAfter = deckController.Deck.Count + deckController.Hand.Count +
+                             deckController.Graveyard.Count + deckController.PendingOverflowCount;
+
+            bool noDupAcrossPiles = !HasDuplicateInstanceIdsAcrossPiles();
+
+            bool pass = moved && !stillInHand && gyCount == 1 &&
+                        totalBefore == totalAfter && noDupAcrossPiles;
+
+            if (pass)
+            {
+                Debug.Log(
+                    $"{LogPrefix} PASS — Discard move conserved. InstanceId={id} Total={totalAfter}");
+            }
+            else
+            {
+                Debug.LogError(
+                    $"{LogPrefix} FAIL — Discard move\n" +
+                    $"Moved={moved} StillInHand={stillInHand} GyMatches={gyCount}\n" +
+                    $"TotalBefore={totalBefore} TotalAfter={totalAfter} NoDup={noDupAcrossPiles}");
+            }
+        }
+
+        [ContextMenu("Debug/Validate Cycle Sequence Checklist")]
+        public void DebugValidateCycleSequenceChecklist()
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine($"{LogPrefix} Cycle sequence checklist (manual Play Mode validation):");
+            sb.AppendLine("1. Play Cycle (cost 1) — AP decreases by exactly 1.");
+            sb.AppendLine("2. Cycle moves to Graveyard once.");
+            sb.AppendLine("3. Draw 2 presentations finish before discard overlay appears.");
+            sb.AppendLine("4. Newly drawn cards are selectable in discard selection.");
+            sb.AppendLine("5. Confirm discard moves selected card to Graveyard (no AP, no countdown).");
+            sb.AppendLine("6. Enemy successful-card-play / countdown occurs exactly once after discard.");
+            sb.AppendLine("7. PendingOverflowCount == 0 after sequence.");
+            sb.AppendLine("8. BattleActionRunner unlocks after enemy response.");
+
+            if (cycleTestCard != null)
+            {
+                sb.AppendLine($"Cycle asset: {cycleTestCard.DisplayName} (id={cycleTestCard.CardId})");
+                sb.AppendLine($"Description:\n{CardDescriptionBuilder.Build(cycleTestCard)}");
+            }
+            else
+            {
+                sb.AppendLine("Assign cycleTestCard to print generated description.");
+            }
+
+            Debug.Log(sb.ToString());
+            DebugPrintSelectionState();
+        }
+
+        private void BeginDiscardFromCurrentHand(int requested)
+        {
+            if (!ValidateSelectionRefs())
+                return;
+
+            handCardSelectionController.BeginSelection(
+                HandCardSelectionPurpose.ManualDiscard,
+                BuildHandCandidates(),
+                requested,
+                "Select cards to discard");
+
+            if (verboseLogs)
+                DebugPrintSelectionState();
+        }
+
+        private List<CardInstance> BuildHandCandidates()
+        {
+            var list = new List<CardInstance>();
+            if (deckController == null)
+                return list;
+
+            var hand = deckController.Hand;
+            for (int i = 0; i < hand.Count; i++)
+            {
+                if (hand[i]?.Data != null)
+                    list.Add(hand[i]);
+            }
+
+            return list;
+        }
+
+        private int CountValidHandCards()
+        {
+            if (deckController == null)
+                return 0;
+
+            int count = 0;
+            var hand = deckController.Hand;
+            for (int i = 0; i < hand.Count; i++)
+            {
+                if (hand[i]?.Data != null)
+                    count++;
+            }
+
+            return count;
+        }
+
+        private bool HasDuplicateInstanceIdsAcrossPiles()
+        {
+            var seen = new HashSet<System.Guid>();
+            return HasDupInPile(deckController.Deck, seen) ||
+                   HasDupInPile(deckController.Hand, seen) ||
+                   HasDupInPile(deckController.Graveyard, seen);
+        }
+
+        private static bool HasDupInPile(IReadOnlyList<CardInstance> pile, HashSet<System.Guid> seen)
+        {
+            if (pile == null)
+                return false;
+
+            for (int i = 0; i < pile.Count; i++)
+            {
+                var card = pile[i];
+                if (card == null)
+                    continue;
+                if (!seen.Add(card.InstanceId))
+                    return true;
+            }
+
+            return false;
+        }
+
+        private bool ValidateSelectionRefs()
+        {
+            if (handCardSelectionController != null && deckController != null)
+                return true;
+
+            Debug.LogError($"{LogPrefix} HandCardSelectionController or DeckController missing.");
+            return false;
+        }
     }
 }
 ```
@@ -1320,6 +1592,47 @@ namespace CardBattle.Core
 }
 ```
 
+## FILE: CardEffectData.cs
+**Path:** `Assets/Scripts/CardBattle/Cards/Effects/CardEffectData.cs`
+```csharp
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    /// <summary>
+    /// Designer-facing base class for effect-driven card behavior.
+    /// </summary>
+    public abstract class CardEffectData : ScriptableObject
+    {
+        /// <summary>
+        /// Execution category used by the sequential effect runner.
+        /// Immediate effects apply synchronously; draw/selection yield until complete.
+        /// </summary>
+        public virtual CardEffectExecutionKind ExecutionKind => CardEffectExecutionKind.Immediate;
+
+        public abstract string GetDescriptionText();
+        public abstract void Apply(CardPlayContext context, CardEffectExecutionContext executionContext);
+    }
+}
+```
+
+## FILE: CardEffectExecutionKind.cs
+**Path:** `Assets/Scripts/CardBattle/Cards/Effects/CardEffectExecutionKind.cs`
+```csharp
+namespace CardBattle.Core
+{
+    /// <summary>
+    /// How a card effect is executed by the sequential effect runner.
+    /// </summary>
+    public enum CardEffectExecutionKind
+    {
+        Immediate = 0,
+        DrawPresentation = 1,
+        ManualHandSelection = 2
+    }
+}
+```
+
 ## FILE: DealDamageEffectData.cs
 **Path:** `Assets/Scripts/CardBattle/Cards/Effects/DealDamageEffectData.cs`
 ```csharp
@@ -1370,6 +1683,49 @@ namespace CardBattle.Core
 }
 ```
 
+## FILE: DiscardCardsEffectData.cs
+**Path:** `Assets/Scripts/CardBattle/Cards/Effects/DiscardCardsEffectData.cs`
+```csharp
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    /// <summary>
+    /// Manual discard selection effect. Mutation and player input are owned by the
+    /// sequential effect runner / hand selection controller — not by Apply.
+    /// </summary>
+    [CreateAssetMenu(fileName = "DiscardCardsEffect", menuName = "Card Battle/Effects/Discard Cards")]
+    public class DiscardCardsEffectData : CardEffectData
+    {
+        [SerializeField] private int amount = 1;
+
+        public int Amount => Mathf.Max(0, amount);
+
+        public override CardEffectExecutionKind ExecutionKind => CardEffectExecutionKind.ManualHandSelection;
+
+        public override string GetDescriptionText()
+        {
+            int value = Amount;
+            if (value <= 0)
+                return string.Empty;
+
+            if (value == 1)
+                return "Discard 1 card.";
+
+            return $"Discard {value} cards.";
+        }
+
+        /// <summary>
+        /// Intentionally empty. Manual discard requires player input and is executed
+        /// by <see cref="CardEffectSequenceRunner"/>.
+        /// </summary>
+        public override void Apply(CardPlayContext context, CardEffectExecutionContext executionContext)
+        {
+        }
+    }
+}
+```
+
 ## FILE: DrawCardsEffectData.cs
 **Path:** `Assets/Scripts/CardBattle/Cards/Effects/DrawCardsEffectData.cs`
 ```csharp
@@ -1382,21 +1738,31 @@ namespace CardBattle.Core
     {
         [SerializeField] private int amount = 2;
 
+        public int Amount => Mathf.Max(0, amount);
+
+        public override CardEffectExecutionKind ExecutionKind => CardEffectExecutionKind.DrawPresentation;
+
         public override string GetDescriptionText()
         {
-            int value = Mathf.Max(0, amount);
-            if (value == 1)
-                return "Draw 1 card";
+            int value = Amount;
+            if (value <= 0)
+                return string.Empty;
 
-            return $"Draw {value} cards";
+            if (value == 1)
+                return "Draw 1 card.";
+
+            return $"Draw {value} cards.";
         }
 
+        /// <summary>
+        /// Legacy/debug sync path only. Production sequential execution draws via presentation.
+        /// </summary>
         public override void Apply(CardPlayContext context, CardEffectExecutionContext executionContext)
         {
             if (executionContext == null)
                 return;
 
-            executionContext.RequestDraw(Mathf.Max(0, amount));
+            executionContext.RequestDraw(Amount);
         }
     }
 }
@@ -1668,24 +2034,179 @@ namespace CardBattle.Core
 }
 ```
 
-## FILE: CardResolver.cs
-**Path:** `Assets/Scripts/CardBattle/Cards/Systems/CardResolver.cs`
+## FILE: CardEffectSequenceRunner.cs
+**Path:** `Assets/Scripts/CardBattle/Cards/Systems/CardEffectSequenceRunner.cs`
 ```csharp
+using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace CardBattle.Core
 {
     /// <summary>
-    /// Central place for card effect execution via <see cref="CardData.Effects"/>.
-    /// Modifiers may still skip base resolution through <see cref="CardPlayContext.ApplyBaseCardLogic"/>.
+    /// Executes <see cref="CardData.Effects"/> one-at-a-time in array order,
+    /// yielding for draw presentation and manual hand selection.
+    /// </summary>
+    public class CardEffectSequenceRunner : MonoBehaviour
+    {
+        [Header("References")]
+        [SerializeField] private CardResolver cardResolver;
+        [SerializeField] private BattleDrawSequenceController battleDrawSequenceController;
+        [SerializeField] private HandCardSelectionController handCardSelectionController;
+        [SerializeField] private DeckController deckController;
+
+        [Header("Options")]
+        [SerializeField] private bool verboseLogs;
+
+        public IEnumerator ExecuteEffectsSequentially(CardPlayContext context)
+        {
+            if (context?.Card?.Data == null || context.Player == null)
+                yield break;
+
+            foreach (var modifier in context.Card.Modifiers)
+            {
+                if (modifier != null && !modifier.PreResolve(context))
+                    context.ApplyBaseCardLogic = false;
+            }
+
+            if (!context.ApplyBaseCardLogic)
+            {
+                foreach (var modifier in context.Card.Modifiers)
+                    modifier?.PostResolve(context);
+                yield break;
+            }
+
+            var effects = context.Card.Data.Effects;
+            if (!HasAnyValidEffect(effects))
+            {
+                Debug.LogWarning(
+                    $"[CardEffectSequence] Card '{context.Card.Data.CardId}' has no valid effects. " +
+                    "No gameplay effect was applied.");
+
+                foreach (var modifier in context.Card.Modifiers)
+                    modifier?.PostResolve(context);
+                yield break;
+            }
+
+            var enemyTargets = TargetResolver.ResolveEnemyTargets(context, context.Card.Data.TargetMode);
+            var executionContext = new CardEffectExecutionContext(enemyTargets);
+
+            for (int i = 0; i < effects.Count; i++)
+            {
+                var effect = effects[i];
+                if (effect == null)
+                    continue;
+
+                if (verboseLogs)
+                {
+                    Debug.Log(
+                        $"[CardEffectSequence] [{i}] {effect.name} ({effect.ExecutionKind})");
+                }
+
+                switch (effect.ExecutionKind)
+                {
+                    case CardEffectExecutionKind.DrawPresentation:
+                        yield return ExecuteDrawPresentation(effect);
+                        break;
+
+                    case CardEffectExecutionKind.ManualHandSelection:
+                        yield return ExecuteManualHandSelection(effect);
+                        break;
+
+                    case CardEffectExecutionKind.Immediate:
+                    default:
+                        if (cardResolver != null)
+                            cardResolver.ResolveSingleEffect(context, effect, executionContext);
+                        else
+                            effect.Apply(context, executionContext);
+                        break;
+                }
+            }
+
+            foreach (var modifier in context.Card.Modifiers)
+                modifier?.PostResolve(context);
+        }
+
+        private IEnumerator ExecuteDrawPresentation(CardEffectData effect)
+        {
+            int amount = 0;
+            if (effect is DrawCardsEffectData drawEffect)
+                amount = drawEffect.Amount;
+
+            if (amount <= 0)
+                yield break;
+
+            if (battleDrawSequenceController != null)
+            {
+                yield return battleDrawSequenceController.DrawCardsRoutine(amount);
+                yield break;
+            }
+
+            Debug.LogError(
+                "[CardEffectSequence] BattleDrawSequenceController missing. " +
+                "Falling back to immediate DrawCards.");
+
+            if (deckController != null)
+                deckController.DrawCards(amount);
+        }
+
+        private IEnumerator ExecuteManualHandSelection(CardEffectData effect)
+        {
+            int amount = 0;
+            if (effect is DiscardCardsEffectData discardEffect)
+                amount = discardEffect.Amount;
+
+            if (amount <= 0)
+                yield break;
+
+            if (handCardSelectionController == null)
+            {
+                Debug.LogError(
+                    "[CardEffectSequence] HandCardSelectionController missing. " +
+                    "Skipping discard selection.");
+                yield break;
+            }
+
+            yield return handCardSelectionController.SelectAndDiscardRoutine(amount);
+        }
+
+        private static bool HasAnyValidEffect(IReadOnlyList<CardEffectData> effects)
+        {
+            if (effects == null || effects.Count == 0)
+                return false;
+
+            for (int i = 0; i < effects.Count; i++)
+            {
+                if (effects[i] != null)
+                    return true;
+            }
+
+            return false;
+        }
+    }
+}
+```
+
+## FILE: CardResolver.cs
+**Path:** `Assets/Scripts/CardBattle/Cards/Systems/CardResolver.cs`
+```csharp
+using System.Collections.Generic;
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    /// <summary>
+    /// Resolves immediate card effects. Presentation/interactive effects are owned by
+    /// <see cref="CardEffectSequenceRunner"/> in the production play path.
     /// </summary>
     public class CardResolver : MonoBehaviour
     {
         [SerializeField] private bool logResolution;
 
         /// <summary>
-        /// Resolves the card synchronously and returns deferred requests (e.g. draw)
-        /// for the battle runner to present afterward.
+        /// Debug/legacy sync resolve of every effect via Apply.
+        /// Draw effects still accumulate RequestedDrawCount; discard Apply is a no-op.
+        /// Production play uses <see cref="CardEffectSequenceRunner"/> instead.
         /// </summary>
         public CardResolutionResult Resolve(CardPlayContext context)
         {
@@ -1709,11 +2230,37 @@ namespace CardBattle.Core
             if (logResolution)
             {
                 Debug.Log(
-                    $"Resolved {context.Card.Data.DisplayName} via Effects pipeline. " +
+                    $"Resolved {context.Card.Data.DisplayName} via sync Effects Apply. " +
                     $"RequestedDraw={requestedDrawCount}");
             }
 
             return new CardResolutionResult(requestedDrawCount);
+        }
+
+        /// <summary>
+        /// Applies one immediate effect using a shared execution context.
+        /// Does not iterate the card Effects array.
+        /// </summary>
+        public void ResolveSingleEffect(
+            CardPlayContext context,
+            CardEffectData effect,
+            CardEffectExecutionContext executionContext)
+        {
+            if (context?.Card?.Data == null || context.Player == null || effect == null)
+                return;
+
+            if (effect.ExecutionKind != CardEffectExecutionKind.Immediate)
+            {
+                Debug.LogWarning(
+                    $"[CardResolver] ResolveSingleEffect called for non-immediate effect " +
+                    $"'{effect.name}' ({effect.ExecutionKind}). Ignoring.");
+                return;
+            }
+
+            effect.Apply(context, executionContext);
+
+            if (logResolution)
+                Debug.Log($"[CardResolver] Immediate effect applied: {effect.name}");
         }
 
         private static int ApplyEffectCardLogic(CardPlayContext context)
@@ -1747,7 +2294,7 @@ namespace CardBattle.Core
             return executionContext.RequestedDrawCount;
         }
 
-        private static bool HasAnyValidEffect(System.Collections.Generic.IReadOnlyList<CardEffectData> effects)
+        private static bool HasAnyValidEffect(IReadOnlyList<CardEffectData> effects)
         {
             if (effects == null || effects.Count == 0)
                 return false;
@@ -1968,6 +2515,55 @@ namespace CardBattle.Core
 
             _graveyard.Add(card);
             NotifyChanged();
+        }
+
+        /// <summary>
+        /// Manual discard: move one existing hand instance to the graveyard.
+        /// Does not play the card or spend AP.
+        /// </summary>
+        public bool DiscardCardFromHand(CardInstance card)
+        {
+            if (card == null || !_hand.Remove(card))
+                return false;
+
+            if (!_graveyard.Contains(card))
+                _graveyard.Add(card);
+
+            NotifyChanged();
+            return true;
+        }
+
+        /// <summary>
+        /// Manual discard batch. Ignores nulls, duplicates, and cards no longer in hand.
+        /// Notifies once if any card moved.
+        /// </summary>
+        public int DiscardCardsFromHand(IReadOnlyList<CardInstance> cards)
+        {
+            if (cards == null || cards.Count == 0)
+                return 0;
+
+            var seen = new HashSet<CardInstance>();
+            int moved = 0;
+
+            for (int i = 0; i < cards.Count; i++)
+            {
+                var card = cards[i];
+                if (card == null || !seen.Add(card))
+                    continue;
+
+                if (!_hand.Remove(card))
+                    continue;
+
+                if (!_graveyard.Contains(card))
+                    _graveyard.Add(card);
+
+                moved++;
+            }
+
+            if (moved > 0)
+                NotifyChanged();
+
+            return moved;
         }
 
         public void ShuffleDeck()
@@ -2265,6 +2861,13 @@ namespace CardBattle.Core
         private bool pendingDealFadeIn;
         private Coroutine dealFadeRoutine;
 
+        private bool handSelectionMode;
+        private bool handSelectionSelected;
+        private bool handSelectionSelectable;
+        [SerializeField] private GameObject handSelectionOutlineRoot;
+        [SerializeField] private float handSelectionYOffset = 36f;
+        [SerializeField] private float handSelectionScale = 1.12f;
+
         public CardInstance BoundCard => boundCard;
         /// <summary>Root layout rect (anchored fan position). Used by presentation VFX.</summary>
         public RectTransform LayoutRect => _rectTransform;
@@ -2483,6 +3086,7 @@ namespace CardBattle.Core
 
         public void Bind(CardInstance card)
         {
+            ClearHandSelectionState();
             boundCard = card;
 
             if (card?.Data == null)
@@ -2531,6 +3135,14 @@ namespace CardBattle.Core
                 isSelected = false;
                 currentState = CardVisualState.Disabled;
             }
+            else if (handSelectionMode)
+            {
+                currentState = handSelectionSelected
+                    ? CardVisualState.Selected
+                    : (isPointerOver && handSelectionSelectable
+                        ? CardVisualState.Hovered
+                        : CardVisualState.Normal);
+            }
             else
             {
                 currentState = isSelected
@@ -2539,6 +3151,62 @@ namespace CardBattle.Core
             }
 
             ApplyStateVisuals();
+        }
+
+        /// <summary>
+        /// Hand selection presentation without coupling to discard controllers.
+        /// Uses VisualRoot only — root pointer hit target stays fixed.
+        /// </summary>
+        public void SetHandSelectionState(bool selectionMode, bool selected, bool selectable)
+        {
+            handSelectionMode = selectionMode;
+            handSelectionSelected = selected;
+            handSelectionSelectable = selectable;
+
+            if (handSelectionOutlineRoot != null)
+                handSelectionOutlineRoot.SetActive(selectionMode && selected);
+
+            if (!selectionMode)
+            {
+                handSelectionSelected = false;
+                handSelectionSelectable = false;
+                if (handSelectionOutlineRoot != null)
+                    handSelectionOutlineRoot.SetActive(false);
+
+                if (!isInteractable)
+                    currentState = CardVisualState.Disabled;
+                else if (isSelected)
+                    currentState = CardVisualState.Selected;
+                else if (isPointerOver)
+                    currentState = CardVisualState.Hovered;
+                else
+                    currentState = CardVisualState.Normal;
+
+                ApplyStateVisuals();
+                return;
+            }
+
+            if (button != null)
+                button.interactable = selectable;
+
+            isInteractable = selectable;
+            isSelected = selected;
+
+            if (!selectable)
+                currentState = CardVisualState.Disabled;
+            else if (selected)
+                currentState = CardVisualState.Selected;
+            else if (isPointerOver)
+                currentState = CardVisualState.Hovered;
+            else
+                currentState = CardVisualState.Normal;
+
+            ApplyStateVisuals();
+        }
+
+        public void ClearHandSelectionState()
+        {
+            SetHandSelectionState(false, false, false);
         }
 
         public void SetClickAction(UnityEngine.Events.UnityAction action)
@@ -2552,7 +3220,8 @@ namespace CardBattle.Core
             {
                 button.onClick.AddListener(() =>
                 {
-                    Select();
+                    if (!handSelectionMode)
+                        Select();
                     action.Invoke();
                 });
             }
@@ -2660,11 +3329,19 @@ namespace CardBattle.Core
                     break;
 
                 case CardVisualState.Selected:
-                    targetScale = baseScale * selectedScale;
-                    targetLocalPosition = baseLocalPosition + new Vector3(
-                        selectedXOffset,
-                        selectedYOffset,
-                        0f);
+                    if (handSelectionMode && handSelectionSelected)
+                    {
+                        targetScale = baseScale * Mathf.Max(1f, handSelectionScale);
+                        targetLocalPosition = baseLocalPosition + new Vector3(0f, handSelectionYOffset, 0f);
+                    }
+                    else
+                    {
+                        targetScale = baseScale * selectedScale;
+                        targetLocalPosition = baseLocalPosition + new Vector3(
+                            selectedXOffset,
+                            selectedYOffset,
+                            0f);
+                    }
                     SetAlpha(normalAlpha);
                     break;
 
@@ -2742,6 +3419,513 @@ namespace CardBattle.Core
 }
 ```
 
+## FILE: HandCardSelectionController.cs
+**Path:** `Assets/Scripts/CardBattle/Cards/UI/HandCardSelectionController.cs`
+```csharp
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    /// <summary>
+    /// Reusable hand-card selection session owner (manual discard first use-case).
+    /// </summary>
+    public class HandCardSelectionController : MonoBehaviour
+    {
+        [Header("References")]
+        [SerializeField] private DeckController deckController;
+        [SerializeField] private HandUIController handUIController;
+        [SerializeField] private HandCardSelectionUI selectionUI;
+        [SerializeField] private CardToGraveyardVFXController graveyardVfx;
+        [SerializeField] private PileCounterUI pileCounterUI;
+        [SerializeField] private BattleOutcomeController battleOutcomeController;
+
+        [Header("Options")]
+        [SerializeField] private string discardInstruction = "Select cards to discard";
+        [SerializeField] private bool verboseLogs;
+
+        private readonly List<CardInstance> selectedCards = new List<CardInstance>();
+        private readonly List<CardInstance> candidateCards = new List<CardInstance>();
+        private readonly List<CardInstance> confirmedSnapshot = new List<CardInstance>();
+
+        private bool isSelecting;
+        private bool confirmRequested;
+        private bool forceCancelled;
+        private int requestedCount;
+        private int requiredCount;
+        private HandCardSelectionPurpose purpose;
+
+        public bool IsSelecting => isSelecting;
+        public int RequestedCount => requestedCount;
+        public int RequiredCount => requiredCount;
+        public int SelectedCount => selectedCards.Count;
+        public IReadOnlyList<CardInstance> SelectedCards => selectedCards;
+        public HandCardSelectionPurpose Purpose => purpose;
+
+        public event System.Action OnSelectionStarted;
+        public event System.Action OnSelectionChanged;
+        public event System.Action OnSelectionConfirmed;
+        public event System.Action OnSelectionEnded;
+
+        private void OnEnable()
+        {
+            if (selectionUI != null && selectionUI.ConfirmButton != null)
+                selectionUI.ConfirmButton.onClick.AddListener(HandleConfirmClicked);
+
+            if (deckController != null)
+                deckController.OnPilesChanged += HandlePilesChanged;
+
+            if (battleOutcomeController != null)
+                battleOutcomeController.OnBattleEnded += HandleBattleEnded;
+        }
+
+        private void OnDisable()
+        {
+            if (selectionUI != null && selectionUI.ConfirmButton != null)
+                selectionUI.ConfirmButton.onClick.RemoveListener(HandleConfirmClicked);
+
+            if (deckController != null)
+                deckController.OnPilesChanged -= HandlePilesChanged;
+
+            if (battleOutcomeController != null)
+                battleOutcomeController.OnBattleEnded -= HandleBattleEnded;
+
+            ForceCancelSelectionInternal(discardSelectedCards: false);
+        }
+
+        private void OnDestroy()
+        {
+            ForceCancelSelectionInternal(discardSelectedCards: false);
+        }
+
+        /// <summary>
+        /// Waitable manual discard sequence used by the sequential effect runner.
+        /// </summary>
+        public IEnumerator SelectAndDiscardRoutine(int requestedDiscardCount)
+        {
+            int requested = Mathf.Max(0, requestedDiscardCount);
+            RebuildCandidatesFromCurrentHand();
+            int required = Mathf.Min(requested, CountValidCandidates());
+
+            if (verboseLogs)
+            {
+                Debug.Log(
+                    $"[HandSelection] Begin discard Requested={requested} Required={required} " +
+                    $"Hand={CountValidCandidates()}");
+            }
+
+            if (required <= 0)
+                yield break;
+
+            BeginSelection(HandCardSelectionPurpose.ManualDiscard, candidateCards, requested, discardInstruction);
+
+            confirmRequested = false;
+            forceCancelled = false;
+
+            while (isSelecting && !confirmRequested && !forceCancelled)
+                yield return null;
+
+            if (forceCancelled || !isSelecting)
+            {
+                EndSelectionInternal(confirmed: false);
+                yield break;
+            }
+
+            confirmedSnapshot.Clear();
+            for (int i = 0; i < selectedCards.Count; i++)
+            {
+                var card = selectedCards[i];
+                if (card != null)
+                    confirmedSnapshot.Add(card);
+            }
+
+            OnSelectionConfirmed?.Invoke();
+
+            // Capture views for optional VFX before pile mutation / selection exit.
+            var viewsForVfx = new List<CardViewUI>(confirmedSnapshot.Count);
+            if (handUIController != null)
+            {
+                for (int i = 0; i < confirmedSnapshot.Count; i++)
+                {
+                    var view = handUIController.GetViewForCard(confirmedSnapshot[i]);
+                    if (view != null)
+                        viewsForVfx.Add(view);
+                }
+            }
+
+            EndSelectionInternal(confirmed: true);
+
+            if (graveyardVfx != null && viewsForVfx.Count > 0)
+                graveyardVfx.PlayBatchCardsToGraveyard(viewsForVfx);
+
+            int moved = deckController != null
+                ? deckController.DiscardCardsFromHand(confirmedSnapshot)
+                : 0;
+
+            if (graveyardVfx == null)
+                pileCounterUI?.ForceSyncDisplayedToReal();
+
+            handUIController?.SyncHandViewsExternal();
+            handUIController?.RefreshInteractivityExternal();
+
+            if (verboseLogs)
+                Debug.Log($"[HandSelection] Discarded {moved} card(s).");
+
+            confirmedSnapshot.Clear();
+        }
+
+        public void BeginSelection(
+            HandCardSelectionPurpose selectionPurpose,
+            IReadOnlyList<CardInstance> candidates,
+            int requested,
+            string instruction = null)
+        {
+            // Snapshot first so callers may pass candidateCards itself without alias wipe.
+            var incomingSnapshot = new List<CardInstance>();
+            if (candidates != null)
+            {
+                for (int i = 0; i < candidates.Count; i++)
+                {
+                    var card = candidates[i];
+                    if (card?.Data == null)
+                        continue;
+                    if (deckController != null && !deckController.IsInHand(card))
+                        continue;
+                    if (!incomingSnapshot.Contains(card))
+                        incomingSnapshot.Add(card);
+                }
+            }
+
+            ForceCancelSelectionInternal(discardSelectedCards: false);
+
+            purpose = selectionPurpose;
+            requestedCount = Mathf.Max(0, requested);
+            selectedCards.Clear();
+            candidateCards.Clear();
+            candidateCards.AddRange(incomingSnapshot);
+
+            requiredCount = Mathf.Min(requestedCount, candidateCards.Count);
+            if (requiredCount <= 0)
+            {
+                selectionUI?.HideImmediate();
+                return;
+            }
+
+            isSelecting = true;
+            confirmRequested = false;
+            forceCancelled = false;
+
+            handUIController?.BeginHandSelection(this);
+            selectionUI?.Show(
+                string.IsNullOrEmpty(instruction) ? discardInstruction : instruction,
+                SelectedCount,
+                requiredCount);
+
+            RefreshSelectionVisuals();
+            OnSelectionStarted?.Invoke();
+            OnSelectionChanged?.Invoke();
+        }
+
+        public bool TryToggleCard(CardInstance card)
+        {
+            if (!isSelecting || card?.Data == null)
+                return false;
+
+            if (!candidateCards.Contains(card))
+                return false;
+
+            if (deckController != null && !deckController.IsInHand(card))
+            {
+                RefreshCandidatesAfterPileChange();
+                return false;
+            }
+
+            int index = selectedCards.IndexOf(card);
+            if (index >= 0)
+            {
+                selectedCards.RemoveAt(index);
+            }
+            else
+            {
+                if (selectedCards.Count >= requiredCount)
+                    return false;
+
+                selectedCards.Add(card);
+            }
+
+            selectionUI?.RefreshCount(SelectedCount, requiredCount);
+            RefreshSelectionVisuals();
+            OnSelectionChanged?.Invoke();
+            return true;
+        }
+
+        public void ConfirmSelection()
+        {
+            if (!isSelecting)
+                return;
+
+            if (SelectedCount != requiredCount)
+                return;
+
+            selectionUI?.SetConfirmInteractable(false);
+            confirmRequested = true;
+        }
+
+        /// <summary>Cancel selection without discarding. Used by battle reset / battle end.</summary>
+        public void ForceCancelSelection()
+        {
+            ForceCancelSelectionInternal(discardSelectedCards: false);
+        }
+
+        public void RefreshSelectionVisuals()
+        {
+            if (!isSelecting)
+            {
+                handUIController?.EndHandSelection();
+                return;
+            }
+
+            handUIController?.RefreshHandSelectionVisuals(
+                candidateCards,
+                selectedCards,
+                requiredCount);
+        }
+
+        private void HandleConfirmClicked()
+        {
+            ConfirmSelection();
+        }
+
+        private void HandleBattleEnded(BattleOutcome outcome)
+        {
+            ForceCancelSelectionInternal(discardSelectedCards: false);
+        }
+
+        private void HandlePilesChanged()
+        {
+            if (!isSelecting)
+                return;
+
+            RefreshCandidatesAfterPileChange();
+        }
+
+        private void RefreshCandidatesAfterPileChange()
+        {
+            for (int i = candidateCards.Count - 1; i >= 0; i--)
+            {
+                var card = candidateCards[i];
+                if (card == null || deckController == null || !deckController.IsInHand(card))
+                    candidateCards.RemoveAt(i);
+            }
+
+            for (int i = selectedCards.Count - 1; i >= 0; i--)
+            {
+                var card = selectedCards[i];
+                if (card == null || !candidateCards.Contains(card))
+                    selectedCards.RemoveAt(i);
+            }
+
+            // Newly drawn cards should join the candidate set while still selecting.
+            if (deckController != null)
+            {
+                var hand = deckController.Hand;
+                for (int i = 0; i < hand.Count; i++)
+                {
+                    var card = hand[i];
+                    if (card?.Data == null)
+                        continue;
+                    if (!candidateCards.Contains(card))
+                        candidateCards.Add(card);
+                }
+            }
+
+            int newRequired = Mathf.Min(requestedCount, candidateCards.Count);
+            if (newRequired != requiredCount)
+            {
+                requiredCount = newRequired;
+                while (selectedCards.Count > requiredCount && selectedCards.Count > 0)
+                    selectedCards.RemoveAt(selectedCards.Count - 1);
+            }
+
+            if (requiredCount <= 0)
+            {
+                // Nothing left to select: complete as a soft cancel/skip without locking.
+                confirmRequested = true;
+                EndSelectionInternal(confirmed: false);
+                return;
+            }
+
+            selectionUI?.RefreshCount(SelectedCount, requiredCount);
+            RefreshSelectionVisuals();
+            OnSelectionChanged?.Invoke();
+        }
+
+        private void RebuildCandidatesFromCurrentHand()
+        {
+            candidateCards.Clear();
+            if (deckController == null)
+                return;
+
+            var hand = deckController.Hand;
+            for (int i = 0; i < hand.Count; i++)
+            {
+                var card = hand[i];
+                if (card?.Data != null)
+                    candidateCards.Add(card);
+            }
+        }
+
+        private int CountValidCandidates()
+        {
+            int count = 0;
+            for (int i = 0; i < candidateCards.Count; i++)
+            {
+                if (candidateCards[i]?.Data != null)
+                    count++;
+            }
+
+            return count;
+        }
+
+        private void ForceCancelSelectionInternal(bool discardSelectedCards)
+        {
+            if (!isSelecting && selectedCards.Count == 0 && (selectionUI == null || !selectionUI.IsVisible))
+                return;
+
+            forceCancelled = true;
+            confirmRequested = false;
+
+            if (discardSelectedCards && selectedCards.Count > 0 && deckController != null)
+                deckController.DiscardCardsFromHand(selectedCards);
+
+            EndSelectionInternal(confirmed: false);
+        }
+
+        private void EndSelectionInternal(bool confirmed)
+        {
+            bool wasSelecting = isSelecting;
+            isSelecting = false;
+
+            selectedCards.Clear();
+            candidateCards.Clear();
+            requestedCount = 0;
+            requiredCount = 0;
+
+            selectionUI?.HideImmediate();
+            handUIController?.EndHandSelection();
+
+            if (wasSelecting)
+                OnSelectionEnded?.Invoke();
+        }
+    }
+}
+```
+
+## FILE: HandCardSelectionPurpose.cs
+**Path:** `Assets/Scripts/CardBattle/Cards/UI/HandCardSelectionPurpose.cs`
+```csharp
+namespace CardBattle.Core
+{
+    /// <summary>
+    /// Purpose for a hand-card selection session. Only ManualDiscard is implemented in Phase 8B-2B.
+    /// </summary>
+    public enum HandCardSelectionPurpose
+    {
+        ManualDiscard = 0
+    }
+}
+```
+
+## FILE: HandCardSelectionUI.cs
+**Path:** `Assets/Scripts/CardBattle/Cards/UI/HandCardSelectionUI.cs`
+```csharp
+using TMPro;
+using UnityEngine;
+using UnityEngine.UI;
+
+namespace CardBattle.Core
+{
+    /// <summary>
+    /// View-only UI for hand card selection sessions (manual discard, etc.).
+    /// </summary>
+    public class HandCardSelectionUI : MonoBehaviour
+    {
+        [Header("Roots")]
+        [SerializeField] private GameObject panelRoot;
+        [SerializeField] private GameObject dimOverlay;
+
+        [Header("Texts")]
+        [SerializeField] private TextMeshProUGUI instructionText;
+        [SerializeField] private TextMeshProUGUI selectionCountText;
+        [SerializeField] private TextMeshProUGUI selectedActionLabelText;
+
+        [Header("Confirm")]
+        [SerializeField] private Button confirmButton;
+        [SerializeField] private TextMeshProUGUI confirmButtonLabel;
+
+        [Header("Defaults")]
+        [SerializeField] private string defaultInstruction = "Select cards to discard";
+        [SerializeField] private string confirmLabel = "Discard";
+
+        public Button ConfirmButton => confirmButton;
+        public bool IsVisible => panelRoot != null && panelRoot.activeSelf;
+
+        private void Awake()
+        {
+            HideImmediate();
+        }
+
+        public void Show(string instruction, int selectedCount, int requiredCount)
+        {
+            if (panelRoot != null)
+                panelRoot.SetActive(true);
+
+            if (dimOverlay != null)
+                dimOverlay.SetActive(true);
+
+            if (instructionText != null)
+                instructionText.text = string.IsNullOrEmpty(instruction) ? defaultInstruction : instruction;
+
+            if (selectedActionLabelText != null)
+                selectedActionLabelText.text = confirmLabel;
+
+            if (confirmButtonLabel != null)
+                confirmButtonLabel.text = confirmLabel;
+
+            RefreshCount(selectedCount, requiredCount);
+            SetConfirmInteractable(selectedCount == requiredCount && requiredCount > 0);
+        }
+
+        public void RefreshCount(int selectedCount, int requiredCount)
+        {
+            if (selectionCountText != null)
+                selectionCountText.text = $"{selectedCount} / {requiredCount}";
+
+            SetConfirmInteractable(selectedCount == requiredCount && requiredCount > 0);
+        }
+
+        public void SetConfirmInteractable(bool value)
+        {
+            if (confirmButton != null)
+                confirmButton.interactable = value;
+        }
+
+        public void HideImmediate()
+        {
+            if (confirmButton != null)
+                confirmButton.interactable = false;
+
+            if (panelRoot != null)
+                panelRoot.SetActive(false);
+
+            if (dimOverlay != null)
+                dimOverlay.SetActive(false);
+        }
+    }
+}
+```
+
 ## FILE: HandUIController.cs
 **Path:** `Assets/Scripts/CardBattle/Cards/UI/HandUIController.cs`
 ```csharp
@@ -2759,11 +3943,15 @@ namespace CardBattle.Core
         [SerializeField] private EnemyActionSystem enemyActionSystem;
         [SerializeField] private TargetSelectionSystem targetSelectionSystem;
         [SerializeField] private BattleActionRunner battleActionRunner;
+        [SerializeField] private HandCardSelectionController handCardSelectionController;
 
         [Header("UI References")]
         [SerializeField] private Transform handContainer;
         [SerializeField] private CardViewUI cardViewPrefab;
         [SerializeField] private RectTransform drawSpawnAnchor;
+        [Tooltip("Optional Canvas on Hand/HandPanel. During selection, override sorting so cards stay above the dim overlay.")]
+        [SerializeField] private Canvas handSortingCanvas;
+        [SerializeField] private int handSelectionSortingOrder = 50;
 
         [Header("Audio")]
         [SerializeField] private CardSFXController cardSfx;
@@ -2842,6 +4030,12 @@ namespace CardBattle.Core
         private CardViewUI selectedView;
         private CardViewUI hoveredCardView;
         private Coroutine dealRoutine;
+
+        private bool handSelectionActive;
+        private HandCardSelectionController activeHandSelection;
+        private int previousHandCanvasSortingOrder;
+        private bool previousHandCanvasOverrideSorting;
+        private bool handCanvasSortBoosted;
 
         private int lastLoggedLayoutCount = -1;
         private float lastLoggedCardScale;
@@ -3161,6 +4355,9 @@ namespace CardBattle.Core
             RefreshCardInteractivity();
             LayoutCards();
 
+            if (handSelectionActive && activeHandSelection != null && activeHandSelection.IsSelecting)
+                activeHandSelection.RefreshSelectionVisuals();
+
             if (shouldPlayDeal)
                 dealRoutine = StartCoroutine(CoDealInNewCards(newlyCreatedViews));
         }
@@ -3254,12 +4451,115 @@ namespace CardBattle.Core
 
             view.SetClickAction(() =>
             {
+                if (handSelectionActive)
+                {
+                    HandleHandSelectionClick(view, card);
+                    return;
+                }
+
                 if (!view.IsInteractable)
                     return;
 
                 SelectView(view);
                 TryPlayCardFromView(card);
             });
+        }
+
+        private void HandleHandSelectionClick(CardViewUI view, CardInstance card)
+        {
+            if (activeHandSelection == null || card == null)
+                return;
+
+            activeHandSelection.TryToggleCard(card);
+        }
+
+        /// <summary>Enter hand selection mode without rebuilding card views.</summary>
+        public void BeginHandSelection(HandCardSelectionController controller)
+        {
+            activeHandSelection = controller;
+            handSelectionActive = controller != null && controller.IsSelecting;
+            DeselectCurrentCard();
+            BoostHandCanvasSorting(true);
+            RefreshCardInteractivity();
+        }
+
+        public void EndHandSelection()
+        {
+            handSelectionActive = false;
+            activeHandSelection = null;
+
+            for (int i = 0; i < spawnedCards.Count; i++)
+            {
+                var view = spawnedCards[i];
+                if (view != null)
+                    view.ClearHandSelectionState();
+            }
+
+            BoostHandCanvasSorting(false);
+            RefreshCardInteractivity();
+        }
+
+        public void RefreshHandSelectionVisuals(
+            IReadOnlyList<CardInstance> candidates,
+            IReadOnlyList<CardInstance> selected,
+            int requiredCount)
+        {
+            handSelectionActive = true;
+            int selectedCount = selected != null ? selected.Count : 0;
+            bool selectionFull = selectedCount >= requiredCount && requiredCount > 0;
+
+            for (int i = 0; i < spawnedCards.Count; i++)
+            {
+                var view = spawnedCards[i];
+                if (view == null)
+                    continue;
+
+                var card = view.BoundCard;
+                bool isCandidate = card != null && candidates != null && ContainsCard(candidates, card);
+                bool isSelected = card != null && selected != null && ContainsCard(selected, card);
+                bool selectable = isCandidate && (isSelected || !selectionFull);
+
+                view.SetHandSelectionState(true, isSelected, selectable);
+            }
+        }
+
+        private static bool ContainsCard(IReadOnlyList<CardInstance> list, CardInstance card)
+        {
+            if (list == null || card == null)
+                return false;
+
+            for (int i = 0; i < list.Count; i++)
+            {
+                if (list[i] == card)
+                    return true;
+            }
+
+            return false;
+        }
+
+        private void BoostHandCanvasSorting(bool enable)
+        {
+            if (handSortingCanvas == null)
+                return;
+
+            if (enable)
+            {
+                if (!handCanvasSortBoosted)
+                {
+                    previousHandCanvasOverrideSorting = handSortingCanvas.overrideSorting;
+                    previousHandCanvasSortingOrder = handSortingCanvas.sortingOrder;
+                    handCanvasSortBoosted = true;
+                }
+
+                handSortingCanvas.overrideSorting = true;
+                handSortingCanvas.sortingOrder = handSelectionSortingOrder;
+            }
+            else if (handCanvasSortBoosted)
+            {
+                handSortingCanvas.overrideSorting = previousHandCanvasOverrideSorting;
+                handSortingCanvas.sortingOrder = previousHandCanvasSortingOrder;
+                handCanvasSortBoosted = false;
+            }
         }
 
         private void HandleCardHoverStarted(CardViewUI view)
@@ -3808,6 +5108,12 @@ namespace CardBattle.Core
 
         private void RefreshCardInteractivity()
         {
+            if (handSelectionActive && activeHandSelection != null && activeHandSelection.IsSelecting)
+            {
+                activeHandSelection.RefreshSelectionVisuals();
+                return;
+            }
+
             for (int i = 0; i < spawnedCards.Count; i++)
             {
                 var view = spawnedCards[i];
@@ -3843,6 +5149,8 @@ namespace CardBattle.Core
             if (dealRoutine != null)
                 StopDealRoutineAndReleaseLocks();
 
+            handCardSelectionController?.ForceCancelSelection();
+            EndHandSelection();
             DeselectCurrentCard();
             hoveredCardView = null;
             ClearSpawnedCards();

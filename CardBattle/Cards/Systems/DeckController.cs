@@ -201,6 +201,55 @@ namespace CardBattle.Core
             NotifyChanged();
         }
 
+        /// <summary>
+        /// Manual discard: move one existing hand instance to the graveyard.
+        /// Does not play the card or spend AP.
+        /// </summary>
+        public bool DiscardCardFromHand(CardInstance card)
+        {
+            if (card == null || !_hand.Remove(card))
+                return false;
+
+            if (!_graveyard.Contains(card))
+                _graveyard.Add(card);
+
+            NotifyChanged();
+            return true;
+        }
+
+        /// <summary>
+        /// Manual discard batch. Ignores nulls, duplicates, and cards no longer in hand.
+        /// Notifies once if any card moved.
+        /// </summary>
+        public int DiscardCardsFromHand(IReadOnlyList<CardInstance> cards)
+        {
+            if (cards == null || cards.Count == 0)
+                return 0;
+
+            var seen = new HashSet<CardInstance>();
+            int moved = 0;
+
+            for (int i = 0; i < cards.Count; i++)
+            {
+                var card = cards[i];
+                if (card == null || !seen.Add(card))
+                    continue;
+
+                if (!_hand.Remove(card))
+                    continue;
+
+                if (!_graveyard.Contains(card))
+                    _graveyard.Add(card);
+
+                moved++;
+            }
+
+            if (moved > 0)
+                NotifyChanged();
+
+            return moved;
+        }
+
         public void ShuffleDeck()
         {
             ShuffleListInPlace(_deck);

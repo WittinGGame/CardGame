@@ -340,6 +340,7 @@ namespace CardBattle.Core
 
             battleActionRunner?.ResetRuntimeActionState();
             targetSelectionSystem?.ForceCancelTargetSelection();
+            // Hand selection is also force-cancelled inside ResetRuntimeActionState / hand reset.
             handUIController?.ResetHandRuntimeStateForNewBattle();
 
             if (resetPlayerRuntimeStateOnStartBattle && player != null)

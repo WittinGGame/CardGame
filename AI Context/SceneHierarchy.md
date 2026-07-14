@@ -33,6 +33,9 @@
         6. TargetSelectionSystem (TargetSelectionSystem.cs)
         7. BattleOutcomeController (BattleOutcomeController.cs)
         8. BattleEndPresentationController (BattleEndPresentationController.cs)
+        9. BattleDrawSequenceController (BattleDrawSequenceController.cs)
+        10. CardEffectSequenceRunner (CardEffectSequenceRunner.cs)
+        11. HandCardSelectionController (HandCardSelectionController.cs)
       5. 04_Reward
         1. RewardController (RewardController.cs)
       6. 05_Audio
@@ -66,7 +69,16 @@
     1. BattleUI
       1. HandUI
         1. HandPanel
-      2. BattleHUD
+      2. HandCardSelectionUI
+        1.HandCardSelectionPanel
+          1. DimOverlay
+          2. SelectionContent
+            1. InstructionText
+            2. SelectionCountText
+            3. ConfirmDiscardButton
+              1. text
+          3. SelectedActionLabelText
+      3. BattleHUD
         1. BG
         2. PlayerHp
         3. EndTurnButton
@@ -74,18 +86,18 @@
         5. Graveyard
         6. PlayerAP
         7. PlayerStatusIconPanel
-      3. BattleVFX
+      4. BattleVFX
         1. GraveyardVFXContainer
         2. GraveyardToDeckVFXController
         3. FloatingTextContainer
-      4. TreeMapUI
+      5. TreeMapUI
         1. MapPanel
           1. LineContainer
           2. NodeContainer
           3. SelectedNodeInfoText
           4. StatusText
           5. StartBattleButton
-      5. RunTopBarController
+      6. RunTopBarController
         1. RunTopBarUI
           1. GoldText
             1. GoldLabelText
@@ -103,7 +115,7 @@
                     1. Content
                 3. EmptyText
                 4. CloseButton
-      6. RewardUI
+      7. RewardUI
         1. RewardPanel
           1. DimBackground
           2. Title
@@ -114,7 +126,7 @@
           6. ResultText
           7. SkipButton
           8. ContinueButton
-      7. RunEndUI
+      8. RunEndUI
         1. RunCompletePanel
           1. Title
           2. SummaryText
@@ -123,7 +135,7 @@
           1. Title
           2. SummaryText
           3. BackToMainButton
-      8. MainFlowUI
+      9. MainFlowUI
         1. MainMenuPanel
           1. NewRunButton
           2. ContinueButton
