@@ -34,6 +34,7 @@ namespace CardBattle.Core
             sb.AppendLine($"Hand={deckController.Hand.Count}/{deckController.MaxHandSize}");
             sb.AppendLine($"Graveyard={deckController.Graveyard.Count}");
             sb.AppendLine($"Exhaust={deckController.GetExhaustCount()}");
+            sb.AppendLine($"Removed={deckController.GetRemovedCount()}");
             sb.AppendLine($"PendingOverflow={deckController.PendingOverflowCount}");
             sb.AppendLine($"Total={GetConservedTotal()}");
             sb.AppendLine(
@@ -54,6 +55,7 @@ namespace CardBattle.Core
                 sb.AppendLine(
                     $"  [{i}] {card.Data.DisplayName} | id={card.InstanceId} | " +
                     $"Retain={DeckController.ResolveRetainAtEndTurn(card)} | " +
+                    $"Temporary={DeckController.ResolveTemporary(card)} | " +
                     $"ExhaustAfterPlay={card.Data.ExhaustAfterPlay}");
             }
 
@@ -67,7 +69,7 @@ namespace CardBattle.Core
                 return;
 
             if (!HasDuplicateInstanceIdsAcrossPiles())
-                Debug.Log($"{LogPrefix} PASS — No duplicate InstanceIds across Deck/Hand/Graveyard/Exhaust");
+                Debug.Log($"{LogPrefix} PASS — No duplicate InstanceIds across Deck/Hand/Graveyard/Exhaust/Removed");
             else
                 Debug.LogError($"{LogPrefix} FAIL — Duplicate InstanceIds detected across piles");
         }
@@ -128,7 +130,7 @@ namespace CardBattle.Core
             sb.AppendLine("6. Hand = retained + newly drawn (up to MaxHandSize); overflow follows existing rules.");
             sb.AppendLine("7. Retained CardView keeps the same CardInstance binding (no duplicate views).");
             sb.AppendLine("8. Retained card is playable next round.");
-            sb.AppendLine("9. Playing a Retain card routes via ExhaustAfterPlay (Graveyard or Exhaust).");
+            sb.AppendLine("9. Playing a Retain card routes by runtime destination (Graveyard, Exhaust, or Removed).");
             sb.AppendLine("10. Manual discard can discard a Retain card to Graveyard.");
             sb.AppendLine("11. Retain + Exhaust: unplayed → retained; played → Exhaust pile.");
             sb.AppendLine("12. Capture baseline, end turn, draw — total conservation unchanged.");
@@ -136,7 +138,9 @@ namespace CardBattle.Core
             if (retainTestCard != null)
             {
                 sb.AppendLine($"Retain test card: {retainTestCard.DisplayName} (id={retainTestCard.CardId})");
-                sb.AppendLine($"Retain={retainTestCard.Retain} ExhaustAfterPlay={retainTestCard.ExhaustAfterPlay}");
+                sb.AppendLine(
+                    $"Retain={retainTestCard.Retain} Temporary={retainTestCard.Temporary} " +
+                    $"ExhaustAfterPlay={retainTestCard.ExhaustAfterPlay}");
                 sb.AppendLine($"Description:\n{CardDescriptionBuilder.Build(retainTestCard)}");
             }
             else
@@ -160,8 +164,9 @@ namespace CardBattle.Core
             var result = deckController.ResolveEndTurnHand();
             Debug.Log(
                 $"{LogPrefix} ResolveEndTurnHand | Discarded={result.DiscardedCount} " +
-                $"Retained={result.RetainedCount} | Hand={deckController.Hand.Count} " +
-                $"Graveyard={deckController.Graveyard.Count}");
+                $"Retained={result.RetainedCount} Removed={result.RemovedCount} | " +
+                $"Hand={deckController.Hand.Count} Graveyard={deckController.Graveyard.Count} " +
+                $"RemovedPile={deckController.GetRemovedCount()}");
 
             if (handUIController != null)
                 handUIController.SyncHandViewsExternal();
@@ -181,6 +186,7 @@ namespace CardBattle.Core
                    + deckController.Hand.Count
                    + deckController.Graveyard.Count
                    + deckController.GetExhaustCount()
+                   + deckController.GetRemovedCount()
                    + deckController.PendingOverflowCount;
         }
 
@@ -190,7 +196,8 @@ namespace CardBattle.Core
             return HasDupInPile(deckController.Deck, seen) ||
                    HasDupInPile(deckController.Hand, seen) ||
                    HasDupInPile(deckController.Graveyard, seen) ||
-                   HasDupInPile(deckController.ExhaustPile, seen);
+                   HasDupInPile(deckController.ExhaustPile, seen) ||
+                   HasDupInPile(deckController.RemovedCards, seen);
         }
 
         private static bool HasDupInPile(IReadOnlyList<CardInstance> pile, HashSet<System.Guid> seen)

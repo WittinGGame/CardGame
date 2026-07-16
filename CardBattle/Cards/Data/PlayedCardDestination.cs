@@ -6,6 +6,7 @@ namespace CardBattle.Core
     public enum PlayedCardDestination
     {
         Graveyard = 0,
-        Exhaust = 1
+        Exhaust = 1,
+        Removed = 2
     }
 }

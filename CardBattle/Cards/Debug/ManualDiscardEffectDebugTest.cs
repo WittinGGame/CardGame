@@ -41,6 +41,7 @@ namespace CardBattle.Core
                 $"Hand={deckController.Hand.Count}\n" +
                 $"Graveyard={deckController.Graveyard.Count}\n" +
                 $"Exhaust={deckController.GetExhaustCount()}\n" +
+                $"Removed={deckController.GetRemovedCount()}\n" +
                 $"PendingOverflow={deckController.PendingOverflowCount}\n" +
                 $"RunnerBusy={(battleActionRunner != null && battleActionRunner.IsBusy)}");
         }
@@ -137,6 +138,7 @@ namespace CardBattle.Core
             var id = pick.InstanceId;
             int totalBefore = deckController.Deck.Count + deckController.Hand.Count +
                               deckController.Graveyard.Count + deckController.GetExhaustCount() +
+                              deckController.GetRemovedCount() +
                               deckController.PendingOverflowCount;
 
             bool moved = deckController.DiscardCardFromHand(pick);
@@ -155,6 +157,7 @@ namespace CardBattle.Core
 
             int totalAfter = deckController.Deck.Count + deckController.Hand.Count +
                              deckController.Graveyard.Count + deckController.GetExhaustCount() +
+                             deckController.GetRemovedCount() +
                              deckController.PendingOverflowCount;
 
             bool noDupAcrossPiles = !HasDuplicateInstanceIdsAcrossPiles();
@@ -257,7 +260,8 @@ namespace CardBattle.Core
             return HasDupInPile(deckController.Deck, seen) ||
                    HasDupInPile(deckController.Hand, seen) ||
                    HasDupInPile(deckController.Graveyard, seen) ||
-                   HasDupInPile(deckController.ExhaustPile, seen);
+                   HasDupInPile(deckController.ExhaustPile, seen) ||
+                   HasDupInPile(deckController.RemovedCards, seen);
         }
 
         private static bool HasDupInPile(IReadOnlyList<CardInstance> pile, HashSet<System.Guid> seen)

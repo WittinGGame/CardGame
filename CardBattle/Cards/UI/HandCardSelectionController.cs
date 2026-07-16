@@ -118,13 +118,17 @@ namespace CardBattle.Core
 
             OnSelectionConfirmed?.Invoke();
 
-            // Capture views for optional VFX before pile mutation / selection exit.
+            // Capture views for optional Graveyard VFX before pile mutation / selection exit.
             var viewsForVfx = new List<CardViewUI>(confirmedSnapshot.Count);
             if (handUIController != null)
             {
                 for (int i = 0; i < confirmedSnapshot.Count; i++)
                 {
-                    var view = handUIController.GetViewForCard(confirmedSnapshot[i]);
+                    var card = confirmedSnapshot[i];
+                    if (DeckController.ResolveDiscardDestination(card) != DeckController.DiscardDestination.Graveyard)
+                        continue;
+
+                    var view = handUIController.GetViewForCard(card);
                     if (view != null)
                         viewsForVfx.Add(view);
                 }

@@ -120,6 +120,8 @@ namespace CardBattle.Core
         [Header("Keywords")]
         [Tooltip("When true, this card remains in Hand instead of being discarded at the end of the player's turn.")]
         [SerializeField] private bool retain;
+        [Tooltip("When true, this card exists only for the current Battle and is removed whenever it leaves Hand.")]
+        [SerializeField] private bool temporary;
         [Tooltip("When true, playing this card sends it to the Exhaust pile instead of the Graveyard.")]
         [SerializeField] private bool exhaustAfterPlay;
 
@@ -135,6 +137,7 @@ namespace CardBattle.Core
         public int ApCost => Mathf.Max(0, apCost);
         public CardTargetMode TargetMode => targetMode;
         public bool Retain => retain;
+        public bool Temporary => temporary;
         public bool ExhaustAfterPlay => exhaustAfterPlay;
         public IReadOnlyList<CardEffectData> Effects => effects;
         public bool HasEffects => effects != null && effects.Length > 0;
@@ -145,6 +148,14 @@ namespace CardBattle.Core
         {
             if (apCost < 0)
                 apCost = 0;
+
+            if (temporary && exhaustAfterPlay)
+            {
+                Debug.LogWarning(
+                    $"[CardData] '{name}' (CardId={CardId}) has Temporary and ExhaustAfterPlay enabled. " +
+                    "Temporary takes priority over ExhaustAfterPlay.",
+                    this);
+            }
 
             if (effects == null || effects.Length == 0)
             {
@@ -211,7 +222,8 @@ namespace CardBattle.Core
     public enum PlayedCardDestination
     {
         Graveyard = 0,
-        Exhaust = 1
+        Exhaust = 1,
+        Removed = 2
     }
 }
 ```
@@ -658,6 +670,7 @@ namespace CardBattle.Core
             CountPileIds("Hand", deckController.Hand, seen, sb, ref total, ref duplicates);
             CountPileIds("Graveyard", deckController.Graveyard, seen, sb, ref total, ref duplicates);
             CountPileIds("Exhaust", deckController.ExhaustPile, seen, sb, ref total, ref duplicates);
+            CountPileIds("Removed", deckController.RemovedCards, seen, sb, ref total, ref duplicates);
 
             // Pending overflow is count-only (collection is not exposed).
             int pending = deckController.PendingOverflowCount;
@@ -672,6 +685,7 @@ namespace CardBattle.Core
                 .Append('/').Append(deckController.MaxHandSize)
                 .Append(" Graveyard=").Append(deckController.Graveyard.Count)
                 .Append(" Exhaust=").Append(deckController.GetExhaustCount())
+                .Append(" Removed=").Append(deckController.GetRemovedCount())
                 .Append(" PendingOverflow=").Append(pending);
 
             if (!handOk)
@@ -739,6 +753,8 @@ namespace CardBattle.Core
             count += CountIdInPile(deckController.Deck, id);
             count += CountIdInPile(deckController.Hand, id);
             count += CountIdInPile(deckController.Graveyard, id);
+            count += CountIdInPile(deckController.ExhaustPile, id);
+            count += CountIdInPile(deckController.RemovedCards, id);
             return count;
         }
 
@@ -780,6 +796,7 @@ namespace CardBattle.Core
                 $"AvailableHandSpace={deckController.AvailableHandSpace}\n" +
                 $"Graveyard={deckController.Graveyard.Count}\n" +
                 $"Exhaust={deckController.GetExhaustCount()}\n" +
+                $"Removed={deckController.GetRemovedCount()}\n" +
                 $"PendingOverflow={deckController.PendingOverflowCount}\n" +
                 $"Total={total}");
         }
@@ -790,6 +807,7 @@ namespace CardBattle.Core
                    + deckController.Hand.Count
                    + deckController.Graveyard.Count
                    + deckController.GetExhaustCount()
+                   + deckController.GetRemovedCount()
                    + deckController.PendingOverflowCount;
         }
 
@@ -834,6 +852,7 @@ namespace CardBattle.Core
                     $"Actual state: Deck={deckController.Deck.Count} " +
                     $"Hand={deckController.Hand.Count}/{deckController.MaxHandSize} " +
                     $"GY={deckController.Graveyard.Count} " +
+                    $"Removed={deckController.GetRemovedCount()} " +
                     $"Pending={deckController.PendingOverflowCount}");
             }
         }
@@ -1218,6 +1237,433 @@ namespace CardBattle.Core
 }
 ```
 
+## FILE: GeneratedTemporaryCardDebugTest.cs
+**Path:** `Assets/Scripts/CardBattle/Cards/Debug/GeneratedTemporaryCardDebugTest.cs`
+```csharp
+using System.Collections.Generic;
+using System.Text;
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    /// <summary>
+    /// Play Mode harness for generated Temporary cards and removed-card accounting.
+    /// </summary>
+    public class GeneratedTemporaryCardDebugTest : MonoBehaviour
+    {
+        private const string LogPrefix = "[GeneratedTemporaryDebug]";
+
+        [Header("References")]
+        [SerializeField] private DeckController deckController;
+        [SerializeField] private HandUIController handUIController;
+        [SerializeField] private BattleActionRunner battleActionRunner;
+        [SerializeField] private PlayerBattleUnit player;
+        [SerializeField] private EnemyActionSystem enemyActionSystem;
+        [SerializeField] private PileCounterUI pileCounterUI;
+        [SerializeField] private CardData generatorCard;
+        [SerializeField] private CardData temporaryCard;
+
+        [Header("Accounting")]
+        [SerializeField] private int expectedGeneratedCount;
+
+        private int? runtimeTotalBaseline;
+
+        [ContextMenu("Debug/Print Generated Card State")]
+        public void DebugPrintGeneratedCardState()
+        {
+            if (!ValidateDeck())
+                return;
+
+            var sb = new StringBuilder();
+            sb.AppendLine($"{LogPrefix} Pile state:");
+            sb.AppendLine($"Deck={deckController.Deck.Count}");
+            sb.AppendLine($"Hand={deckController.Hand.Count}/{deckController.MaxHandSize}");
+            sb.AppendLine($"Graveyard={deckController.Graveyard.Count}");
+            sb.AppendLine($"Exhaust={deckController.GetExhaustCount()}");
+            sb.AppendLine($"Removed={deckController.GetRemovedCount()}");
+            sb.AppendLine($"PendingOverflow={deckController.PendingOverflowCount}");
+            sb.AppendLine($"Total={GetRuntimeTotal()}");
+            sb.AppendLine(
+                $"RunnerBusy={(battleActionRunner != null && battleActionRunner.IsBusy)} " +
+                $"CanAct={(player != null && player.CanAct)} " +
+                $"EnemyResolving={(enemyActionSystem != null && enemyActionSystem.IsResolvingEnemyActions)}");
+
+            sb.AppendLine($"Hand cards ({deckController.Hand.Count}):");
+            AppendCardList(sb, deckController.Hand, includeKeywords: true);
+
+            sb.AppendLine($"Removed cards ({deckController.RemovedCards.Count}):");
+            AppendCardList(sb, deckController.RemovedCards, includeKeywords: false);
+
+            Debug.Log(sb.ToString());
+        }
+
+        [ContextMenu("Debug/Create 1 Temporary Card Directly")]
+        public void DebugCreate1TemporaryCardDirectly()
+        {
+            CreateAndLog(1);
+        }
+
+        [ContextMenu("Debug/Create 2 Temporary Cards Directly")]
+        public void DebugCreate2TemporaryCardsDirectly()
+        {
+            CreateAndLog(2);
+        }
+
+        [ContextMenu("Debug/Fill Hand Then Create 2")]
+        public void DebugFillHandThenCreate2()
+        {
+            if (!ValidateDeck())
+                return;
+
+            int safetyLimit = GetRuntimeTotal() + 2;
+            int iterations = 0;
+            while (deckController.Hand.Count < Mathf.Max(0, deckController.MaxHandSize - 1))
+            {
+                if (deckController.GetDeckCount() == 0 && deckController.GetGraveyardCount() == 0)
+                    break;
+
+                var step = deckController.DrawCards(1);
+                if (step.DrawnCount <= 0)
+                    break;
+
+                iterations++;
+                if (iterations > safetyLimit)
+                {
+                    Debug.LogError($"{LogPrefix} Fill Hand aborted — safety limit reached.");
+                    break;
+                }
+            }
+
+            var result = deckController.CreateCardsInHand(temporaryCard, 2);
+            RefreshUi();
+            Debug.Log(
+                $"{LogPrefix} FillHandThenCreate2 | Hand={deckController.Hand.Count}/{deckController.MaxHandSize} " +
+                $"AddedToHand={result.AddedToHandCount} RemovedByOverflow={result.RemovedByOverflowCount}");
+            DebugPrintGeneratedCardState();
+        }
+
+        [ContextMenu("Debug/Validate No Duplicate InstanceIds")]
+        public void DebugValidateNoDuplicateInstanceIds()
+        {
+            if (!ValidateDeck())
+                return;
+
+            if (!HasDuplicateInstanceIdsAcrossPiles())
+                Debug.Log($"{LogPrefix} PASS — No duplicate InstanceIds across Deck/Hand/Graveyard/Exhaust/Removed");
+            else
+                Debug.LogError($"{LogPrefix} FAIL — Duplicate InstanceIds detected across piles");
+        }
+
+        [ContextMenu("Debug/Capture Runtime Total Baseline")]
+        public void DebugCaptureRuntimeTotalBaseline()
+        {
+            if (!ValidateDeck())
+                return;
+
+            runtimeTotalBaseline = GetRuntimeTotal();
+            Debug.Log($"{LogPrefix} Baseline captured: total={runtimeTotalBaseline.Value}");
+        }
+
+        [ContextMenu("Debug/Validate Runtime Total")]
+        public void DebugValidateRuntimeTotal()
+        {
+            if (!ValidateDeck())
+                return;
+
+            int total = GetRuntimeTotal();
+            bool noDup = !HasDuplicateInstanceIdsAcrossPiles();
+            bool baselineOk = !runtimeTotalBaseline.HasValue ||
+                              total == runtimeTotalBaseline.Value + Mathf.Max(0, expectedGeneratedCount);
+
+            if (noDup && baselineOk)
+            {
+                Debug.Log(
+                    $"{LogPrefix} PASS — total={total} baseline=" +
+                    $"{(runtimeTotalBaseline.HasValue ? runtimeTotalBaseline.Value.ToString() : "none")} " +
+                    $"expectedGenerated={Mathf.Max(0, expectedGeneratedCount)}");
+            }
+            else
+            {
+                Debug.LogError(
+                    $"{LogPrefix} FAIL — total={total} noDup={noDup} baseline=" +
+                    $"{(runtimeTotalBaseline.HasValue ? runtimeTotalBaseline.Value.ToString() : "none")} " +
+                    $"expectedGenerated={Mathf.Max(0, expectedGeneratedCount)} baselineOk={baselineOk}");
+            }
+        }
+
+        [ContextMenu("Debug/Validate Temporary Pending Overflow Flush")]
+        public void DebugValidateTemporaryPendingOverflowFlush()
+        {
+            if (!ValidateDeck())
+                return;
+
+            if (temporaryCard == null)
+            {
+                Debug.LogError($"{LogPrefix} Assign temporaryCard (Temporary=true) for this regression test.");
+                return;
+            }
+
+            if (!temporaryCard.Temporary)
+            {
+                Debug.LogError($"{LogPrefix} temporaryCard must have Temporary=true.");
+                return;
+            }
+
+            var deckBlueprint = new List<CardData>();
+            for (int i = 0; i < 12; i++)
+                deckBlueprint.Add(temporaryCard);
+
+            deckController.BuildFromCardDataList(deckBlueprint);
+
+            int safetyLimit = deckController.MaxHandSize + 4;
+            int iterations = 0;
+            while (deckController.Hand.Count < deckController.MaxHandSize)
+            {
+                var step = deckController.DrawCardsFromDeckImmediate(1);
+                if (step.DrawnCount <= 0)
+                    break;
+
+                iterations++;
+                if (iterations > safetyLimit)
+                {
+                    Debug.LogError($"{LogPrefix} FAIL — could not fill hand to MaxHandSize.");
+                    return;
+                }
+            }
+
+            if (deckController.Hand.Count != deckController.MaxHandSize)
+            {
+                Debug.LogError(
+                    $"{LogPrefix} FAIL — expected full hand before overflow draw. " +
+                    $"Hand={deckController.Hand.Count}/{deckController.MaxHandSize}");
+                return;
+            }
+
+            int removedBefore = deckController.GetRemovedCount();
+            int graveyardBefore = deckController.Graveyard.Count;
+            int totalBefore = GetRuntimeTotal();
+
+            var deckBeforeOverflow = deckController.Deck;
+            if (deckBeforeOverflow.Count < 2)
+            {
+                Debug.LogError($"{LogPrefix} FAIL — expected at least 2 deck cards before overflow draw.");
+                return;
+            }
+
+            var overflowIdA = deckBeforeOverflow[deckBeforeOverflow.Count - 1].InstanceId;
+            var overflowIdB = deckBeforeOverflow[deckBeforeOverflow.Count - 2].InstanceId;
+
+            var overflowDraw = deckController.DrawCardsFromDeckImmediate(2);
+            if (overflowDraw.DrawnCount != 2 ||
+                overflowDraw.AddedToHandCount != 0 ||
+                overflowDraw.OverflowedToGraveyardCount != 2 ||
+                deckController.PendingOverflowCount != 2)
+            {
+                Debug.LogError(
+                    $"{LogPrefix} FAIL — overflow setup\n" +
+                    $"Drawn={overflowDraw.DrawnCount} AddedToHand={overflowDraw.AddedToHandCount} " +
+                    $"Overflowed={overflowDraw.OverflowedToGraveyardCount} " +
+                    $"Pending={deckController.PendingOverflowCount}");
+                return;
+            }
+
+            int flushed = deckController.FlushPendingOverflowToGraveyard();
+            bool pendingEmpty = deckController.PendingOverflowCount == 0;
+            int removedAfter = deckController.GetRemovedCount();
+            int graveyardAfter = deckController.Graveyard.Count;
+            int totalAfter = GetRuntimeTotal();
+            bool noDup = !HasDuplicateInstanceIdsAcrossPiles();
+            bool bothRemoved = removedAfter == removedBefore + 2;
+            bool graveyardUnchanged = graveyardAfter == graveyardBefore;
+            bool totalConserved = totalAfter == totalBefore;
+            bool flushCountOk = flushed == 2;
+            bool idAInRemovedOnce = CountInstanceIdInRemoved(overflowIdA) == 1;
+            bool idBInRemovedOnce = CountInstanceIdInRemoved(overflowIdB) == 1;
+            bool idANotInGraveyard = CountInstanceIdInGraveyard(overflowIdA) == 0;
+            bool idBNotInGraveyard = CountInstanceIdInGraveyard(overflowIdB) == 0;
+
+            if (pendingEmpty && bothRemoved && graveyardUnchanged && totalConserved && noDup &&
+                flushCountOk && idAInRemovedOnce && idBInRemovedOnce &&
+                idANotInGraveyard && idBNotInGraveyard)
+            {
+                Debug.Log(
+                    $"{LogPrefix} PASS — Temporary pending overflow flush\n" +
+                    $"Flushed={flushed} Removed={removedAfter} Graveyard={graveyardAfter} " +
+                    $"Total={totalAfter} Pending={deckController.PendingOverflowCount}");
+            }
+            else
+            {
+                Debug.LogError(
+                    $"{LogPrefix} FAIL — Temporary pending overflow flush\n" +
+                    $"Flushed={flushed} PendingEmpty={pendingEmpty} BothRemoved={bothRemoved} " +
+                    $"GraveyardUnchanged={graveyardUnchanged} TotalConserved={totalConserved} NoDup={noDup} " +
+                    $"IdAInRemovedOnce={idAInRemovedOnce} IdBInRemovedOnce={idBInRemovedOnce} " +
+                    $"IdANotInGraveyard={idANotInGraveyard} IdBNotInGraveyard={idBNotInGraveyard}");
+            }
+
+            RefreshUi();
+            DebugPrintGeneratedCardState();
+        }
+
+        private int CountInstanceIdInRemoved(System.Guid id)
+        {
+            return CountInstanceIdInPile(deckController.RemovedCards, id);
+        }
+
+        private int CountInstanceIdInGraveyard(System.Guid id)
+        {
+            return CountInstanceIdInPile(deckController.Graveyard, id);
+        }
+
+        private static int CountInstanceIdInPile(IReadOnlyList<CardInstance> pile, System.Guid id)
+        {
+            int count = 0;
+            if (pile == null)
+                return 0;
+
+            for (int i = 0; i < pile.Count; i++)
+            {
+                if (pile[i] != null && pile[i].InstanceId == id)
+                    count++;
+            }
+
+            return count;
+        }
+
+        [ContextMenu("Debug/Print Manual Checklist")]
+        public void DebugPrintManualChecklist()
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine($"{LogPrefix} Generated Temporary checklist:");
+            sb.AppendLine("1. Play Hidden Weapon. AP decreases once and two unique Stone instances appear in Hand.");
+            sb.AppendLine("2. Generated Stones do not change Deck count and create new Hand views only.");
+            sb.AppendLine("3. Play Stone: damage resolves, Stone leaves Hand, enters Removed, no Graveyard/Exhaust increase.");
+            sb.AppendLine("4. Stone play does not use Graveyard VFX, but still triggers enemy countdown once.");
+            sb.AppendLine("5. Manual discard a Stone: it leaves Hand and enters Removed, not Graveyard.");
+            sb.AppendLine("6. End turn with Stone in Hand: non-Retain Stone is removed; normal cards go to Graveyard.");
+            sb.AppendLine("7. Retain + Temporary stays in Hand at end turn, then later play removes it.");
+            sb.AppendLine("8. With Hand=9, create 2 Stones: AddedToHand=1, RemovedByOverflow=1.");
+            sb.AppendLine("9. With Hand=10, create 2 Stones: AddedToHand=0, RemovedByOverflow=2.");
+            sb.AppendLine("10. Capture baseline, generate cards, and validate total = baseline + generated count.");
+            sb.AppendLine("11. Start a new battle: Removed resets to 0 and generated cards do not persist.");
+
+            if (generatorCard != null)
+                sb.AppendLine($"Generator card: {generatorCard.DisplayName} (id={generatorCard.CardId})");
+
+            if (temporaryCard != null)
+            {
+                sb.AppendLine($"Temporary card: {temporaryCard.DisplayName} (id={temporaryCard.CardId})");
+                sb.AppendLine(
+                    $"Temporary={temporaryCard.Temporary} Retain={temporaryCard.Retain} " +
+                    $"ExhaustAfterPlay={temporaryCard.ExhaustAfterPlay}");
+                sb.AppendLine($"Description:\n{CardDescriptionBuilder.Build(temporaryCard)}");
+            }
+
+            Debug.Log(sb.ToString());
+            DebugPrintGeneratedCardState();
+        }
+
+        private void CreateAndLog(int amount)
+        {
+            if (!ValidateDeck())
+                return;
+
+            var result = deckController.CreateCardsInHand(temporaryCard, amount);
+            RefreshUi();
+            Debug.Log(
+                $"{LogPrefix} CreateCardsInHand({amount}) | Requested={result.RequestedCount} " +
+                $"Created={result.CreatedCount} AddedToHand={result.AddedToHandCount} " +
+                $"RemovedByOverflow={result.RemovedByOverflowCount}");
+            DebugPrintGeneratedCardState();
+        }
+
+        private void AppendCardList(StringBuilder sb, IReadOnlyList<CardInstance> cards, bool includeKeywords)
+        {
+            if (cards == null)
+                return;
+
+            for (int i = 0; i < cards.Count; i++)
+            {
+                var card = cards[i];
+                if (card?.Data == null)
+                {
+                    sb.AppendLine($"  [{i}] <null>");
+                    continue;
+                }
+
+                if (includeKeywords)
+                {
+                    sb.AppendLine(
+                        $"  [{i}] {card.Data.DisplayName} | id={card.InstanceId} | " +
+                        $"Temporary={DeckController.ResolveTemporary(card)} | " +
+                        $"Retain={DeckController.ResolveRetainAtEndTurn(card)} | " +
+                        $"ExhaustAfterPlay={card.Data.ExhaustAfterPlay}");
+                }
+                else
+                {
+                    sb.AppendLine($"  [{i}] {card.Data.DisplayName} | id={card.InstanceId}");
+                }
+            }
+        }
+
+        private int GetRuntimeTotal()
+        {
+            if (deckController == null)
+                return 0;
+
+            return deckController.Deck.Count
+                   + deckController.Hand.Count
+                   + deckController.Graveyard.Count
+                   + deckController.GetExhaustCount()
+                   + deckController.GetRemovedCount()
+                   + deckController.PendingOverflowCount;
+        }
+
+        private bool HasDuplicateInstanceIdsAcrossPiles()
+        {
+            var seen = new HashSet<System.Guid>();
+            return HasDupInPile(deckController.Deck, seen) ||
+                   HasDupInPile(deckController.Hand, seen) ||
+                   HasDupInPile(deckController.Graveyard, seen) ||
+                   HasDupInPile(deckController.ExhaustPile, seen) ||
+                   HasDupInPile(deckController.RemovedCards, seen);
+        }
+
+        private static bool HasDupInPile(IReadOnlyList<CardInstance> pile, HashSet<System.Guid> seen)
+        {
+            if (pile == null)
+                return false;
+
+            for (int i = 0; i < pile.Count; i++)
+            {
+                var card = pile[i];
+                if (card == null)
+                    continue;
+                if (!seen.Add(card.InstanceId))
+                    return true;
+            }
+
+            return false;
+        }
+
+        private void RefreshUi()
+        {
+            handUIController?.SyncHandViewsExternal();
+            pileCounterUI?.ForceSyncDisplayedToReal();
+        }
+
+        private bool ValidateDeck()
+        {
+            if (deckController != null)
+                return true;
+
+            Debug.LogError($"{LogPrefix} DeckController reference is missing.");
+            return false;
+        }
+    }
+}
+```
+
 ## FILE: ManualDiscardEffectDebugTest.cs
 **Path:** `Assets/Scripts/CardBattle/Cards/Debug/ManualDiscardEffectDebugTest.cs`
 ```csharp
@@ -1264,6 +1710,7 @@ namespace CardBattle.Core
                 $"Hand={deckController.Hand.Count}\n" +
                 $"Graveyard={deckController.Graveyard.Count}\n" +
                 $"Exhaust={deckController.GetExhaustCount()}\n" +
+                $"Removed={deckController.GetRemovedCount()}\n" +
                 $"PendingOverflow={deckController.PendingOverflowCount}\n" +
                 $"RunnerBusy={(battleActionRunner != null && battleActionRunner.IsBusy)}");
         }
@@ -1360,6 +1807,7 @@ namespace CardBattle.Core
             var id = pick.InstanceId;
             int totalBefore = deckController.Deck.Count + deckController.Hand.Count +
                               deckController.Graveyard.Count + deckController.GetExhaustCount() +
+                              deckController.GetRemovedCount() +
                               deckController.PendingOverflowCount;
 
             bool moved = deckController.DiscardCardFromHand(pick);
@@ -1378,6 +1826,7 @@ namespace CardBattle.Core
 
             int totalAfter = deckController.Deck.Count + deckController.Hand.Count +
                              deckController.Graveyard.Count + deckController.GetExhaustCount() +
+                             deckController.GetRemovedCount() +
                              deckController.PendingOverflowCount;
 
             bool noDupAcrossPiles = !HasDuplicateInstanceIdsAcrossPiles();
@@ -1480,7 +1929,8 @@ namespace CardBattle.Core
             return HasDupInPile(deckController.Deck, seen) ||
                    HasDupInPile(deckController.Hand, seen) ||
                    HasDupInPile(deckController.Graveyard, seen) ||
-                   HasDupInPile(deckController.ExhaustPile, seen);
+                   HasDupInPile(deckController.ExhaustPile, seen) ||
+                   HasDupInPile(deckController.RemovedCards, seen);
         }
 
         private static bool HasDupInPile(IReadOnlyList<CardInstance> pile, HashSet<System.Guid> seen)
@@ -1551,6 +2001,7 @@ namespace CardBattle.Core
             sb.AppendLine($"Hand={deckController.Hand.Count}/{deckController.MaxHandSize}");
             sb.AppendLine($"Graveyard={deckController.Graveyard.Count}");
             sb.AppendLine($"Exhaust={deckController.GetExhaustCount()}");
+            sb.AppendLine($"Removed={deckController.GetRemovedCount()}");
             sb.AppendLine($"PendingOverflow={deckController.PendingOverflowCount}");
             sb.AppendLine($"Total={GetConservedTotal()}");
             sb.AppendLine(
@@ -1571,6 +2022,7 @@ namespace CardBattle.Core
                 sb.AppendLine(
                     $"  [{i}] {card.Data.DisplayName} | id={card.InstanceId} | " +
                     $"Retain={DeckController.ResolveRetainAtEndTurn(card)} | " +
+                    $"Temporary={DeckController.ResolveTemporary(card)} | " +
                     $"ExhaustAfterPlay={card.Data.ExhaustAfterPlay}");
             }
 
@@ -1584,7 +2036,7 @@ namespace CardBattle.Core
                 return;
 
             if (!HasDuplicateInstanceIdsAcrossPiles())
-                Debug.Log($"{LogPrefix} PASS — No duplicate InstanceIds across Deck/Hand/Graveyard/Exhaust");
+                Debug.Log($"{LogPrefix} PASS — No duplicate InstanceIds across Deck/Hand/Graveyard/Exhaust/Removed");
             else
                 Debug.LogError($"{LogPrefix} FAIL — Duplicate InstanceIds detected across piles");
         }
@@ -1645,7 +2097,7 @@ namespace CardBattle.Core
             sb.AppendLine("6. Hand = retained + newly drawn (up to MaxHandSize); overflow follows existing rules.");
             sb.AppendLine("7. Retained CardView keeps the same CardInstance binding (no duplicate views).");
             sb.AppendLine("8. Retained card is playable next round.");
-            sb.AppendLine("9. Playing a Retain card routes via ExhaustAfterPlay (Graveyard or Exhaust).");
+            sb.AppendLine("9. Playing a Retain card routes by runtime destination (Graveyard, Exhaust, or Removed).");
             sb.AppendLine("10. Manual discard can discard a Retain card to Graveyard.");
             sb.AppendLine("11. Retain + Exhaust: unplayed → retained; played → Exhaust pile.");
             sb.AppendLine("12. Capture baseline, end turn, draw — total conservation unchanged.");
@@ -1653,7 +2105,9 @@ namespace CardBattle.Core
             if (retainTestCard != null)
             {
                 sb.AppendLine($"Retain test card: {retainTestCard.DisplayName} (id={retainTestCard.CardId})");
-                sb.AppendLine($"Retain={retainTestCard.Retain} ExhaustAfterPlay={retainTestCard.ExhaustAfterPlay}");
+                sb.AppendLine(
+                    $"Retain={retainTestCard.Retain} Temporary={retainTestCard.Temporary} " +
+                    $"ExhaustAfterPlay={retainTestCard.ExhaustAfterPlay}");
                 sb.AppendLine($"Description:\n{CardDescriptionBuilder.Build(retainTestCard)}");
             }
             else
@@ -1677,8 +2131,9 @@ namespace CardBattle.Core
             var result = deckController.ResolveEndTurnHand();
             Debug.Log(
                 $"{LogPrefix} ResolveEndTurnHand | Discarded={result.DiscardedCount} " +
-                $"Retained={result.RetainedCount} | Hand={deckController.Hand.Count} " +
-                $"Graveyard={deckController.Graveyard.Count}");
+                $"Retained={result.RetainedCount} Removed={result.RemovedCount} | " +
+                $"Hand={deckController.Hand.Count} Graveyard={deckController.Graveyard.Count} " +
+                $"RemovedPile={deckController.GetRemovedCount()}");
 
             if (handUIController != null)
                 handUIController.SyncHandViewsExternal();
@@ -1698,6 +2153,7 @@ namespace CardBattle.Core
                    + deckController.Hand.Count
                    + deckController.Graveyard.Count
                    + deckController.GetExhaustCount()
+                   + deckController.GetRemovedCount()
                    + deckController.PendingOverflowCount;
         }
 
@@ -1707,7 +2163,8 @@ namespace CardBattle.Core
             return HasDupInPile(deckController.Deck, seen) ||
                    HasDupInPile(deckController.Hand, seen) ||
                    HasDupInPile(deckController.Graveyard, seen) ||
-                   HasDupInPile(deckController.ExhaustPile, seen);
+                   HasDupInPile(deckController.ExhaustPile, seen) ||
+                   HasDupInPile(deckController.RemovedCards, seen);
         }
 
         private static bool HasDupInPile(IReadOnlyList<CardInstance> pile, HashSet<System.Guid> seen)
@@ -1774,6 +2231,7 @@ namespace CardBattle.Core
                 $"Hand={deckController.Hand.Count}/{deckController.MaxHandSize}\n" +
                 $"Graveyard={deckController.Graveyard.Count}\n" +
                 $"Exhaust={deckController.GetExhaustCount()}\n" +
+                $"Removed={deckController.GetRemovedCount()}\n" +
                 $"PendingOverflow={deckController.PendingOverflowCount}\n" +
                 $"Total={GetConservedTotal()}\n" +
                 $"RunnerBusy={(battleActionRunner != null && battleActionRunner.IsBusy)}");
@@ -1786,7 +2244,7 @@ namespace CardBattle.Core
                 return;
 
             if (!HasDuplicateInstanceIdsAcrossPiles())
-                Debug.Log($"{LogPrefix} PASS — No duplicate InstanceIds across Deck/Hand/Graveyard/Exhaust");
+                Debug.Log($"{LogPrefix} PASS — No duplicate InstanceIds across Deck/Hand/Graveyard/Exhaust/Removed");
             else
                 Debug.LogError($"{LogPrefix} FAIL — Duplicate InstanceIds detected across piles");
         }
@@ -1820,7 +2278,7 @@ namespace CardBattle.Core
             sb.AppendLine("7. Enemy countdown decreases once after full sequence.");
             sb.AppendLine("8. Reshuffle Graveyard → Deck never includes Exhaust pile cards.");
             sb.AppendLine("9. Start new battle — Exhaust pile clears; card returns via RunState deck rebuild.");
-            sb.AppendLine("10. Total card conservation remains valid (Deck+Hand+GY+Exhaust+Pending).");
+            sb.AppendLine("10. Total card conservation remains valid (Deck+Hand+GY+Exhaust+Removed+Pending).");
 
             if (exhaustTestCard != null)
             {
@@ -1846,6 +2304,7 @@ namespace CardBattle.Core
                    + deckController.Hand.Count
                    + deckController.Graveyard.Count
                    + deckController.GetExhaustCount()
+                   + deckController.GetRemovedCount()
                    + deckController.PendingOverflowCount;
         }
 
@@ -1855,7 +2314,8 @@ namespace CardBattle.Core
             return HasDupInPile(deckController.Deck, seen) ||
                    HasDupInPile(deckController.Hand, seen) ||
                    HasDupInPile(deckController.Graveyard, seen) ||
-                   HasDupInPile(deckController.ExhaustPile, seen);
+                   HasDupInPile(deckController.ExhaustPile, seen) ||
+                   HasDupInPile(deckController.RemovedCards, seen);
         }
 
         private static bool HasDupInPile(IReadOnlyList<CardInstance> pile, HashSet<System.Guid> seen)
@@ -2130,6 +2590,73 @@ namespace CardBattle.Core
         Immediate = 0,
         DrawPresentation = 1,
         ManualHandSelection = 2
+    }
+}
+```
+
+## FILE: CreateCardsInHandEffectData.cs
+**Path:** `Assets/Scripts/CardBattle/Cards/Effects/CreateCardsInHandEffectData.cs`
+```csharp
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    [CreateAssetMenu(
+        fileName = "CreateCardsInHandEffect",
+        menuName = "Card Battle/Effects/Create Cards In Hand")]
+    public class CreateCardsInHandEffectData : CardEffectData
+    {
+        [Tooltip("Card definition used to create new runtime CardInstances.")]
+        [SerializeField] private CardData cardToCreate;
+
+        [Min(0)]
+        [SerializeField] private int amount = 1;
+
+        public CardData CardToCreate => cardToCreate;
+        public int Amount => Mathf.Max(0, amount);
+
+        public override string GetDescriptionText()
+        {
+            int value = Amount;
+            if (cardToCreate == null || value <= 0)
+                return string.Empty;
+
+            if (value == 1)
+                return $"Create 1 {cardToCreate.DisplayName} in your hand.";
+
+            return $"Create {value} {cardToCreate.DisplayName} cards in your hand.";
+        }
+
+        public override void Apply(CardPlayContext context, CardEffectExecutionContext executionContext)
+        {
+            if (context?.Player?.DeckController == null || cardToCreate == null)
+                return;
+
+            int value = Amount;
+            if (value <= 0)
+                return;
+
+            context.Player.DeckController.CreateCardsInHand(cardToCreate, value);
+        }
+
+#if UNITY_EDITOR
+        private void OnValidate()
+        {
+            if (cardToCreate == null)
+            {
+                Debug.LogWarning(
+                    $"[CreateCardsInHandEffect] '{name}' is missing Card To Create.",
+                    this);
+            }
+
+            if (amount <= 0)
+            {
+                Debug.LogWarning(
+                    $"[CreateCardsInHandEffect] '{name}' Amount should be greater than 0.",
+                    this);
+            }
+        }
+#endif
     }
 }
 ```
@@ -2521,20 +3048,57 @@ namespace CardBattle.Core
 namespace CardBattle.Core
 {
     /// <summary>
-    /// Outcome of end-turn hand resolution (Retain cards stay in Hand; others move to Graveyard).
+    /// Outcome of end-turn hand resolution (Retain cards stay in Hand; others move to Graveyard or Removed).
     /// </summary>
     public readonly struct EndTurnHandResult
     {
         public int DiscardedCount { get; }
         public int RetainedCount { get; }
+        public int RemovedCount { get; }
 
-        public EndTurnHandResult(int discardedCount, int retainedCount)
+        public EndTurnHandResult(int discardedCount, int retainedCount, int removedCount)
         {
             DiscardedCount = discardedCount;
             RetainedCount = retainedCount;
+            RemovedCount = removedCount;
         }
 
-        public static EndTurnHandResult Empty => new EndTurnHandResult(0, 0);
+        public static EndTurnHandResult Empty => new EndTurnHandResult(0, 0, 0);
+    }
+}
+```
+
+## FILE: GeneratedCardResult.cs
+**Path:** `Assets/Scripts/CardBattle/Cards/Runtime/GeneratedCardResult.cs`
+```csharp
+namespace CardBattle.Core
+{
+    /// <summary>
+    /// Outcome of creating new runtime card copies directly in Hand.
+    /// </summary>
+    public readonly struct GeneratedCardResult
+    {
+        public int RequestedCount { get; }
+        public int CreatedCount { get; }
+        public int AddedToHandCount { get; }
+        public int RemovedByOverflowCount { get; }
+
+        public GeneratedCardResult(
+            int requestedCount,
+            int createdCount,
+            int addedToHandCount,
+            int removedByOverflowCount)
+        {
+            RequestedCount = requestedCount < 0 ? 0 : requestedCount;
+            CreatedCount = createdCount < 0 ? 0 : createdCount;
+            AddedToHandCount = addedToHandCount < 0 ? 0 : addedToHandCount;
+            RemovedByOverflowCount = removedByOverflowCount < 0 ? 0 : removedByOverflowCount;
+        }
+
+        public static GeneratedCardResult Empty(int requestedCount)
+        {
+            return new GeneratedCardResult(requestedCount, 0, 0, 0);
+        }
     }
 }
 ```
@@ -2846,13 +3410,26 @@ using UnityEngine;
 namespace CardBattle.Core
 {
     /// <summary>
-    /// Owns the battle piles (deck, hand, graveyard, exhaust) and draw/discard/shuffle rules.
+    /// Owns the battle piles (deck, hand, graveyard, exhaust, removed diagnostics) and draw/discard/shuffle rules.
     /// When the deck is empty during a draw, the graveyard is shuffled back into the deck.
     /// Exhausted cards never reshuffle. Draw respects <see cref="MaxHandSize"/>; excess cards
-    /// overflow to the graveyard (deferred via pending overflow when a multi-step draw may still reshuffle).
+    /// overflow to the graveyard or removed diagnostics (deferred via pending overflow when a multi-step draw may still reshuffle).
     /// </summary>
     public class DeckController : MonoBehaviour
     {
+        public enum DiscardDestination
+        {
+            Graveyard = 0,
+            Removed = 1
+        }
+
+        public enum EndTurnCardDestination
+        {
+            Hand = 0,
+            Graveyard = 1,
+            Removed = 2
+        }
+
         [Tooltip("Optional designer list consumed by BuildFromCardDataList / BuildFromInspectorBlueprint at battle setup.")]
         [SerializeField] private List<CardData> starterDeckBlueprint = new List<CardData>();
 
@@ -2863,6 +3440,7 @@ namespace CardBattle.Core
         private readonly List<CardInstance> _hand = new List<CardInstance>();
         private readonly List<CardInstance> _graveyard = new List<CardInstance>();
         private readonly List<CardInstance> _exhaustPile = new List<CardInstance>();
+        private readonly List<CardInstance> _removedCards = new List<CardInstance>();
 
         /// <summary>
         /// Cards drawn while the hand was full, held out of the graveyard until the
@@ -2875,12 +3453,13 @@ namespace CardBattle.Core
         public IReadOnlyList<CardInstance> Hand => _hand;
         public IReadOnlyList<CardInstance> Graveyard => _graveyard;
         public IReadOnlyList<CardInstance> ExhaustPile => _exhaustPile;
+        public IReadOnlyList<CardInstance> RemovedCards => _removedCards;
 
         public int MaxHandSize => Mathf.Max(0, maxHandSize);
         public int AvailableHandSpace => Mathf.Max(0, MaxHandSize - _hand.Count);
         public bool IsHandFull => AvailableHandSpace <= 0;
 
-        /// <summary>Cards drawn past hand capacity that are not yet committed to the graveyard.</summary>
+        /// <summary>Cards drawn past hand capacity that are not yet committed to a final destination.</summary>
         public int PendingOverflowCount => _pendingOverflow.Count;
 
         /// <summary>Fired after any pile mutation so UI or VFX can subscribe later.</summary>
@@ -2922,6 +3501,7 @@ namespace CardBattle.Core
             _hand.Clear();
             _graveyard.Clear();
             _exhaustPile.Clear();
+            _removedCards.Clear();
             _pendingOverflow.Clear();
             NotifyChanged();
         }
@@ -2943,9 +3523,14 @@ namespace CardBattle.Core
             return _exhaustPile.Count;
         }
 
+        public int GetRemovedCount()
+        {
+            return _removedCards.Count;
+        }
+
         /// <summary>
         /// Draw up to <paramref name="count"/> cards, reshuffling graveyard into deck as needed.
-        /// Overflow is held pending during the operation, then committed to the graveyard once.
+        /// Overflow is held pending during the operation, then committed to Graveyard or Removed once.
         /// </summary>
         public CardDrawResult DrawCards(int count)
         {
@@ -2984,7 +3569,7 @@ namespace CardBattle.Core
 
         /// <summary>
         /// Draws directly from the current deck without auto-reshuffle, respecting hand capacity.
-        /// Overflow is flushed to the graveyard immediately (safe default for simple callers).
+        /// Overflow is flushed to Graveyard or Removed immediately (safe default for simple callers).
         /// For presentation-driven two-phase draws, use <see cref="DrawCardsFromDeckImmediate"/>
         /// and call <see cref="FlushPendingOverflowToGraveyard"/> after the full sequence.
         /// </summary>
@@ -2998,8 +3583,8 @@ namespace CardBattle.Core
 
         /// <summary>
         /// Low-level draw from the current deck only: no reshuffle, respects hand limit.
-        /// Overflow cards stay in pending overflow (not graveyard) so a later reshuffle
-        /// in the same multi-step draw cannot pick them up.
+        /// Overflow cards stay in pending overflow so a later reshuffle in the same
+        /// multi-step draw cannot pick them up.
         /// </summary>
         public CardDrawResult DrawCardsFromDeckImmediate(int count)
         {
@@ -3009,7 +3594,7 @@ namespace CardBattle.Core
         }
 
         /// <summary>
-        /// Moves pending overflow cards into the graveyard in one batch.
+        /// Moves pending overflow cards into Graveyard or Removed in one batch.
         /// Call after a multi-step draw that may reshuffle between immediate draws.
         /// </summary>
         public int FlushPendingOverflowToGraveyard()
@@ -3032,7 +3617,7 @@ namespace CardBattle.Core
         }
 
         /// <summary>
-        /// End-turn hand cleanup: non-Retain cards move Hand → Graveyard; Retain cards stay in Hand.
+        /// End-turn hand cleanup: Retain cards stay in Hand; non-Retain cards move to Graveyard or Removed.
         /// Manual discard and card play use separate APIs and ignore Retain.
         /// </summary>
         public EndTurnHandResult ResolveEndTurnHand()
@@ -3042,6 +3627,8 @@ namespace CardBattle.Core
 
             int discarded = 0;
             int retained = 0;
+            int removed = 0;
+            bool mutated = false;
 
             for (int i = _hand.Count - 1; i >= 0; i--)
             {
@@ -3049,25 +3636,36 @@ namespace CardBattle.Core
                 if (card == null)
                 {
                     _hand.RemoveAt(i);
+                    mutated = true;
                     continue;
                 }
 
-                if (ResolveRetainAtEndTurn(card))
+                EndTurnCardDestination destination = ResolveEndTurnDestination(card);
+                if (destination == EndTurnCardDestination.Hand)
                 {
                     retained++;
                     continue;
                 }
 
                 _hand.RemoveAt(i);
+                mutated = true;
+
+                if (destination == EndTurnCardDestination.Removed)
+                {
+                    AddToRemoved(card);
+                    removed++;
+                    continue;
+                }
+
                 if (!_graveyard.Contains(card))
                     _graveyard.Add(card);
                 discarded++;
             }
 
-            if (discarded > 0)
+            if (mutated)
                 NotifyChanged();
 
-            return new EndTurnHandResult(discarded, retained);
+            return new EndTurnHandResult(discarded, retained, removed);
         }
 
         /// <summary>Compatibility wrapper for end-turn hand cleanup (Retain-aware).</summary>
@@ -3086,8 +3684,38 @@ namespace CardBattle.Core
         }
 
         /// <summary>
-        /// Play resolution: remove from hand and route to Graveyard or Exhaust
-        /// based on <see cref="CardData.ExhaustAfterPlay"/>.
+        /// Whether a card should be treated as Temporary.
+        /// Future upgrade resolution may replace the CardData keyword read with per-instance data.
+        /// </summary>
+        public static bool ResolveTemporary(CardInstance card)
+        {
+            return card?.Data != null && card.Data.Temporary;
+        }
+
+        /// <summary>Resolves end-turn routing priority from card keywords. Does not mutate piles.</summary>
+        public static EndTurnCardDestination ResolveEndTurnDestination(CardInstance card)
+        {
+            if (ResolveRetainAtEndTurn(card))
+                return EndTurnCardDestination.Hand;
+
+            if (ResolveTemporary(card))
+                return EndTurnCardDestination.Removed;
+
+            return EndTurnCardDestination.Graveyard;
+        }
+
+        /// <summary>Resolves manual discard routing priority. Does not mutate piles.</summary>
+        public static DiscardDestination ResolveDiscardDestination(CardInstance card)
+        {
+            if (ResolveTemporary(card))
+                return DiscardDestination.Removed;
+
+            return DiscardDestination.Graveyard;
+        }
+
+        /// <summary>
+        /// Play resolution: remove from hand and route to Graveyard, Exhaust, or Removed
+        /// based on the card's resolved runtime keywords.
         /// </summary>
         public bool PlayCardFromHand(CardInstance card)
         {
@@ -3095,15 +3723,22 @@ namespace CardBattle.Core
                 return false;
 
             PlayedCardDestination destination = ResolvePlayedCardDestination(card);
-            if (destination == PlayedCardDestination.Exhaust)
+            switch (destination)
             {
-                if (!_exhaustPile.Contains(card))
-                    _exhaustPile.Add(card);
-            }
-            else
-            {
-                if (!_graveyard.Contains(card))
-                    _graveyard.Add(card);
+                case PlayedCardDestination.Exhaust:
+                    if (!_exhaustPile.Contains(card))
+                        _exhaustPile.Add(card);
+                    break;
+
+                case PlayedCardDestination.Removed:
+                    AddToRemoved(card);
+                    break;
+
+                case PlayedCardDestination.Graveyard:
+                default:
+                    if (!_graveyard.Contains(card))
+                        _graveyard.Add(card);
+                    break;
             }
 
             NotifyChanged();
@@ -3113,6 +3748,9 @@ namespace CardBattle.Core
         /// <summary>Resolves play destination from card keywords. Does not mutate piles.</summary>
         public static PlayedCardDestination ResolvePlayedCardDestination(CardInstance card)
         {
+            if (ResolveTemporary(card))
+                return PlayedCardDestination.Removed;
+
             if (card?.Data != null && card.Data.ExhaustAfterPlay)
                 return PlayedCardDestination.Exhaust;
 
@@ -3120,7 +3758,7 @@ namespace CardBattle.Core
         }
 
         /// <summary>
-        /// Manual discard: move one existing hand instance to the graveyard.
+        /// Manual discard: move one existing hand instance to Graveyard or Removed.
         /// Does not play the card or spend AP. Never routes to Exhaust.
         /// </summary>
         public bool DiscardCardFromHand(CardInstance card)
@@ -3128,9 +3766,7 @@ namespace CardBattle.Core
             if (card == null || !_hand.Remove(card))
                 return false;
 
-            if (!_graveyard.Contains(card))
-                _graveyard.Add(card);
-
+            RouteCardLeavingHandByDiscard(card);
             NotifyChanged();
             return true;
         }
@@ -3156,9 +3792,7 @@ namespace CardBattle.Core
                 if (!_hand.Remove(card))
                     continue;
 
-                if (!_graveyard.Contains(card))
-                    _graveyard.Add(card);
-
+                RouteCardLeavingHandByDiscard(card);
                 moved++;
             }
 
@@ -3166,6 +3800,51 @@ namespace CardBattle.Core
                 NotifyChanged();
 
             return moved;
+        }
+
+        /// <summary>
+        /// Creates new runtime card copies directly in Hand. Generated overflow bypasses PendingOverflow
+        /// and goes straight to Removed because no reshuffle is occurring in this API.
+        /// </summary>
+        public GeneratedCardResult CreateCardsInHand(CardData cardData, int count)
+        {
+            int requested = Mathf.Max(0, count);
+            if (cardData == null || requested <= 0)
+                return GeneratedCardResult.Empty(requested);
+
+            if (!cardData.Temporary)
+            {
+                Debug.LogWarning(
+                    $"[DeckController] CreateCardsInHand generated '{cardData.DisplayName}' which is not Temporary. " +
+                    "Generated cards should normally be Temporary.",
+                    this);
+            }
+
+            int created = 0;
+            int addedToHand = 0;
+            int removedByOverflow = 0;
+
+            for (int i = 0; i < requested; i++)
+            {
+                var createdCard = new CardInstance(cardData);
+                created++;
+
+                if (_hand.Count < MaxHandSize)
+                {
+                    _hand.Add(createdCard);
+                    addedToHand++;
+                }
+                else
+                {
+                    AddToRemoved(createdCard);
+                    removedByOverflow++;
+                }
+            }
+
+            if (created > 0)
+                NotifyChanged();
+
+            return new GeneratedCardResult(requested, created, addedToHand, removedByOverflow);
         }
 
         /// <summary>
@@ -3292,14 +3971,20 @@ namespace CardBattle.Core
             if (moved <= 0)
                 return 0;
 
-            for (int i = 0; i < _pendingOverflow.Count; i++)
+            var overflowSnapshot = new List<CardInstance>(_pendingOverflow);
+            _pendingOverflow.Clear();
+
+            for (int i = 0; i < overflowSnapshot.Count; i++)
             {
-                var overflowCard = _pendingOverflow[i];
-                if (overflowCard != null && !_graveyard.Contains(overflowCard))
+                var overflowCard = overflowSnapshot[i];
+                if (overflowCard == null)
+                    continue;
+
+                if (ResolveTemporary(overflowCard))
+                    AddToRemoved(overflowCard);
+                else if (!_graveyard.Contains(overflowCard))
                     _graveyard.Add(overflowCard);
             }
-
-            _pendingOverflow.Clear();
 
             if (notify)
                 NotifyChanged();
@@ -3328,20 +4013,32 @@ namespace CardBattle.Core
             }
         }
 
-        private void MoveToGraveyard(CardInstance card)
+        private void RouteCardLeavingHandByDiscard(CardInstance card)
         {
             if (card == null)
                 return;
 
-            _hand.Remove(card);
-            _deck.Remove(card);
-            _pendingOverflow.Remove(card);
-            // Exhausted cards stay in ExhaustPile and never enter Graveyard via this path.
-            if (_exhaustPile.Contains(card))
+            if (ResolveDiscardDestination(card) == DiscardDestination.Removed)
+            {
+                AddToRemoved(card);
                 return;
+            }
 
             if (!_graveyard.Contains(card))
                 _graveyard.Add(card);
+        }
+
+        private void AddToRemoved(CardInstance card)
+        {
+            if (card == null || _removedCards.Contains(card))
+                return;
+
+            _deck.Remove(card);
+            _hand.Remove(card);
+            _graveyard.Remove(card);
+            _exhaustPile.Remove(card);
+            _pendingOverflow.Remove(card);
+            _removedCards.Add(card);
         }
 
         private void NotifyChanged() => OnPilesChanged?.Invoke();
@@ -3384,6 +4081,9 @@ namespace CardBattle.Core
 
             if (data.Retain)
                 lines.Add("Retain.");
+
+            if (data.Temporary)
+                lines.Add("Temporary.");
 
             if (data.ExhaustAfterPlay)
                 lines.Add("Exhaust.");
@@ -4202,13 +4902,17 @@ namespace CardBattle.Core
 
             OnSelectionConfirmed?.Invoke();
 
-            // Capture views for optional VFX before pile mutation / selection exit.
+            // Capture views for optional Graveyard VFX before pile mutation / selection exit.
             var viewsForVfx = new List<CardViewUI>(confirmedSnapshot.Count);
             if (handUIController != null)
             {
                 for (int i = 0; i < confirmedSnapshot.Count; i++)
                 {
-                    var view = handUIController.GetViewForCard(confirmedSnapshot[i]);
+                    var card = confirmedSnapshot[i];
+                    if (DeckController.ResolveDiscardDestination(card) != DeckController.DiscardDestination.Graveyard)
+                        continue;
+
+                    var view = handUIController.GetViewForCard(card);
                     if (view != null)
                         viewsForVfx.Add(view);
                 }

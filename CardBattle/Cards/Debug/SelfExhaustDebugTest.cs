@@ -30,6 +30,7 @@ namespace CardBattle.Core
                 $"Hand={deckController.Hand.Count}/{deckController.MaxHandSize}\n" +
                 $"Graveyard={deckController.Graveyard.Count}\n" +
                 $"Exhaust={deckController.GetExhaustCount()}\n" +
+                $"Removed={deckController.GetRemovedCount()}\n" +
                 $"PendingOverflow={deckController.PendingOverflowCount}\n" +
                 $"Total={GetConservedTotal()}\n" +
                 $"RunnerBusy={(battleActionRunner != null && battleActionRunner.IsBusy)}");
@@ -42,7 +43,7 @@ namespace CardBattle.Core
                 return;
 
             if (!HasDuplicateInstanceIdsAcrossPiles())
-                Debug.Log($"{LogPrefix} PASS — No duplicate InstanceIds across Deck/Hand/Graveyard/Exhaust");
+                Debug.Log($"{LogPrefix} PASS — No duplicate InstanceIds across Deck/Hand/Graveyard/Exhaust/Removed");
             else
                 Debug.LogError($"{LogPrefix} FAIL — Duplicate InstanceIds detected across piles");
         }
@@ -76,7 +77,7 @@ namespace CardBattle.Core
             sb.AppendLine("7. Enemy countdown decreases once after full sequence.");
             sb.AppendLine("8. Reshuffle Graveyard → Deck never includes Exhaust pile cards.");
             sb.AppendLine("9. Start new battle — Exhaust pile clears; card returns via RunState deck rebuild.");
-            sb.AppendLine("10. Total card conservation remains valid (Deck+Hand+GY+Exhaust+Pending).");
+            sb.AppendLine("10. Total card conservation remains valid (Deck+Hand+GY+Exhaust+Removed+Pending).");
 
             if (exhaustTestCard != null)
             {
@@ -102,6 +103,7 @@ namespace CardBattle.Core
                    + deckController.Hand.Count
                    + deckController.Graveyard.Count
                    + deckController.GetExhaustCount()
+                   + deckController.GetRemovedCount()
                    + deckController.PendingOverflowCount;
         }
 
@@ -111,7 +113,8 @@ namespace CardBattle.Core
             return HasDupInPile(deckController.Deck, seen) ||
                    HasDupInPile(deckController.Hand, seen) ||
                    HasDupInPile(deckController.Graveyard, seen) ||
-                   HasDupInPile(deckController.ExhaustPile, seen);
+                   HasDupInPile(deckController.ExhaustPile, seen) ||
+                   HasDupInPile(deckController.RemovedCards, seen);
         }
 
         private static bool HasDupInPile(IReadOnlyList<CardInstance> pile, HashSet<System.Guid> seen)

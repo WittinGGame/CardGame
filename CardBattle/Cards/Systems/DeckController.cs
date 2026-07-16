@@ -5,13 +5,26 @@ using UnityEngine;
 namespace CardBattle.Core
 {
     /// <summary>
-    /// Owns the battle piles (deck, hand, graveyard, exhaust) and draw/discard/shuffle rules.
+    /// Owns the battle piles (deck, hand, graveyard, exhaust, removed diagnostics) and draw/discard/shuffle rules.
     /// When the deck is empty during a draw, the graveyard is shuffled back into the deck.
     /// Exhausted cards never reshuffle. Draw respects <see cref="MaxHandSize"/>; excess cards
-    /// overflow to the graveyard (deferred via pending overflow when a multi-step draw may still reshuffle).
+    /// overflow to the graveyard or removed diagnostics (deferred via pending overflow when a multi-step draw may still reshuffle).
     /// </summary>
     public class DeckController : MonoBehaviour
     {
+        public enum DiscardDestination
+        {
+            Graveyard = 0,
+            Removed = 1
+        }
+
+        public enum EndTurnCardDestination
+        {
+            Hand = 0,
+            Graveyard = 1,
+            Removed = 2
+        }
+
         [Tooltip("Optional designer list consumed by BuildFromCardDataList / BuildFromInspectorBlueprint at battle setup.")]
         [SerializeField] private List<CardData> starterDeckBlueprint = new List<CardData>();
 
@@ -22,6 +35,7 @@ namespace CardBattle.Core
         private readonly List<CardInstance> _hand = new List<CardInstance>();
         private readonly List<CardInstance> _graveyard = new List<CardInstance>();
         private readonly List<CardInstance> _exhaustPile = new List<CardInstance>();
+        private readonly List<CardInstance> _removedCards = new List<CardInstance>();
 
         /// <summary>
         /// Cards drawn while the hand was full, held out of the graveyard until the
@@ -34,12 +48,13 @@ namespace CardBattle.Core
         public IReadOnlyList<CardInstance> Hand => _hand;
         public IReadOnlyList<CardInstance> Graveyard => _graveyard;
         public IReadOnlyList<CardInstance> ExhaustPile => _exhaustPile;
+        public IReadOnlyList<CardInstance> RemovedCards => _removedCards;
 
         public int MaxHandSize => Mathf.Max(0, maxHandSize);
         public int AvailableHandSpace => Mathf.Max(0, MaxHandSize - _hand.Count);
         public bool IsHandFull => AvailableHandSpace <= 0;
 
-        /// <summary>Cards drawn past hand capacity that are not yet committed to the graveyard.</summary>
+        /// <summary>Cards drawn past hand capacity that are not yet committed to a final destination.</summary>
         public int PendingOverflowCount => _pendingOverflow.Count;
 
         /// <summary>Fired after any pile mutation so UI or VFX can subscribe later.</summary>
@@ -81,6 +96,7 @@ namespace CardBattle.Core
             _hand.Clear();
             _graveyard.Clear();
             _exhaustPile.Clear();
+            _removedCards.Clear();
             _pendingOverflow.Clear();
             NotifyChanged();
         }
@@ -102,9 +118,14 @@ namespace CardBattle.Core
             return _exhaustPile.Count;
         }
 
+        public int GetRemovedCount()
+        {
+            return _removedCards.Count;
+        }
+
         /// <summary>
         /// Draw up to <paramref name="count"/> cards, reshuffling graveyard into deck as needed.
-        /// Overflow is held pending during the operation, then committed to the graveyard once.
+        /// Overflow is held pending during the operation, then committed to Graveyard or Removed once.
         /// </summary>
         public CardDrawResult DrawCards(int count)
         {
@@ -143,7 +164,7 @@ namespace CardBattle.Core
 
         /// <summary>
         /// Draws directly from the current deck without auto-reshuffle, respecting hand capacity.
-        /// Overflow is flushed to the graveyard immediately (safe default for simple callers).
+        /// Overflow is flushed to Graveyard or Removed immediately (safe default for simple callers).
         /// For presentation-driven two-phase draws, use <see cref="DrawCardsFromDeckImmediate"/>
         /// and call <see cref="FlushPendingOverflowToGraveyard"/> after the full sequence.
         /// </summary>
@@ -157,8 +178,8 @@ namespace CardBattle.Core
 
         /// <summary>
         /// Low-level draw from the current deck only: no reshuffle, respects hand limit.
-        /// Overflow cards stay in pending overflow (not graveyard) so a later reshuffle
-        /// in the same multi-step draw cannot pick them up.
+        /// Overflow cards stay in pending overflow so a later reshuffle in the same
+        /// multi-step draw cannot pick them up.
         /// </summary>
         public CardDrawResult DrawCardsFromDeckImmediate(int count)
         {
@@ -168,7 +189,7 @@ namespace CardBattle.Core
         }
 
         /// <summary>
-        /// Moves pending overflow cards into the graveyard in one batch.
+        /// Moves pending overflow cards into Graveyard or Removed in one batch.
         /// Call after a multi-step draw that may reshuffle between immediate draws.
         /// </summary>
         public int FlushPendingOverflowToGraveyard()
@@ -191,7 +212,7 @@ namespace CardBattle.Core
         }
 
         /// <summary>
-        /// End-turn hand cleanup: non-Retain cards move Hand → Graveyard; Retain cards stay in Hand.
+        /// End-turn hand cleanup: Retain cards stay in Hand; non-Retain cards move to Graveyard or Removed.
         /// Manual discard and card play use separate APIs and ignore Retain.
         /// </summary>
         public EndTurnHandResult ResolveEndTurnHand()
@@ -201,6 +222,8 @@ namespace CardBattle.Core
 
             int discarded = 0;
             int retained = 0;
+            int removed = 0;
+            bool mutated = false;
 
             for (int i = _hand.Count - 1; i >= 0; i--)
             {
@@ -208,25 +231,36 @@ namespace CardBattle.Core
                 if (card == null)
                 {
                     _hand.RemoveAt(i);
+                    mutated = true;
                     continue;
                 }
 
-                if (ResolveRetainAtEndTurn(card))
+                EndTurnCardDestination destination = ResolveEndTurnDestination(card);
+                if (destination == EndTurnCardDestination.Hand)
                 {
                     retained++;
                     continue;
                 }
 
                 _hand.RemoveAt(i);
+                mutated = true;
+
+                if (destination == EndTurnCardDestination.Removed)
+                {
+                    AddToRemoved(card);
+                    removed++;
+                    continue;
+                }
+
                 if (!_graveyard.Contains(card))
                     _graveyard.Add(card);
                 discarded++;
             }
 
-            if (discarded > 0)
+            if (mutated)
                 NotifyChanged();
 
-            return new EndTurnHandResult(discarded, retained);
+            return new EndTurnHandResult(discarded, retained, removed);
         }
 
         /// <summary>Compatibility wrapper for end-turn hand cleanup (Retain-aware).</summary>
@@ -245,8 +279,38 @@ namespace CardBattle.Core
         }
 
         /// <summary>
-        /// Play resolution: remove from hand and route to Graveyard or Exhaust
-        /// based on <see cref="CardData.ExhaustAfterPlay"/>.
+        /// Whether a card should be treated as Temporary.
+        /// Future upgrade resolution may replace the CardData keyword read with per-instance data.
+        /// </summary>
+        public static bool ResolveTemporary(CardInstance card)
+        {
+            return card?.Data != null && card.Data.Temporary;
+        }
+
+        /// <summary>Resolves end-turn routing priority from card keywords. Does not mutate piles.</summary>
+        public static EndTurnCardDestination ResolveEndTurnDestination(CardInstance card)
+        {
+            if (ResolveRetainAtEndTurn(card))
+                return EndTurnCardDestination.Hand;
+
+            if (ResolveTemporary(card))
+                return EndTurnCardDestination.Removed;
+
+            return EndTurnCardDestination.Graveyard;
+        }
+
+        /// <summary>Resolves manual discard routing priority. Does not mutate piles.</summary>
+        public static DiscardDestination ResolveDiscardDestination(CardInstance card)
+        {
+            if (ResolveTemporary(card))
+                return DiscardDestination.Removed;
+
+            return DiscardDestination.Graveyard;
+        }
+
+        /// <summary>
+        /// Play resolution: remove from hand and route to Graveyard, Exhaust, or Removed
+        /// based on the card's resolved runtime keywords.
         /// </summary>
         public bool PlayCardFromHand(CardInstance card)
         {
@@ -254,15 +318,22 @@ namespace CardBattle.Core
                 return false;
 
             PlayedCardDestination destination = ResolvePlayedCardDestination(card);
-            if (destination == PlayedCardDestination.Exhaust)
+            switch (destination)
             {
-                if (!_exhaustPile.Contains(card))
-                    _exhaustPile.Add(card);
-            }
-            else
-            {
-                if (!_graveyard.Contains(card))
-                    _graveyard.Add(card);
+                case PlayedCardDestination.Exhaust:
+                    if (!_exhaustPile.Contains(card))
+                        _exhaustPile.Add(card);
+                    break;
+
+                case PlayedCardDestination.Removed:
+                    AddToRemoved(card);
+                    break;
+
+                case PlayedCardDestination.Graveyard:
+                default:
+                    if (!_graveyard.Contains(card))
+                        _graveyard.Add(card);
+                    break;
             }
 
             NotifyChanged();
@@ -272,6 +343,9 @@ namespace CardBattle.Core
         /// <summary>Resolves play destination from card keywords. Does not mutate piles.</summary>
         public static PlayedCardDestination ResolvePlayedCardDestination(CardInstance card)
         {
+            if (ResolveTemporary(card))
+                return PlayedCardDestination.Removed;
+
             if (card?.Data != null && card.Data.ExhaustAfterPlay)
                 return PlayedCardDestination.Exhaust;
 
@@ -279,7 +353,7 @@ namespace CardBattle.Core
         }
 
         /// <summary>
-        /// Manual discard: move one existing hand instance to the graveyard.
+        /// Manual discard: move one existing hand instance to Graveyard or Removed.
         /// Does not play the card or spend AP. Never routes to Exhaust.
         /// </summary>
         public bool DiscardCardFromHand(CardInstance card)
@@ -287,9 +361,7 @@ namespace CardBattle.Core
             if (card == null || !_hand.Remove(card))
                 return false;
 
-            if (!_graveyard.Contains(card))
-                _graveyard.Add(card);
-
+            RouteCardLeavingHandByDiscard(card);
             NotifyChanged();
             return true;
         }
@@ -315,9 +387,7 @@ namespace CardBattle.Core
                 if (!_hand.Remove(card))
                     continue;
 
-                if (!_graveyard.Contains(card))
-                    _graveyard.Add(card);
-
+                RouteCardLeavingHandByDiscard(card);
                 moved++;
             }
 
@@ -325,6 +395,51 @@ namespace CardBattle.Core
                 NotifyChanged();
 
             return moved;
+        }
+
+        /// <summary>
+        /// Creates new runtime card copies directly in Hand. Generated overflow bypasses PendingOverflow
+        /// and goes straight to Removed because no reshuffle is occurring in this API.
+        /// </summary>
+        public GeneratedCardResult CreateCardsInHand(CardData cardData, int count)
+        {
+            int requested = Mathf.Max(0, count);
+            if (cardData == null || requested <= 0)
+                return GeneratedCardResult.Empty(requested);
+
+            if (!cardData.Temporary)
+            {
+                Debug.LogWarning(
+                    $"[DeckController] CreateCardsInHand generated '{cardData.DisplayName}' which is not Temporary. " +
+                    "Generated cards should normally be Temporary.",
+                    this);
+            }
+
+            int created = 0;
+            int addedToHand = 0;
+            int removedByOverflow = 0;
+
+            for (int i = 0; i < requested; i++)
+            {
+                var createdCard = new CardInstance(cardData);
+                created++;
+
+                if (_hand.Count < MaxHandSize)
+                {
+                    _hand.Add(createdCard);
+                    addedToHand++;
+                }
+                else
+                {
+                    AddToRemoved(createdCard);
+                    removedByOverflow++;
+                }
+            }
+
+            if (created > 0)
+                NotifyChanged();
+
+            return new GeneratedCardResult(requested, created, addedToHand, removedByOverflow);
         }
 
         /// <summary>
@@ -451,14 +566,20 @@ namespace CardBattle.Core
             if (moved <= 0)
                 return 0;
 
-            for (int i = 0; i < _pendingOverflow.Count; i++)
+            var overflowSnapshot = new List<CardInstance>(_pendingOverflow);
+            _pendingOverflow.Clear();
+
+            for (int i = 0; i < overflowSnapshot.Count; i++)
             {
-                var overflowCard = _pendingOverflow[i];
-                if (overflowCard != null && !_graveyard.Contains(overflowCard))
+                var overflowCard = overflowSnapshot[i];
+                if (overflowCard == null)
+                    continue;
+
+                if (ResolveTemporary(overflowCard))
+                    AddToRemoved(overflowCard);
+                else if (!_graveyard.Contains(overflowCard))
                     _graveyard.Add(overflowCard);
             }
-
-            _pendingOverflow.Clear();
 
             if (notify)
                 NotifyChanged();
@@ -487,20 +608,32 @@ namespace CardBattle.Core
             }
         }
 
-        private void MoveToGraveyard(CardInstance card)
+        private void RouteCardLeavingHandByDiscard(CardInstance card)
         {
             if (card == null)
                 return;
 
-            _hand.Remove(card);
-            _deck.Remove(card);
-            _pendingOverflow.Remove(card);
-            // Exhausted cards stay in ExhaustPile and never enter Graveyard via this path.
-            if (_exhaustPile.Contains(card))
+            if (ResolveDiscardDestination(card) == DiscardDestination.Removed)
+            {
+                AddToRemoved(card);
                 return;
+            }
 
             if (!_graveyard.Contains(card))
                 _graveyard.Add(card);
+        }
+
+        private void AddToRemoved(CardInstance card)
+        {
+            if (card == null || _removedCards.Contains(card))
+                return;
+
+            _deck.Remove(card);
+            _hand.Remove(card);
+            _graveyard.Remove(card);
+            _exhaustPile.Remove(card);
+            _pendingOverflow.Remove(card);
+            _removedCards.Add(card);
         }
 
         private void NotifyChanged() => OnPilesChanged?.Invoke();

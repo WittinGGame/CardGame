@@ -23,6 +23,8 @@ namespace CardBattle.Core
         [Header("Keywords")]
         [Tooltip("When true, this card remains in Hand instead of being discarded at the end of the player's turn.")]
         [SerializeField] private bool retain;
+        [Tooltip("When true, this card exists only for the current Battle and is removed whenever it leaves Hand.")]
+        [SerializeField] private bool temporary;
         [Tooltip("When true, playing this card sends it to the Exhaust pile instead of the Graveyard.")]
         [SerializeField] private bool exhaustAfterPlay;
 
@@ -38,6 +40,7 @@ namespace CardBattle.Core
         public int ApCost => Mathf.Max(0, apCost);
         public CardTargetMode TargetMode => targetMode;
         public bool Retain => retain;
+        public bool Temporary => temporary;
         public bool ExhaustAfterPlay => exhaustAfterPlay;
         public IReadOnlyList<CardEffectData> Effects => effects;
         public bool HasEffects => effects != null && effects.Length > 0;
@@ -48,6 +51,14 @@ namespace CardBattle.Core
         {
             if (apCost < 0)
                 apCost = 0;
+
+            if (temporary && exhaustAfterPlay)
+            {
+                Debug.LogWarning(
+                    $"[CardData] '{name}' (CardId={CardId}) has Temporary and ExhaustAfterPlay enabled. " +
+                    "Temporary takes priority over ExhaustAfterPlay.",
+                    this);
+            }
 
             if (effects == null || effects.Length == 0)
             {

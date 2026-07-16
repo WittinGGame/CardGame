@@ -31,6 +31,9 @@ namespace CardBattle.Core
             if (data.Retain)
                 lines.Add("Retain.");
 
+            if (data.Temporary)
+                lines.Add("Temporary.");
+
             if (data.ExhaustAfterPlay)
                 lines.Add("Exhaust.");
 

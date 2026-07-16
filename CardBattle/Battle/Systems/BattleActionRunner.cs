@@ -140,18 +140,18 @@ namespace CardBattle.Core
                 int cost = card.Data.ApCost;
                 player.SpendApFromRunner(cost);
 
-                bool willExhaust = card.Data.ExhaustAfterPlay;
+                PlayedCardDestination destination = DeckController.ResolvePlayedCardDestination(card);
                 CardViewUI handViewForVfx =
                     handUIController != null ? handUIController.GetViewForCard(card) : null;
 
-                // Destination is fixed before effects run. Exhaust must not use Graveyard VFX.
-                // Future: branch to CardToExhaustVFXController when available.
-                if (!willExhaust && graveyardVfx != null)
+                // Destination is fixed before effects run. Only Graveyard should use Graveyard VFX.
+                // Future: branch to destination-specific VFX when available.
+                if (destination == PlayedCardDestination.Graveyard && graveyardVfx != null)
                     graveyardVfx.PlaySingleCardToGraveyard(handViewForVfx);
 
                 deckController.PlayCardFromHand(card);
 
-                if (willExhaust || graveyardVfx == null)
+                if (destination != PlayedCardDestination.Graveyard || graveyardVfx == null)
                     pileCounterUI?.ForceSyncDisplayedToReal();
 
                 bool isAttack = card.Data.CardType == CardType.Attack;
@@ -462,7 +462,8 @@ namespace CardBattle.Core
             for (int i = 0; i < hand.Count; i++)
             {
                 var card = hand[i];
-                if (card == null || DeckController.ResolveRetainAtEndTurn(card))
+                if (card == null ||
+                    DeckController.ResolveEndTurnDestination(card) != DeckController.EndTurnCardDestination.Graveyard)
                     continue;
 
                 var view = handUIController.GetViewForCard(card);

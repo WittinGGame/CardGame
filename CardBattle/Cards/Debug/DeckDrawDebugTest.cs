@@ -437,6 +437,7 @@ namespace CardBattle.Core
             CountPileIds("Hand", deckController.Hand, seen, sb, ref total, ref duplicates);
             CountPileIds("Graveyard", deckController.Graveyard, seen, sb, ref total, ref duplicates);
             CountPileIds("Exhaust", deckController.ExhaustPile, seen, sb, ref total, ref duplicates);
+            CountPileIds("Removed", deckController.RemovedCards, seen, sb, ref total, ref duplicates);
 
             // Pending overflow is count-only (collection is not exposed).
             int pending = deckController.PendingOverflowCount;
@@ -451,6 +452,7 @@ namespace CardBattle.Core
                 .Append('/').Append(deckController.MaxHandSize)
                 .Append(" Graveyard=").Append(deckController.Graveyard.Count)
                 .Append(" Exhaust=").Append(deckController.GetExhaustCount())
+                .Append(" Removed=").Append(deckController.GetRemovedCount())
                 .Append(" PendingOverflow=").Append(pending);
 
             if (!handOk)
@@ -518,6 +520,8 @@ namespace CardBattle.Core
             count += CountIdInPile(deckController.Deck, id);
             count += CountIdInPile(deckController.Hand, id);
             count += CountIdInPile(deckController.Graveyard, id);
+            count += CountIdInPile(deckController.ExhaustPile, id);
+            count += CountIdInPile(deckController.RemovedCards, id);
             return count;
         }
 
@@ -559,6 +563,7 @@ namespace CardBattle.Core
                 $"AvailableHandSpace={deckController.AvailableHandSpace}\n" +
                 $"Graveyard={deckController.Graveyard.Count}\n" +
                 $"Exhaust={deckController.GetExhaustCount()}\n" +
+                $"Removed={deckController.GetRemovedCount()}\n" +
                 $"PendingOverflow={deckController.PendingOverflowCount}\n" +
                 $"Total={total}");
         }
@@ -569,6 +574,7 @@ namespace CardBattle.Core
                    + deckController.Hand.Count
                    + deckController.Graveyard.Count
                    + deckController.GetExhaustCount()
+                   + deckController.GetRemovedCount()
                    + deckController.PendingOverflowCount;
         }
 
@@ -613,6 +619,7 @@ namespace CardBattle.Core
                     $"Actual state: Deck={deckController.Deck.Count} " +
                     $"Hand={deckController.Hand.Count}/{deckController.MaxHandSize} " +
                     $"GY={deckController.Graveyard.Count} " +
+                    $"Removed={deckController.GetRemovedCount()} " +
                     $"Pending={deckController.PendingOverflowCount}");
             }
         }
