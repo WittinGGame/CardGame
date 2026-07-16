@@ -28,6 +28,9 @@ namespace CardBattle.Core
                 }
             }
 
+            if (data.Retain)
+                lines.Add("Retain.");
+
             if (data.ExhaustAfterPlay)
                 lines.Add("Exhaust.");
 

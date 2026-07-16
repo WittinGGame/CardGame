@@ -617,6 +617,7 @@ namespace CardBattle.Core
 **Path:** `Assets/Scripts/CardBattle/Battle/Systems/BattleActionRunner.cs`
 ```csharp
 using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace CardBattle.Core
@@ -873,10 +874,15 @@ namespace CardBattle.Core
             SetBusy(true);
             RefreshExternalUI();
 
-            if (graveyardVfx != null && handUIController != null)
-                graveyardVfx.PlayBatchCardsToGraveyard(handUIController.GetCurrentHandViewsSnapshot());
+            var discardableViews = CollectEndTurnDiscardableHandViews();
+
+            if (graveyardVfx != null && discardableViews.Count > 0)
+                graveyardVfx.PlayBatchCardsToGraveyard(discardableViews);
 
             player.CommitEndTurnFromRunner();
+
+            if (deckController != null)
+                deckController.ResolveEndTurnHand();
 
             if (graveyardVfx == null)
                 pileCounterUI?.ForceSyncDisplayedToReal();
@@ -1062,6 +1068,27 @@ namespace CardBattle.Core
             }
 
             return false;
+        }
+
+        private List<CardViewUI> CollectEndTurnDiscardableHandViews()
+        {
+            var views = new List<CardViewUI>();
+            if (deckController == null || handUIController == null)
+                return views;
+
+            var hand = deckController.Hand;
+            for (int i = 0; i < hand.Count; i++)
+            {
+                var card = hand[i];
+                if (card == null || DeckController.ResolveRetainAtEndTurn(card))
+                    continue;
+
+                var view = handUIController.GetViewForCard(card);
+                if (view != null)
+                    views.Add(view);
+            }
+
+            return views;
         }
 
         private void RefreshExternalUI()
@@ -2790,8 +2817,9 @@ namespace CardBattle.Core
         }
 
         /// <summary>
-        /// Locks further plays, discards the hand, then lets end-of-turn enemies strike.
+        /// Locks further plays, resolves end-turn hand (Retain-aware), then lets end-of-turn enemies strike.
         /// Countdown enemies that already attacked this round are skipped automatically.
+        /// Prefer <see cref="BattleActionRunner.TryEndTurn"/> for presentation-driven flow.
         /// </summary>
         public void RequestEndTurn()
         {
@@ -2806,7 +2834,7 @@ namespace CardBattle.Core
 
             _turnCommitted = true;
             NotifyTurnStateChanged();
-            deckController.DiscardEntireHand();
+            deckController.ResolveEndTurnHand();
             enemyActionSystem.ResolveEndTurnAttacks();
         }
 
@@ -2861,9 +2889,6 @@ namespace CardBattle.Core
 
             _turnCommitted = true;
             NotifyTurnStateChanged();
-
-            if (deckController != null)
-                deckController.DiscardEntireHand();
         }
 
         /// <summary>Clears transient combat state before a new encounter battle start. Does not change HP.</summary>

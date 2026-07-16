@@ -21,6 +21,8 @@ namespace CardBattle.Core
         [SerializeField] private CardTargetMode targetMode = CardTargetMode.None;
 
         [Header("Keywords")]
+        [Tooltip("When true, this card remains in Hand instead of being discarded at the end of the player's turn.")]
+        [SerializeField] private bool retain;
         [Tooltip("When true, playing this card sends it to the Exhaust pile instead of the Graveyard.")]
         [SerializeField] private bool exhaustAfterPlay;
 
@@ -35,6 +37,7 @@ namespace CardBattle.Core
         public CardType CardType => cardType;
         public int ApCost => Mathf.Max(0, apCost);
         public CardTargetMode TargetMode => targetMode;
+        public bool Retain => retain;
         public bool ExhaustAfterPlay => exhaustAfterPlay;
         public IReadOnlyList<CardEffectData> Effects => effects;
         public bool HasEffects => effects != null && effects.Length > 0;

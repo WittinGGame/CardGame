@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace CardBattle.Core
@@ -255,10 +256,15 @@ namespace CardBattle.Core
             SetBusy(true);
             RefreshExternalUI();
 
-            if (graveyardVfx != null && handUIController != null)
-                graveyardVfx.PlayBatchCardsToGraveyard(handUIController.GetCurrentHandViewsSnapshot());
+            var discardableViews = CollectEndTurnDiscardableHandViews();
+
+            if (graveyardVfx != null && discardableViews.Count > 0)
+                graveyardVfx.PlayBatchCardsToGraveyard(discardableViews);
 
             player.CommitEndTurnFromRunner();
+
+            if (deckController != null)
+                deckController.ResolveEndTurnHand();
 
             if (graveyardVfx == null)
                 pileCounterUI?.ForceSyncDisplayedToReal();
@@ -444,6 +450,27 @@ namespace CardBattle.Core
             }
 
             return false;
+        }
+
+        private List<CardViewUI> CollectEndTurnDiscardableHandViews()
+        {
+            var views = new List<CardViewUI>();
+            if (deckController == null || handUIController == null)
+                return views;
+
+            var hand = deckController.Hand;
+            for (int i = 0; i < hand.Count; i++)
+            {
+                var card = hand[i];
+                if (card == null || DeckController.ResolveRetainAtEndTurn(card))
+                    continue;
+
+                var view = handUIController.GetViewForCard(card);
+                if (view != null)
+                    views.Add(view);
+            }
+
+            return views;
         }
 
         private void RefreshExternalUI()

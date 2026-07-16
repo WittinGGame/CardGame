@@ -190,13 +190,58 @@ namespace CardBattle.Core
             return moved;
         }
 
-        /// <summary>Move every card from hand to graveyard (end of player turn).</summary>
+        /// <summary>
+        /// End-turn hand cleanup: non-Retain cards move Hand → Graveyard; Retain cards stay in Hand.
+        /// Manual discard and card play use separate APIs and ignore Retain.
+        /// </summary>
+        public EndTurnHandResult ResolveEndTurnHand()
+        {
+            if (_hand.Count == 0)
+                return EndTurnHandResult.Empty;
+
+            int discarded = 0;
+            int retained = 0;
+
+            for (int i = _hand.Count - 1; i >= 0; i--)
+            {
+                var card = _hand[i];
+                if (card == null)
+                {
+                    _hand.RemoveAt(i);
+                    continue;
+                }
+
+                if (ResolveRetainAtEndTurn(card))
+                {
+                    retained++;
+                    continue;
+                }
+
+                _hand.RemoveAt(i);
+                if (!_graveyard.Contains(card))
+                    _graveyard.Add(card);
+                discarded++;
+            }
+
+            if (discarded > 0)
+                NotifyChanged();
+
+            return new EndTurnHandResult(discarded, retained);
+        }
+
+        /// <summary>Compatibility wrapper for end-turn hand cleanup (Retain-aware).</summary>
         public void DiscardEntireHand()
         {
-            for (var i = _hand.Count - 1; i >= 0; i--)
-                MoveToGraveyard(_hand[i]);
+            ResolveEndTurnHand();
+        }
 
-            NotifyChanged();
+        /// <summary>
+        /// Whether a hand card should remain in Hand at end turn.
+        /// Future upgrade resolution may replace the CardData keyword read with per-instance data.
+        /// </summary>
+        public static bool ResolveRetainAtEndTurn(CardInstance card)
+        {
+            return card?.Data != null && card.Data.Retain;
         }
 
         /// <summary>

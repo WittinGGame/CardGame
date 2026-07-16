@@ -86,8 +86,9 @@ namespace CardBattle.Core
         }
 
         /// <summary>
-        /// Locks further plays, discards the hand, then lets end-of-turn enemies strike.
+        /// Locks further plays, resolves end-turn hand (Retain-aware), then lets end-of-turn enemies strike.
         /// Countdown enemies that already attacked this round are skipped automatically.
+        /// Prefer <see cref="BattleActionRunner.TryEndTurn"/> for presentation-driven flow.
         /// </summary>
         public void RequestEndTurn()
         {
@@ -102,7 +103,7 @@ namespace CardBattle.Core
 
             _turnCommitted = true;
             NotifyTurnStateChanged();
-            deckController.DiscardEntireHand();
+            deckController.ResolveEndTurnHand();
             enemyActionSystem.ResolveEndTurnAttacks();
         }
 
@@ -157,9 +158,6 @@ namespace CardBattle.Core
 
             _turnCommitted = true;
             NotifyTurnStateChanged();
-
-            if (deckController != null)
-                deckController.DiscardEntireHand();
         }
 
         /// <summary>Clears transient combat state before a new encounter battle start. Does not change HP.</summary>
