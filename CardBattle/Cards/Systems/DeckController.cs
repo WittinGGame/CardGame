@@ -5,10 +5,10 @@ using UnityEngine;
 namespace CardBattle.Core
 {
     /// <summary>
-    /// Owns the three piles (deck, hand, graveyard) and draw/discard/shuffle rules.
+    /// Owns the battle piles (deck, hand, graveyard, exhaust) and draw/discard/shuffle rules.
     /// When the deck is empty during a draw, the graveyard is shuffled back into the deck.
-    /// Draw respects <see cref="MaxHandSize"/>; excess cards overflow to the graveyard
-    /// (deferred via pending overflow when a multi-step draw may still reshuffle).
+    /// Exhausted cards never reshuffle. Draw respects <see cref="MaxHandSize"/>; excess cards
+    /// overflow to the graveyard (deferred via pending overflow when a multi-step draw may still reshuffle).
     /// </summary>
     public class DeckController : MonoBehaviour
     {
@@ -21,6 +21,7 @@ namespace CardBattle.Core
         private readonly List<CardInstance> _deck = new List<CardInstance>();
         private readonly List<CardInstance> _hand = new List<CardInstance>();
         private readonly List<CardInstance> _graveyard = new List<CardInstance>();
+        private readonly List<CardInstance> _exhaustPile = new List<CardInstance>();
 
         /// <summary>
         /// Cards drawn while the hand was full, held out of the graveyard until the
@@ -32,6 +33,7 @@ namespace CardBattle.Core
         public IReadOnlyList<CardInstance> Deck => _deck;
         public IReadOnlyList<CardInstance> Hand => _hand;
         public IReadOnlyList<CardInstance> Graveyard => _graveyard;
+        public IReadOnlyList<CardInstance> ExhaustPile => _exhaustPile;
 
         public int MaxHandSize => Mathf.Max(0, maxHandSize);
         public int AvailableHandSpace => Mathf.Max(0, MaxHandSize - _hand.Count);
@@ -78,6 +80,7 @@ namespace CardBattle.Core
             _deck.Clear();
             _hand.Clear();
             _graveyard.Clear();
+            _exhaustPile.Clear();
             _pendingOverflow.Clear();
             NotifyChanged();
         }
@@ -92,6 +95,11 @@ namespace CardBattle.Core
         public int GetGraveyardCount()
         {
             return _graveyard.Count;
+        }
+
+        public int GetExhaustCount()
+        {
+            return _exhaustPile.Count;
         }
 
         /// <summary>
@@ -191,19 +199,43 @@ namespace CardBattle.Core
             NotifyChanged();
         }
 
-        /// <summary>Play resolution: remove from hand and send to graveyard.</summary>
-        public void PlayCardFromHand(CardInstance card)
+        /// <summary>
+        /// Play resolution: remove from hand and route to Graveyard or Exhaust
+        /// based on <see cref="CardData.ExhaustAfterPlay"/>.
+        /// </summary>
+        public bool PlayCardFromHand(CardInstance card)
         {
             if (card == null || !_hand.Remove(card))
-                return;
+                return false;
 
-            _graveyard.Add(card);
+            PlayedCardDestination destination = ResolvePlayedCardDestination(card);
+            if (destination == PlayedCardDestination.Exhaust)
+            {
+                if (!_exhaustPile.Contains(card))
+                    _exhaustPile.Add(card);
+            }
+            else
+            {
+                if (!_graveyard.Contains(card))
+                    _graveyard.Add(card);
+            }
+
             NotifyChanged();
+            return true;
+        }
+
+        /// <summary>Resolves play destination from card keywords. Does not mutate piles.</summary>
+        public static PlayedCardDestination ResolvePlayedCardDestination(CardInstance card)
+        {
+            if (card?.Data != null && card.Data.ExhaustAfterPlay)
+                return PlayedCardDestination.Exhaust;
+
+            return PlayedCardDestination.Graveyard;
         }
 
         /// <summary>
         /// Manual discard: move one existing hand instance to the graveyard.
-        /// Does not play the card or spend AP.
+        /// Does not play the card or spend AP. Never routes to Exhaust.
         /// </summary>
         public bool DiscardCardFromHand(CardInstance card)
         {
@@ -219,7 +251,7 @@ namespace CardBattle.Core
 
         /// <summary>
         /// Manual discard batch. Ignores nulls, duplicates, and cards no longer in hand.
-        /// Notifies once if any card moved.
+        /// Notifies once if any card moved. Never routes to Exhaust.
         /// </summary>
         public int DiscardCardsFromHand(IReadOnlyList<CardInstance> cards)
         {
@@ -240,6 +272,54 @@ namespace CardBattle.Core
 
                 if (!_graveyard.Contains(card))
                     _graveyard.Add(card);
+
+                moved++;
+            }
+
+            if (moved > 0)
+                NotifyChanged();
+
+            return moved;
+        }
+
+        /// <summary>
+        /// Future API: move one hand card directly to Exhaust.
+        /// Does not spend AP or resolve effects.
+        /// </summary>
+        public bool ExhaustCardFromHand(CardInstance card)
+        {
+            if (card == null || !_hand.Remove(card))
+                return false;
+
+            if (!_exhaustPile.Contains(card))
+                _exhaustPile.Add(card);
+
+            NotifyChanged();
+            return true;
+        }
+
+        /// <summary>
+        /// Future API: batch Hand → Exhaust. Ignores nulls, duplicates, and cards no longer in hand.
+        /// </summary>
+        public int ExhaustCardsFromHand(IReadOnlyList<CardInstance> cards)
+        {
+            if (cards == null || cards.Count == 0)
+                return 0;
+
+            var seen = new HashSet<CardInstance>();
+            int moved = 0;
+
+            for (int i = 0; i < cards.Count; i++)
+            {
+                var card = cards[i];
+                if (card == null || !seen.Add(card))
+                    continue;
+
+                if (!_hand.Remove(card))
+                    continue;
+
+                if (!_exhaustPile.Contains(card))
+                    _exhaustPile.Add(card);
 
                 moved++;
             }
@@ -370,6 +450,10 @@ namespace CardBattle.Core
             _hand.Remove(card);
             _deck.Remove(card);
             _pendingOverflow.Remove(card);
+            // Exhausted cards stay in ExhaustPile and never enter Graveyard via this path.
+            if (_exhaustPile.Contains(card))
+                return;
+
             if (!_graveyard.Contains(card))
                 _graveyard.Add(card);
         }

@@ -20,6 +20,10 @@ namespace CardBattle.Core
         [SerializeField] private int apCost = 1;
         [SerializeField] private CardTargetMode targetMode = CardTargetMode.None;
 
+        [Header("Keywords")]
+        [Tooltip("When true, playing this card sends it to the Exhaust pile instead of the Graveyard.")]
+        [SerializeField] private bool exhaustAfterPlay;
+
         [Header("Effects")]
         [SerializeField] private CardEffectData[] effects;
 
@@ -31,6 +35,7 @@ namespace CardBattle.Core
         public CardType CardType => cardType;
         public int ApCost => Mathf.Max(0, apCost);
         public CardTargetMode TargetMode => targetMode;
+        public bool ExhaustAfterPlay => exhaustAfterPlay;
         public IReadOnlyList<CardEffectData> Effects => effects;
         public bool HasEffects => effects != null && effects.Length > 0;
         public Sprite Artwork => artwork;

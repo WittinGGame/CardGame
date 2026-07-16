@@ -40,6 +40,7 @@ namespace CardBattle.Core
                 $"Selected={handCardSelectionController.SelectedCount}\n" +
                 $"Hand={deckController.Hand.Count}\n" +
                 $"Graveyard={deckController.Graveyard.Count}\n" +
+                $"Exhaust={deckController.GetExhaustCount()}\n" +
                 $"PendingOverflow={deckController.PendingOverflowCount}\n" +
                 $"RunnerBusy={(battleActionRunner != null && battleActionRunner.IsBusy)}");
         }
@@ -135,7 +136,8 @@ namespace CardBattle.Core
 
             var id = pick.InstanceId;
             int totalBefore = deckController.Deck.Count + deckController.Hand.Count +
-                              deckController.Graveyard.Count + deckController.PendingOverflowCount;
+                              deckController.Graveyard.Count + deckController.GetExhaustCount() +
+                              deckController.PendingOverflowCount;
 
             bool moved = deckController.DiscardCardFromHand(pick);
             handUIController?.SyncHandViewsExternal();
@@ -152,7 +154,8 @@ namespace CardBattle.Core
             }
 
             int totalAfter = deckController.Deck.Count + deckController.Hand.Count +
-                             deckController.Graveyard.Count + deckController.PendingOverflowCount;
+                             deckController.Graveyard.Count + deckController.GetExhaustCount() +
+                             deckController.PendingOverflowCount;
 
             bool noDupAcrossPiles = !HasDuplicateInstanceIdsAcrossPiles();
 
@@ -253,7 +256,8 @@ namespace CardBattle.Core
             var seen = new HashSet<System.Guid>();
             return HasDupInPile(deckController.Deck, seen) ||
                    HasDupInPile(deckController.Hand, seen) ||
-                   HasDupInPile(deckController.Graveyard, seen);
+                   HasDupInPile(deckController.Graveyard, seen) ||
+                   HasDupInPile(deckController.ExhaustPile, seen);
         }
 
         private static bool HasDupInPile(IReadOnlyList<CardInstance> pile, HashSet<System.Guid> seen)

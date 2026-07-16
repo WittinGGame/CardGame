@@ -1,3 +1,97 @@
+## FILE: CardCatalog.cs
+**Path:** `Assets/Scripts/CardBattle/Cards/Data/CardCatalog.cs`
+```csharp
+using System;
+using System.Collections.Generic;
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    [CreateAssetMenu(
+        fileName = "CardCatalog",
+        menuName = "Card Battle/Card Catalog",
+        order = 10)]
+    public class CardCatalog : ScriptableObject
+    {
+        [SerializeField] private List<CardData> cards = new List<CardData>();
+
+        private Dictionary<string, CardData> lookup;
+        private bool lookupBuilt;
+
+        public int Count => cards != null ? cards.Count : 0;
+
+        public IReadOnlyList<CardData> Cards => cards;
+
+        private void OnEnable()
+        {
+            lookupBuilt = false;
+        }
+
+#if UNITY_EDITOR
+        private void OnValidate()
+        {
+            lookupBuilt = false;
+        }
+#endif
+
+        public bool TryGetCard(string cardId, out CardData cardData)
+        {
+            cardData = null;
+
+            if (string.IsNullOrWhiteSpace(cardId))
+                return false;
+
+            EnsureLookupBuilt();
+            return lookup.TryGetValue(cardId, out cardData);
+        }
+
+        public void RebuildLookup()
+        {
+            if (lookup == null)
+                lookup = new Dictionary<string, CardData>(StringComparer.Ordinal);
+            else
+                lookup.Clear();
+
+            lookupBuilt = true;
+
+            if (cards == null)
+                return;
+
+            for (int i = 0; i < cards.Count; i++)
+            {
+                CardData card = cards[i];
+                if (card == null)
+                    continue;
+
+                string id = card.CardId;
+                if (string.IsNullOrWhiteSpace(id))
+                    continue;
+
+                if (lookup.ContainsKey(id))
+                {
+                    CardData existing = lookup[id];
+                    Debug.LogError(
+                        $"[CardCatalog] Duplicate card ID '{id}'.\n" +
+                        $"Existing asset: {existing.name}\n" +
+                        $"Duplicate asset: {card.name}");
+                    continue;
+                }
+
+                lookup[id] = card;
+            }
+        }
+
+        private void EnsureLookupBuilt()
+        {
+            if (lookupBuilt)
+                return;
+
+            RebuildLookup();
+        }
+    }
+}
+```
+
 ## FILE: CardData.cs
 **Path:** `Assets/Scripts/CardBattle/Cards/Data/CardData.cs`
 ```csharp
@@ -23,6 +117,10 @@ namespace CardBattle.Core
         [SerializeField] private int apCost = 1;
         [SerializeField] private CardTargetMode targetMode = CardTargetMode.None;
 
+        [Header("Keywords")]
+        [Tooltip("When true, playing this card sends it to the Exhaust pile instead of the Graveyard.")]
+        [SerializeField] private bool exhaustAfterPlay;
+
         [Header("Effects")]
         [SerializeField] private CardEffectData[] effects;
 
@@ -34,6 +132,7 @@ namespace CardBattle.Core
         public CardType CardType => cardType;
         public int ApCost => Mathf.Max(0, apCost);
         public CardTargetMode TargetMode => targetMode;
+        public bool ExhaustAfterPlay => exhaustAfterPlay;
         public IReadOnlyList<CardEffectData> Effects => effects;
         public bool HasEffects => effects != null && effects.Length > 0;
         public Sprite Artwork => artwork;
@@ -87,13 +186,29 @@ namespace CardBattle.Core
 ```csharp
 namespace CardBattle.Core
 {
-    /// Primary card families; extend with new enum values or parallel systems as content grows.
+    /// <summary>Primary card families; extend with new enum values or parallel systems as content grows.</summary>
     public enum CardType
     {
         Attack,
         Buff,
         Heal,
         Defend
+    }
+}
+```
+
+## FILE: PlayedCardDestination.cs
+**Path:** `Assets/Scripts/CardBattle/Cards/Data/PlayedCardDestination.cs`
+```csharp
+namespace CardBattle.Core
+{
+    /// <summary>
+    /// Destination for a card leaving Hand via play resolution.
+    /// </summary>
+    public enum PlayedCardDestination
+    {
+        Graveyard = 0,
+        Exhaust = 1
     }
 }
 ```
@@ -539,6 +654,7 @@ namespace CardBattle.Core
             CountPileIds("Deck", deckController.Deck, seen, sb, ref total, ref duplicates);
             CountPileIds("Hand", deckController.Hand, seen, sb, ref total, ref duplicates);
             CountPileIds("Graveyard", deckController.Graveyard, seen, sb, ref total, ref duplicates);
+            CountPileIds("Exhaust", deckController.ExhaustPile, seen, sb, ref total, ref duplicates);
 
             // Pending overflow is count-only (collection is not exposed).
             int pending = deckController.PendingOverflowCount;
@@ -552,6 +668,7 @@ namespace CardBattle.Core
                 .Append(" Hand=").Append(deckController.Hand.Count)
                 .Append('/').Append(deckController.MaxHandSize)
                 .Append(" Graveyard=").Append(deckController.Graveyard.Count)
+                .Append(" Exhaust=").Append(deckController.GetExhaustCount())
                 .Append(" PendingOverflow=").Append(pending);
 
             if (!handOk)
@@ -659,6 +776,7 @@ namespace CardBattle.Core
                 $"Hand={deckController.Hand.Count}/{deckController.MaxHandSize}\n" +
                 $"AvailableHandSpace={deckController.AvailableHandSpace}\n" +
                 $"Graveyard={deckController.Graveyard.Count}\n" +
+                $"Exhaust={deckController.GetExhaustCount()}\n" +
                 $"PendingOverflow={deckController.PendingOverflowCount}\n" +
                 $"Total={total}");
         }
@@ -668,6 +786,7 @@ namespace CardBattle.Core
             return deckController.Deck.Count
                    + deckController.Hand.Count
                    + deckController.Graveyard.Count
+                   + deckController.GetExhaustCount()
                    + deckController.PendingOverflowCount;
         }
 
@@ -1141,6 +1260,7 @@ namespace CardBattle.Core
                 $"Selected={handCardSelectionController.SelectedCount}\n" +
                 $"Hand={deckController.Hand.Count}\n" +
                 $"Graveyard={deckController.Graveyard.Count}\n" +
+                $"Exhaust={deckController.GetExhaustCount()}\n" +
                 $"PendingOverflow={deckController.PendingOverflowCount}\n" +
                 $"RunnerBusy={(battleActionRunner != null && battleActionRunner.IsBusy)}");
         }
@@ -1236,7 +1356,8 @@ namespace CardBattle.Core
 
             var id = pick.InstanceId;
             int totalBefore = deckController.Deck.Count + deckController.Hand.Count +
-                              deckController.Graveyard.Count + deckController.PendingOverflowCount;
+                              deckController.Graveyard.Count + deckController.GetExhaustCount() +
+                              deckController.PendingOverflowCount;
 
             bool moved = deckController.DiscardCardFromHand(pick);
             handUIController?.SyncHandViewsExternal();
@@ -1253,7 +1374,8 @@ namespace CardBattle.Core
             }
 
             int totalAfter = deckController.Deck.Count + deckController.Hand.Count +
-                             deckController.Graveyard.Count + deckController.PendingOverflowCount;
+                             deckController.Graveyard.Count + deckController.GetExhaustCount() +
+                             deckController.PendingOverflowCount;
 
             bool noDupAcrossPiles = !HasDuplicateInstanceIdsAcrossPiles();
 
@@ -1354,7 +1476,8 @@ namespace CardBattle.Core
             var seen = new HashSet<System.Guid>();
             return HasDupInPile(deckController.Deck, seen) ||
                    HasDupInPile(deckController.Hand, seen) ||
-                   HasDupInPile(deckController.Graveyard, seen);
+                   HasDupInPile(deckController.Graveyard, seen) ||
+                   HasDupInPile(deckController.ExhaustPile, seen);
         }
 
         private static bool HasDupInPile(IReadOnlyList<CardInstance> pile, HashSet<System.Guid> seen)
@@ -1380,6 +1503,154 @@ namespace CardBattle.Core
                 return true;
 
             Debug.LogError($"{LogPrefix} HandCardSelectionController or DeckController missing.");
+            return false;
+        }
+    }
+}
+```
+
+## FILE: SelfExhaustDebugTest.cs
+**Path:** `Assets/Scripts/CardBattle/Cards/Debug/SelfExhaustDebugTest.cs`
+```csharp
+using System.Collections.Generic;
+using System.Text;
+using UnityEngine;
+
+namespace CardBattle.Core
+{
+    /// <summary>
+    /// Play Mode harness for Self Exhaust / Exhaust pile validation.
+    /// </summary>
+    public class SelfExhaustDebugTest : MonoBehaviour
+    {
+        private const string LogPrefix = "[SelfExhaustDebug]";
+
+        [Header("References")]
+        [SerializeField] private DeckController deckController;
+        [SerializeField] private HandUIController handUIController;
+        [SerializeField] private PileCounterUI pileCounterUI;
+        [SerializeField] private BattleActionRunner battleActionRunner;
+        [SerializeField] private CardData exhaustTestCard;
+
+        [ContextMenu("Debug/Print Pile State")]
+        public void DebugPrintPileState()
+        {
+            if (!ValidateDeck())
+                return;
+
+            Debug.Log(
+                $"{LogPrefix}\n" +
+                $"Deck={deckController.Deck.Count}\n" +
+                $"Hand={deckController.Hand.Count}/{deckController.MaxHandSize}\n" +
+                $"Graveyard={deckController.Graveyard.Count}\n" +
+                $"Exhaust={deckController.GetExhaustCount()}\n" +
+                $"PendingOverflow={deckController.PendingOverflowCount}\n" +
+                $"Total={GetConservedTotal()}\n" +
+                $"RunnerBusy={(battleActionRunner != null && battleActionRunner.IsBusy)}");
+        }
+
+        [ContextMenu("Debug/Validate No Duplicate InstanceIds")]
+        public void DebugValidateNoDuplicateInstanceIds()
+        {
+            if (!ValidateDeck())
+                return;
+
+            if (!HasDuplicateInstanceIdsAcrossPiles())
+                Debug.Log($"{LogPrefix} PASS — No duplicate InstanceIds across Deck/Hand/Graveyard/Exhaust");
+            else
+                Debug.LogError($"{LogPrefix} FAIL — Duplicate InstanceIds detected across piles");
+        }
+
+        [ContextMenu("Debug/Validate Total Card Conservation")]
+        public void DebugValidateTotalCardConservation()
+        {
+            if (!ValidateDeck())
+                return;
+
+            int total = GetConservedTotal();
+            bool noDup = !HasDuplicateInstanceIdsAcrossPiles();
+
+            if (noDup && total > 0)
+                Debug.Log($"{LogPrefix} PASS — Conservation total={total}, no duplicates");
+            else
+                Debug.LogError($"{LogPrefix} FAIL — Conservation total={total}, noDup={noDup}");
+        }
+
+        [ContextMenu("Debug/Validate Play Exhaust Card Checklist")]
+        public void DebugValidatePlayExhaustCardChecklist()
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine($"{LogPrefix} Play Exhaust card checklist (manual Play Mode via BattleActionRunner):");
+            sb.AppendLine("1. Play Overcharge (or assigned exhaustTestCard) from Hand.");
+            sb.AppendLine("2. AP decreases by card cost; effects resolve normally.");
+            sb.AppendLine("3. Played card leaves Hand and appears in Exhaust pile exactly once.");
+            sb.AppendLine("4. Played card does NOT appear in Graveyard.");
+            sb.AppendLine("5. No Graveyard fly VFX for the exhausted card.");
+            sb.AppendLine("6. PileCounter Exhaust count increases immediately.");
+            sb.AppendLine("7. Enemy countdown decreases once after full sequence.");
+            sb.AppendLine("8. Reshuffle Graveyard → Deck never includes Exhaust pile cards.");
+            sb.AppendLine("9. Start new battle — Exhaust pile clears; card returns via RunState deck rebuild.");
+            sb.AppendLine("10. Total card conservation remains valid (Deck+Hand+GY+Exhaust+Pending).");
+
+            if (exhaustTestCard != null)
+            {
+                sb.AppendLine($"Test card: {exhaustTestCard.DisplayName} (id={exhaustTestCard.CardId})");
+                sb.AppendLine($"ExhaustAfterPlay={exhaustTestCard.ExhaustAfterPlay}");
+                sb.AppendLine($"Description:\n{CardDescriptionBuilder.Build(exhaustTestCard)}");
+            }
+            else
+            {
+                sb.AppendLine("Assign exhaustTestCard (e.g. Card_Overcharge) for asset details.");
+            }
+
+            Debug.Log(sb.ToString());
+            DebugPrintPileState();
+        }
+
+        private int GetConservedTotal()
+        {
+            if (deckController == null)
+                return 0;
+
+            return deckController.Deck.Count
+                   + deckController.Hand.Count
+                   + deckController.Graveyard.Count
+                   + deckController.GetExhaustCount()
+                   + deckController.PendingOverflowCount;
+        }
+
+        private bool HasDuplicateInstanceIdsAcrossPiles()
+        {
+            var seen = new HashSet<System.Guid>();
+            return HasDupInPile(deckController.Deck, seen) ||
+                   HasDupInPile(deckController.Hand, seen) ||
+                   HasDupInPile(deckController.Graveyard, seen) ||
+                   HasDupInPile(deckController.ExhaustPile, seen);
+        }
+
+        private static bool HasDupInPile(IReadOnlyList<CardInstance> pile, HashSet<System.Guid> seen)
+        {
+            if (pile == null)
+                return false;
+
+            for (int i = 0; i < pile.Count; i++)
+            {
+                var card = pile[i];
+                if (card == null)
+                    continue;
+                if (!seen.Add(card.InstanceId))
+                    return true;
+            }
+
+            return false;
+        }
+
+        private bool ValidateDeck()
+        {
+            if (deckController != null)
+                return true;
+
+            Debug.LogError($"{LogPrefix} DeckController reference is missing.");
             return false;
         }
     }
@@ -2321,10 +2592,10 @@ using UnityEngine;
 namespace CardBattle.Core
 {
     /// <summary>
-    /// Owns the three piles (deck, hand, graveyard) and draw/discard/shuffle rules.
+    /// Owns the battle piles (deck, hand, graveyard, exhaust) and draw/discard/shuffle rules.
     /// When the deck is empty during a draw, the graveyard is shuffled back into the deck.
-    /// Draw respects <see cref="MaxHandSize"/>; excess cards overflow to the graveyard
-    /// (deferred via pending overflow when a multi-step draw may still reshuffle).
+    /// Exhausted cards never reshuffle. Draw respects <see cref="MaxHandSize"/>; excess cards
+    /// overflow to the graveyard (deferred via pending overflow when a multi-step draw may still reshuffle).
     /// </summary>
     public class DeckController : MonoBehaviour
     {
@@ -2337,6 +2608,7 @@ namespace CardBattle.Core
         private readonly List<CardInstance> _deck = new List<CardInstance>();
         private readonly List<CardInstance> _hand = new List<CardInstance>();
         private readonly List<CardInstance> _graveyard = new List<CardInstance>();
+        private readonly List<CardInstance> _exhaustPile = new List<CardInstance>();
 
         /// <summary>
         /// Cards drawn while the hand was full, held out of the graveyard until the
@@ -2348,6 +2620,7 @@ namespace CardBattle.Core
         public IReadOnlyList<CardInstance> Deck => _deck;
         public IReadOnlyList<CardInstance> Hand => _hand;
         public IReadOnlyList<CardInstance> Graveyard => _graveyard;
+        public IReadOnlyList<CardInstance> ExhaustPile => _exhaustPile;
 
         public int MaxHandSize => Mathf.Max(0, maxHandSize);
         public int AvailableHandSpace => Mathf.Max(0, MaxHandSize - _hand.Count);
@@ -2394,6 +2667,7 @@ namespace CardBattle.Core
             _deck.Clear();
             _hand.Clear();
             _graveyard.Clear();
+            _exhaustPile.Clear();
             _pendingOverflow.Clear();
             NotifyChanged();
         }
@@ -2408,6 +2682,11 @@ namespace CardBattle.Core
         public int GetGraveyardCount()
         {
             return _graveyard.Count;
+        }
+
+        public int GetExhaustCount()
+        {
+            return _exhaustPile.Count;
         }
 
         /// <summary>
@@ -2507,19 +2786,43 @@ namespace CardBattle.Core
             NotifyChanged();
         }
 
-        /// <summary>Play resolution: remove from hand and send to graveyard.</summary>
-        public void PlayCardFromHand(CardInstance card)
+        /// <summary>
+        /// Play resolution: remove from hand and route to Graveyard or Exhaust
+        /// based on <see cref="CardData.ExhaustAfterPlay"/>.
+        /// </summary>
+        public bool PlayCardFromHand(CardInstance card)
         {
             if (card == null || !_hand.Remove(card))
-                return;
+                return false;
 
-            _graveyard.Add(card);
+            PlayedCardDestination destination = ResolvePlayedCardDestination(card);
+            if (destination == PlayedCardDestination.Exhaust)
+            {
+                if (!_exhaustPile.Contains(card))
+                    _exhaustPile.Add(card);
+            }
+            else
+            {
+                if (!_graveyard.Contains(card))
+                    _graveyard.Add(card);
+            }
+
             NotifyChanged();
+            return true;
+        }
+
+        /// <summary>Resolves play destination from card keywords. Does not mutate piles.</summary>
+        public static PlayedCardDestination ResolvePlayedCardDestination(CardInstance card)
+        {
+            if (card?.Data != null && card.Data.ExhaustAfterPlay)
+                return PlayedCardDestination.Exhaust;
+
+            return PlayedCardDestination.Graveyard;
         }
 
         /// <summary>
         /// Manual discard: move one existing hand instance to the graveyard.
-        /// Does not play the card or spend AP.
+        /// Does not play the card or spend AP. Never routes to Exhaust.
         /// </summary>
         public bool DiscardCardFromHand(CardInstance card)
         {
@@ -2535,7 +2838,7 @@ namespace CardBattle.Core
 
         /// <summary>
         /// Manual discard batch. Ignores nulls, duplicates, and cards no longer in hand.
-        /// Notifies once if any card moved.
+        /// Notifies once if any card moved. Never routes to Exhaust.
         /// </summary>
         public int DiscardCardsFromHand(IReadOnlyList<CardInstance> cards)
         {
@@ -2556,6 +2859,54 @@ namespace CardBattle.Core
 
                 if (!_graveyard.Contains(card))
                     _graveyard.Add(card);
+
+                moved++;
+            }
+
+            if (moved > 0)
+                NotifyChanged();
+
+            return moved;
+        }
+
+        /// <summary>
+        /// Future API: move one hand card directly to Exhaust.
+        /// Does not spend AP or resolve effects.
+        /// </summary>
+        public bool ExhaustCardFromHand(CardInstance card)
+        {
+            if (card == null || !_hand.Remove(card))
+                return false;
+
+            if (!_exhaustPile.Contains(card))
+                _exhaustPile.Add(card);
+
+            NotifyChanged();
+            return true;
+        }
+
+        /// <summary>
+        /// Future API: batch Hand → Exhaust. Ignores nulls, duplicates, and cards no longer in hand.
+        /// </summary>
+        public int ExhaustCardsFromHand(IReadOnlyList<CardInstance> cards)
+        {
+            if (cards == null || cards.Count == 0)
+                return 0;
+
+            var seen = new HashSet<CardInstance>();
+            int moved = 0;
+
+            for (int i = 0; i < cards.Count; i++)
+            {
+                var card = cards[i];
+                if (card == null || !seen.Add(card))
+                    continue;
+
+                if (!_hand.Remove(card))
+                    continue;
+
+                if (!_exhaustPile.Contains(card))
+                    _exhaustPile.Add(card);
 
                 moved++;
             }
@@ -2686,6 +3037,10 @@ namespace CardBattle.Core
             _hand.Remove(card);
             _deck.Remove(card);
             _pendingOverflow.Remove(card);
+            // Exhausted cards stay in ExhaustPile and never enter Graveyard via this path.
+            if (_exhaustPile.Contains(card))
+                return;
+
             if (!_graveyard.Contains(card))
                 _graveyard.Add(card);
         }
@@ -2724,9 +3079,12 @@ namespace CardBattle.Core
                     if (string.IsNullOrWhiteSpace(line))
                         continue;
 
-                    lines.Add(line);
+                    lines.Add(line.TrimEnd());
                 }
             }
+
+            if (data.ExhaustAfterPlay)
+                lines.Add("Exhaust.");
 
             if (lines.Count == 0)
                 return string.Empty;

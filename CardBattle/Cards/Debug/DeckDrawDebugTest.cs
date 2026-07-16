@@ -436,6 +436,7 @@ namespace CardBattle.Core
             CountPileIds("Deck", deckController.Deck, seen, sb, ref total, ref duplicates);
             CountPileIds("Hand", deckController.Hand, seen, sb, ref total, ref duplicates);
             CountPileIds("Graveyard", deckController.Graveyard, seen, sb, ref total, ref duplicates);
+            CountPileIds("Exhaust", deckController.ExhaustPile, seen, sb, ref total, ref duplicates);
 
             // Pending overflow is count-only (collection is not exposed).
             int pending = deckController.PendingOverflowCount;
@@ -449,6 +450,7 @@ namespace CardBattle.Core
                 .Append(" Hand=").Append(deckController.Hand.Count)
                 .Append('/').Append(deckController.MaxHandSize)
                 .Append(" Graveyard=").Append(deckController.Graveyard.Count)
+                .Append(" Exhaust=").Append(deckController.GetExhaustCount())
                 .Append(" PendingOverflow=").Append(pending);
 
             if (!handOk)
@@ -556,6 +558,7 @@ namespace CardBattle.Core
                 $"Hand={deckController.Hand.Count}/{deckController.MaxHandSize}\n" +
                 $"AvailableHandSpace={deckController.AvailableHandSpace}\n" +
                 $"Graveyard={deckController.Graveyard.Count}\n" +
+                $"Exhaust={deckController.GetExhaustCount()}\n" +
                 $"PendingOverflow={deckController.PendingOverflowCount}\n" +
                 $"Total={total}");
         }
@@ -565,6 +568,7 @@ namespace CardBattle.Core
             return deckController.Deck.Count
                    + deckController.Hand.Count
                    + deckController.Graveyard.Count
+                   + deckController.GetExhaustCount()
                    + deckController.PendingOverflowCount;
         }
 

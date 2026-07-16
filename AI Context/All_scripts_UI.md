@@ -278,6 +278,7 @@ namespace CardBattle.Core
         [Header("UI References")]
         [SerializeField] private TextMeshProUGUI deckCountText;
         [SerializeField] private TextMeshProUGUI graveyardCountText;
+        [SerializeField] private TextMeshProUGUI exhaustCountText;
         [SerializeField] private RectTransform deckAnchor;
         [SerializeField] private RectTransform graveyardAnchor;
 
@@ -332,6 +333,7 @@ namespace CardBattle.Core
 
             RefreshDeckText();
             RefreshGraveyardText();
+            RefreshExhaustText();
         }
 
         private void OnPilesChanged()
@@ -350,6 +352,7 @@ namespace CardBattle.Core
 
             RefreshDeckText();
             RefreshGraveyardText();
+            RefreshExhaustText();
         }
 
         [ContextMenu("Refresh UI")]
@@ -389,6 +392,7 @@ namespace CardBattle.Core
             reshufflePresentationActive = false;
             RefreshGraveyardText();
             RefreshDeckText();
+            RefreshExhaustText();
         }
 
         private void RefreshDeckText()
@@ -401,6 +405,14 @@ namespace CardBattle.Core
         {
             if (graveyardCountText != null)
                 graveyardCountText.text = displayedGraveyardCount.ToString();
+        }
+
+        private void RefreshExhaustText()
+        {
+            if (exhaustCountText == null || deckController == null)
+                return;
+
+            exhaustCountText.text = deckController.GetExhaustCount().ToString();
         }
 
         /// <summary>Locks deck/graveyard display into reshuffle presentation mode.</summary>

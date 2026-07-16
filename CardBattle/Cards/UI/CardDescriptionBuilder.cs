@@ -24,9 +24,12 @@ namespace CardBattle.Core
                     if (string.IsNullOrWhiteSpace(line))
                         continue;
 
-                    lines.Add(line);
+                    lines.Add(line.TrimEnd());
                 }
             }
+
+            if (data.ExhaustAfterPlay)
+                lines.Add("Exhaust.");
 
             if (lines.Count == 0)
                 return string.Empty;

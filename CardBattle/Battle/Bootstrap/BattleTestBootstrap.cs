@@ -301,6 +301,7 @@ namespace CardBattle.Core
             sb.AppendLine($"Deck: {deckController.Deck.Count}");
             sb.AppendLine($"Hand: {deckController.Hand.Count}");
             sb.AppendLine($"Graveyard: {deckController.Graveyard.Count}");
+            sb.AppendLine($"Exhaust: {deckController.GetExhaustCount()}");
 
             for (int i = 0; i < deckController.Hand.Count; i++)
             {
