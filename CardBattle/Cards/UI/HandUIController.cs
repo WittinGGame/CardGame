@@ -95,8 +95,15 @@ namespace CardBattle.Core
         [SerializeField] private bool keepHoveredCardOnTop = true;
         [SerializeField] private float edgeHoverInwardOffset = 30f;
 
+        [Header("Target Selection Card Presentation")]
+        [Tooltip("Vertical visual offset used only while a hand card is waiting for a SingleEnemy target.")]
+        [SerializeField] private float targetSelectionYOffset = 170f;
+        [Tooltip("Visual scale multiplier used only while a hand card is waiting for a SingleEnemy target.")]
+        [SerializeField] private float targetSelectionScale = 1.12f;
+
         private readonly List<CardViewUI> spawnedCards = new List<CardViewUI>();
         private CardViewUI selectedView;
+        private CardViewUI targetSelectionPresentationView;
         private CardViewUI hoveredCardView;
         private Coroutine dealRoutine;
 
@@ -200,6 +207,9 @@ namespace CardBattle.Core
             neighborPushFalloff = Mathf.Clamp01(neighborPushFalloff);
             edgeHoverInwardOffset = Mathf.Max(0f, edgeHoverInwardOffset);
 
+            targetSelectionYOffset = Mathf.Max(0f, targetSelectionYOffset);
+            targetSelectionScale = Mathf.Max(0.01f, targetSelectionScale);
+
             EnsureFanStrengthArraySize();
             if (fanStrengthByCardCount != null)
             {
@@ -298,6 +308,7 @@ namespace CardBattle.Core
 
             ClearSpawnedCards();
             selectedView = null;
+            targetSelectionPresentationView = null;
             hoveredCardView = null;
 
             var hand = deckController.Hand;
@@ -507,6 +518,12 @@ namespace CardBattle.Core
             {
                 selectedView = null;
                 view.Deselect();
+            }
+
+            if (targetSelectionPresentationView == view)
+            {
+                ClearTargetSelectionPresentationOnView(view);
+                targetSelectionPresentationView = null;
             }
 
             spawnedCards.Remove(view);
@@ -1093,13 +1110,99 @@ namespace CardBattle.Core
                 $"HoveredIndex={lastLoggedHoveredIndex}");
         }
 
+        /// <summary>Presentation-only: waiting for SingleEnemy target on this card.</summary>
+        public void BeginTargetSelectionPresentation(CardInstance card)
+        {
+            EndTargetSelectionPresentation();
+
+            if (card == null)
+                return;
+
+            var view = GetViewForCard(card);
+            if (view == null)
+            {
+                if (verboseLogs)
+                    Debug.Log($"[HandUI] Target-selection presentation begin skipped — no view for card.");
+                return;
+            }
+
+            float yOffset = Mathf.Max(0f, targetSelectionYOffset);
+            float scale = Mathf.Max(0.01f, targetSelectionScale);
+
+            targetSelectionPresentationView = view;
+            view.SetTargetSelectionPresentation(yOffset, scale);
+            view.SetTargetSelectionActive(true);
+
+            if (verboseLogs)
+            {
+                Debug.Log(
+                    $"[HandUI] Target-selection presentation begin | " +
+                    $"Card={card.Data?.DisplayName} | Y={yOffset:0.##} | Scale={scale:0.##}");
+            }
+
+            UpdateHandSiblingOrder();
+        }
+
+        /// <summary>Clears target-selection presentation; optional card limits which view is cleared.</summary>
+        public void EndTargetSelectionPresentation(CardInstance card = null)
+        {
+            CardViewUI view = null;
+            if (card != null)
+                view = GetViewForCard(card);
+            else
+                view = targetSelectionPresentationView;
+
+            if (view == null)
+            {
+                if (card == null && targetSelectionPresentationView != null && verboseLogs)
+                {
+                    Debug.Log("[HandUI] Target-selection presentation end — stale/missing view fallback.");
+                }
+
+                if (card == null)
+                    targetSelectionPresentationView = null;
+                return;
+            }
+
+            if (card != null && targetSelectionPresentationView != null && view != targetSelectionPresentationView)
+                return;
+
+            ClearTargetSelectionPresentationOnView(view);
+
+            if (targetSelectionPresentationView == view || card == null)
+                targetSelectionPresentationView = null;
+
+            if (verboseLogs)
+            {
+                var name = view.BoundCard?.Data?.DisplayName ?? "?";
+                Debug.Log($"[HandUI] Target-selection presentation end | Card={name}");
+            }
+
+            LayoutCards();
+        }
+
+        private static void ClearTargetSelectionPresentationOnView(CardViewUI view)
+        {
+            if (view == null)
+                return;
+
+            view.SetTargetSelectionActive(false);
+        }
+
         private void SelectView(CardViewUI view)
         {
             if (view == null)
                 return;
 
             if (selectedView != null && selectedView != view)
+            {
+                if (targetSelectionPresentationView == selectedView)
+                    EndTargetSelectionPresentation(selectedView.BoundCard);
+                else
+                    ClearTargetSelectionPresentationOnView(selectedView);
+
                 selectedView.Deselect();
+            }
 
             selectedView = view;
             selectedView.Select();
@@ -1108,6 +1211,8 @@ namespace CardBattle.Core
 
         public void DeselectCurrentCard()
         {
+            EndTargetSelectionPresentation();
+
             if (selectedView != null)
             {
                 var previouslySelected = selectedView;
@@ -1140,6 +1245,7 @@ namespace CardBattle.Core
                 if (targetSelectionSystem != null)
                 {
                     targetSelectionSystem.BeginTargetSelection(card);
+                    BeginTargetSelectionPresentation(card);
 
                     if (verboseLogs)
                         Debug.Log($"[HandUI] Waiting for target selection: {card.Data.DisplayName} | TargetMode: {card.Data.TargetMode}");
@@ -1220,6 +1326,7 @@ namespace CardBattle.Core
 
             handCardSelectionController?.ForceCancelSelection();
             EndHandSelection();
+            EndTargetSelectionPresentation();
             DeselectCurrentCard();
             hoveredCardView = null;
             ClearSpawnedCards();

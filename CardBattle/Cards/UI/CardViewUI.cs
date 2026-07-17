@@ -86,6 +86,10 @@ namespace CardBattle.Core
         [SerializeField] private float handSelectionYOffset = 36f;
         [SerializeField] private float handSelectionScale = 1.12f;
 
+        private bool targetSelectionActive;
+        private float targetSelectionYOffset;
+        private float targetSelectionScale = 1.12f;
+
         public CardInstance BoundCard => boundCard;
         /// <summary>Root layout rect (anchored fan position). Used by presentation VFX.</summary>
         public RectTransform LayoutRect => _rectTransform;
@@ -351,6 +355,7 @@ namespace CardBattle.Core
             if (!isInteractable)
             {
                 isSelected = false;
+                targetSelectionActive = false;
                 currentState = CardVisualState.Disabled;
             }
             else if (handSelectionMode)
@@ -426,6 +431,25 @@ namespace CardBattle.Core
         {
             SetHandSelectionState(false, false, false);
         }
+
+        /// <summary>Runtime target-selection raise/scale from <see cref="HandUIController"/> (not hover or hand-selection tuning).</summary>
+        public void SetTargetSelectionPresentation(float yOffset, float scale)
+        {
+            targetSelectionYOffset = Mathf.Max(0f, yOffset);
+            targetSelectionScale = Mathf.Max(0.01f, scale);
+            ApplyStateVisuals();
+        }
+
+        public void SetTargetSelectionActive(bool active)
+        {
+            if (targetSelectionActive == active)
+                return;
+
+            targetSelectionActive = active;
+            ApplyStateVisuals();
+        }
+
+        public bool IsTargetSelectionPresentationActive => targetSelectionActive;
 
         public void SetClickAction(UnityEngine.Events.UnityAction action)
         {
@@ -551,6 +575,14 @@ namespace CardBattle.Core
                     {
                         targetScale = baseScale * Mathf.Max(1f, handSelectionScale);
                         targetLocalPosition = baseLocalPosition + new Vector3(0f, handSelectionYOffset, 0f);
+                    }
+                    else if (targetSelectionActive)
+                    {
+                        targetScale = baseScale * targetSelectionScale;
+                        targetLocalPosition = baseLocalPosition + new Vector3(
+                            selectedXOffset,
+                            targetSelectionYOffset,
+                            0f);
                     }
                     else
                     {

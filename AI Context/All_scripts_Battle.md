@@ -1798,8 +1798,16 @@ namespace CardBattle.Core
 
             SetHighlight(false);
 
-            battleActionRunner.TryPlayCard(_pendingCard, target);
+            var playedCard = _pendingCard;
             _pendingCard = null;
+
+            if (handUIController != null)
+            {
+                handUIController.EndTargetSelectionPresentation(playedCard);
+                handUIController.DeselectCurrentCard();
+            }
+
+            battleActionRunner.TryPlayCard(playedCard, target);
 
             if (guideLine != null)
                 guideLine.Hide();
