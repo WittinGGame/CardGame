@@ -8,7 +8,7 @@ namespace CardBattle.Core
     /// <summary>
     /// Coordinates enemy reactions to the player's cards and turn boundaries.
     /// Handles countdown interrupts (sorted by <see cref="EnemyBattleUnit.Speed"/> descending)
-    /// and end-of-turn attackers while respecting the "one attack per enemy per player round" rule.
+    /// and end-of-turn attackers. Countdown interrupts may repeat in the same player round.
     /// </summary>
     public class EnemyActionSystem : MonoBehaviour
     {
@@ -24,11 +24,15 @@ namespace CardBattle.Core
         [SerializeField] private bool skipStatusTickOnFirstPlayerRound = true;
         [SerializeField] private bool verboseStatusTickLogs = false;
 
-        private Coroutine runningEnemyActions;
+        private bool resolvingEnemyActions;
+        private bool startingPlayerRound;
+        private BattleActionExecution enemySequence;
+        private BattleActionExecution roundSequence;
 
+        public BattleActionExecution LastRoundStart { get; private set; }
         public PlayerBattleUnit Player => player;
         public IReadOnlyList<EnemyBattleUnit> Enemies => enemies;
-        public bool IsResolvingEnemyActions => runningEnemyActions != null;
+        public bool IsResolvingEnemyActions => resolvingEnemyActions || startingPlayerRound;
         public int CurrentTurn { get; private set; }
 
         public event System.Action<int> OnTurnStarted;
@@ -42,6 +46,7 @@ namespace CardBattle.Core
 
         public void ResetTurnCounter()
         {
+            ResetRuntimeActions();
             CurrentTurn = 0;
         }
 
@@ -54,11 +59,13 @@ namespace CardBattle.Core
 
         public void ClearRegisteredEnemies()
         {
+            ResetRuntimeActions();
             enemies.Clear();
         }
 
         public void ReplaceRegisteredEnemies(IReadOnlyList<EnemyBattleUnit> newEnemies)
         {
+            ResetRuntimeActions();
             enemies.Clear();
 
             if (newEnemies == null)
@@ -79,10 +86,34 @@ namespace CardBattle.Core
 
         public IEnumerator StartPlayerRoundRoutine()
         {
+            if (IsResolvingEnemyActions || !isActiveAndEnabled)
+                yield break;
+            startingPlayerRound = true;
+            var execution = new BattleActionExecution();
+            roundSequence = execution;
+            LastRoundStart = execution;
+            execution.Commit();
+            try
+            {
+                yield return execution.Run(StartPlayerRoundCore(), exception => Debug.LogException(exception, this));
+                execution.Complete(BattleActionResult.Successful);
+            }
+            finally
+            {
+                execution.Complete(BattleActionResult.Cancelled, "Round start interrupted.");
+                if (ReferenceEquals(roundSequence, execution))
+                {
+                    startingPlayerRound = false;
+                    roundSequence = null;
+                }
+            }
+        }
+
+        private IEnumerator StartPlayerRoundCore()
+        {
             if (player == null)
             {
-                Debug.LogError("EnemyActionSystem requires a PlayerBattleUnit reference.");
-                yield break;
+                throw new System.InvalidOperationException("EnemyActionSystem requires a PlayerBattleUnit reference.");
             }
 
             CurrentTurn++;
@@ -102,8 +133,7 @@ namespace CardBattle.Core
 
             if (player.DeckController == null)
             {
-                Debug.LogError("Player is missing a DeckController.");
-                yield break;
+                throw new System.InvalidOperationException("Player is missing a DeckController.");
             }
 
             int requestedDraw = Mathf.Max(0, player.DrawPerRound);
@@ -125,7 +155,7 @@ namespace CardBattle.Core
         /// </summary>
         public void HandlePlayerSuccessfullyPlayedCard()
         {
-            if (player == null)
+            if (player == null || !player.IsAlive || !isActiveAndEnabled || IsResolvingEnemyActions)
                 return;
 
             foreach (var enemy in enemies)
@@ -139,10 +169,7 @@ namespace CardBattle.Core
             }
 
             ready.Sort((a, b) => b.Speed.CompareTo(a.Speed));
-            if (runningEnemyActions != null)
-                return;
-
-            runningEnemyActions = StartCoroutine(RunCountdownAttacksSequentially(ready));
+            StartEnemySequence(RunCountdownAttacksSequentially(ready));
         }
 
         /// <summary>
@@ -151,7 +178,7 @@ namespace CardBattle.Core
         /// </summary>
         public void ResolveEndTurnAttacks()
         {
-            if (player == null)
+            if (player == null || !player.IsAlive || !isActiveAndEnabled || IsResolvingEnemyActions)
                 return;
 
             var actors = new List<EnemyBattleUnit>();
@@ -172,10 +199,7 @@ namespace CardBattle.Core
             }
 
             actors.Sort((a, b) => b.Speed.CompareTo(a.Speed));
-            if (runningEnemyActions != null)
-                return;
-
-            runningEnemyActions = StartCoroutine(RunEndTurnAttacksSequentially(actors));
+            StartEnemySequence(RunEndTurnAttacksSequentially(actors));
         }
 
         private IEnumerator RunCountdownAttacksSequentially(List<EnemyBattleUnit> ready)
@@ -183,13 +207,11 @@ namespace CardBattle.Core
             for (int i = 0; i < ready.Count; i++)
             {
                 var enemy = ready[i];
-                if (enemy == null)
-                    continue;
-
+                if (player == null || !player.IsAlive) yield break;
+                if (enemy == null || !enemy.isActiveAndEnabled) continue;
                 yield return enemy.ExecuteCountdownAttackRoutine(player);
             }
 
-            runningEnemyActions = null;
         }
 
         private IEnumerator RunEndTurnAttacksSequentially(List<EnemyBattleUnit> actors)
@@ -197,8 +219,8 @@ namespace CardBattle.Core
             for (int i = 0; i < actors.Count; i++)
             {
                 var enemy = actors[i];
-                if (enemy == null)
-                    continue;
+                if (player == null || !player.IsAlive) yield break;
+                if (enemy == null || !enemy.isActiveAndEnabled) continue;
 
                 if (enemy.Behavior == EnemyBehaviorType.CountdownAttacker)
                     yield return enemy.ExecuteEndTurnCountdownAttackRoutine(player);
@@ -206,7 +228,49 @@ namespace CardBattle.Core
                     yield return enemy.ExecuteEndTurnAttackRoutine(player);
             }
 
-            runningEnemyActions = null;
+        }
+
+        private void StartEnemySequence(IEnumerator routine)
+        {
+            resolvingEnemyActions = true;
+            var execution = new BattleActionExecution();
+            enemySequence = execution;
+            execution.Commit();
+            StartCoroutine(RunEnemySequence(routine, execution));
+        }
+
+        private IEnumerator RunEnemySequence(IEnumerator routine, BattleActionExecution execution)
+        {
+            try
+            {
+                yield return execution.Run(routine, exception => Debug.LogException(exception, this));
+                execution.Complete(BattleActionResult.Successful);
+            }
+            finally
+            {
+                execution.Complete(BattleActionResult.Cancelled, "Enemy sequence interrupted.");
+                if (ReferenceEquals(enemySequence, execution))
+                {
+                    resolvingEnemyActions = false;
+                    enemySequence = null;
+                }
+            }
+        }
+
+        public void ResetRuntimeActions()
+        {
+            enemySequence?.Cancel("Enemy sequence reset.");
+            roundSequence?.Cancel("Round start reset.");
+            foreach (var enemy in enemies)
+                enemy?.CancelRuntimeAction();
+            StopAllCoroutines();
+            resolvingEnemyActions = false;
+            startingPlayerRound = false;
+        }
+
+        private void OnDisable()
+        {
+            ResetRuntimeActions();
         }
 
         private void TickTurnDurationStatusesForPlayerRoundStart()

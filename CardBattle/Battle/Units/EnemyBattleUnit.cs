@@ -38,9 +38,11 @@ namespace CardBattle.Core
         private int pendingAttackDamage;
         private int pendingHitCount;
         private float pendingDelayBetweenHits;
-        private bool multiHitInProgress;
         private int currentActionPatternIndex;
         private bool lastActionResolved;
+        private bool actionExecutionActive;
+        [SerializeField, Min(0.1f)] private float animationEventTimeout = 10f;
+        public BattleActionExecution LastAction { get; private set; }
 
         public event System.Action OnEnemyStateChanged;
         public event System.Action<EnemyBattleUnit> OnPlannedActionChanged;
@@ -82,6 +84,7 @@ namespace CardBattle.Core
         /// <summary>Swap template at runtime (e.g. encounter scripting).</summary>
         public void BindEnemyData(EnemyData data)
         {
+            CancelRuntimeAction();
             enemyData = data;
             ApplyEnemyData();
             ClearStatuses();
@@ -219,17 +222,9 @@ namespace CardBattle.Core
 
         public IEnumerator ExecuteCountdownAttackRoutine(PlayerBattleUnit player)
         {
-            if (!IsCountdownReady)
+            if (!IsCountdownReady || actionExecutionActive)
                 yield break;
-
-            EnemyActionData action = ResolveActionForExecution();
-            yield return PerformAction(player, action);
-
-            if (lastActionResolved)
-                AdvanceActionPatternAfterResolved();
-
-            _countdown = enemyData != null ? enemyData.BaseCountdown : 0;
-            NotifyStateChanged();
+            yield return ExecuteAction(player, true);
         }
 
         public bool CanExecuteCountdownAttackAtEndTurn()
@@ -245,13 +240,11 @@ namespace CardBattle.Core
 
         public IEnumerator ExecuteEndTurnCountdownAttackRoutine(PlayerBattleUnit player)
         {
-            if (!CanExecuteCountdownAttackAtEndTurn())
+            if (!CanExecuteCountdownAttackAtEndTurn() || actionExecutionActive)
                 yield break;
 
-            // End-turn rule: eligible countdown attackers can force-ready and strike now.
-            _countdown = 0;
-            NotifyStateChanged();
-            yield return ExecuteCountdownAttackRoutine(player);
+            // End-turn eligibility is independent of countdown readiness. Reset only on success.
+            yield return ExecuteAction(player, true);
         }
 
         /// <summary>End-of-turn attack for <see cref="EnemyBehaviorType.EndTurnAttacker"/>.</summary>
@@ -274,19 +267,57 @@ namespace CardBattle.Core
             if (_hasAttackedThisPlayerRound)
                 yield break;
 
-            EnemyActionData action = ResolveActionForExecution();
-            yield return PerformAction(player, action);
+            if (actionExecutionActive)
+                yield break;
+            yield return ExecuteAction(player, false);
+        }
 
-            if (lastActionResolved)
-                AdvanceActionPatternAfterResolved();
+        private IEnumerator ExecuteAction(PlayerBattleUnit player, bool resetCountdown)
+        {
+            if (actionExecutionActive)
+                yield break;
+            var execution = new BattleActionExecution();
+            LastAction = execution;
+            if (!isActiveAndEnabled || !IsAlive || player == null || !player.IsAlive || !player.isActiveAndEnabled)
+            {
+                execution.Complete(BattleActionResult.Cancelled, "No valid owner/target before execution.");
+                yield break;
+            }
+
+            actionExecutionActive = true;
+            lastActionResolved = false;
+            execution.Commit();
+            try
+            {
+                yield return execution.Run(PerformAction(player, ResolveActionForExecution()),
+                    exception => Debug.LogException(exception, this));
+                if (!execution.IsComplete)
+                    execution.Complete(lastActionResolved ? BattleActionResult.Successful : BattleActionResult.Failed,
+                        lastActionResolved ? string.Empty : "Enemy action did not resolve.");
+
+                if (execution.Result == BattleActionResult.Successful)
+                {
+                    _hasAttackedThisPlayerRound = true;
+                    if (resetCountdown)
+                        _countdown = enemyData != null ? enemyData.BaseCountdown : 0;
+                    AdvanceActionPatternAfterResolved();
+                    NotifyStateChanged();
+                }
+            }
+            finally
+            {
+                execution.Complete(BattleActionResult.Cancelled, "Enemy execution interrupted.");
+                if (ReferenceEquals(LastAction, execution))
+                {
+                    CleanupRuntimeAction();
+                    actionExecutionActive = false;
+                }
+            }
         }
 
         private IEnumerator PerformAction(PlayerBattleUnit player, EnemyActionData action)
         {
             lastActionResolved = false;
-
-            if (player == null || !player.IsAlive || !IsAlive)
-                yield break;
 
             if (action == null)
             {
@@ -386,12 +417,6 @@ namespace CardBattle.Core
 
         private IEnumerator PerformAttackAnimation(PlayerBattleUnit player)
         {
-            if (attackInProgress || player == null || !player.IsAlive)
-            {
-                lastActionResolved = false;
-                yield break;
-            }
-
             attackInProgress = true;
             pendingTarget = player;
             waitingForHit = true;
@@ -401,27 +426,53 @@ namespace CardBattle.Core
             {
                 SubscribeToViewEvents();
                 View.PlayAttack();
-
-                yield return new WaitUntil(() => !waitingForFinish && !multiHitInProgress);
-                UnsubscribeFromViewEvents();
+                float elapsed = 0f;
+                while (waitingForHit && waitingForFinish)
+                {
+                    elapsed += Time.deltaTime;
+                    if (elapsed >= Mathf.Max(0.1f, animationEventTimeout))
+                    {
+                        Debug.LogWarning("Enemy animation hit/finish timeout; resolving committed attack once.", this);
+                        waitingForFinish = false;
+                        break;
+                    }
+                    yield return null;
+                }
             }
             else
-            {
-                ApplyDamageOnHit();
-                if (multiHitInProgress)
-                    yield return new WaitUntil(() => !multiHitInProgress);
-
                 waitingForFinish = false;
-            }
 
+            // Events only release waits. This coroutine is the sole damage executor.
             waitingForHit = false;
+            yield return ApplyMultiHitDamageRoutine();
+
+            float finishElapsed = 0f;
+            while (waitingForFinish)
+            {
+                finishElapsed += Time.deltaTime;
+                if (finishElapsed >= Mathf.Max(0.1f, animationEventTimeout))
+                {
+                    Debug.LogWarning("Enemy animation finish timeout; completing committed attack.", this);
+                    waitingForFinish = false;
+                    break;
+                }
+                yield return null;
+            }
+            UnsubscribeFromViewEvents();
             pendingTarget = null;
             attackInProgress = false;
             lastActionResolved = true;
-            NotifyStateChanged();
         }
 
-        private void OnDisable()
+        public void CancelRuntimeAction()
+        {
+            LastAction?.Cancel("Enemy reset or disabled.");
+            StopAllCoroutines();
+            CleanupRuntimeAction();
+            actionExecutionActive = false;
+        }
+
+        private void CleanupRuntimeAction()
         {
             UnsubscribeFromViewEvents();
             waitingForHit = false;
@@ -429,7 +480,11 @@ namespace CardBattle.Core
             pendingTarget = null;
             attackInProgress = false;
             pendingAction = null;
-            multiHitInProgress = false;
+        }
+
+        private void OnDisable()
+        {
+            CancelRuntimeAction();
         }
 
         private void SubscribeToViewEvents()
@@ -459,7 +514,6 @@ namespace CardBattle.Core
                 return;
 
             waitingForHit = false;
-            ApplyDamageOnHit();
         }
 
         private void HandleAttackPreHit()
@@ -479,26 +533,8 @@ namespace CardBattle.Core
             waitingForFinish = false;
         }
 
-        private void ApplyDamageOnHit()
-        {
-            if (pendingTarget == null || !pendingTarget.IsAlive)
-                return;
-
-            if (pendingAttackDamage <= 0)
-                return;
-
-            if (pendingHitCount <= 1)
-            {
-                ApplySingleHitDamage();
-                return;
-            }
-
-            StartCoroutine(ApplyMultiHitDamageRoutine());
-        }
-
         private IEnumerator ApplyMultiHitDamageRoutine()
         {
-            multiHitInProgress = true;
 
             for (int i = 0; i < pendingHitCount; i++)
             {
@@ -516,7 +552,6 @@ namespace CardBattle.Core
                     yield return null;
             }
 
-            multiHitInProgress = false;
         }
 
         private void ApplySingleHitDamage()
@@ -547,6 +582,12 @@ namespace CardBattle.Core
             }
 
             _hasAttackedThisPlayerRound = true;
+        }
+
+        [ContextMenu("Debug Print Last Action")]
+        private void DebugPrintLastAction()
+        {
+            Debug.Log($"[EnemyBattleUnit] Result={LastAction?.Result} | Committed={LastAction?.IsCommitted} | Active={actionExecutionActive} | Countdown={CurrentCountdown} | PatternIndex={currentActionPatternIndex} | Reason={LastAction?.Reason}", this);
         }
 
         private void NotifyStateChanged()

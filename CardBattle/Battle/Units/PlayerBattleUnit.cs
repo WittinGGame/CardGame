@@ -52,59 +52,37 @@ namespace CardBattle.Core
             NotifyTurnStateChanged();
         }
 
-        /// <summary>
-        /// Attempts to play a card: spends AP, moves it to the graveyard, resolves effects, then notifies enemies.
-        /// Returns false if the turn is locked, the card is not in hand, or AP is insufficient.
-        /// </summary>
-        public bool TryPlayCard(CardInstance card, EnemyBattleUnit primaryTarget = null)
+        private BattleActionRunner actionRunner;
+
+        public void BindActionRunner(BattleActionRunner runner)
         {
-            if (!CanAct || card?.Data == null)
-                return false;
-
-            if (deckController == null || cardResolver == null || enemyActionSystem == null)
-            {
-                Debug.LogError("PlayerBattleUnit missing one of its serialized systems.");
-                return false;
-            }
-
-            if (!deckController.IsInHand(card))
-                return false;
-
-            var cost = card.Data.ApCost;
-            if (!CanSpendAp(cost))
-                return false;
-
-            CurrentAp -= cost;
-            NotifyApChanged();
-            deckController.PlayCardFromHand(card);
-
-            var context = new CardPlayContext(this, card, enemyActionSystem.Enemies, primaryTarget);
-            cardResolver.Resolve(context);
-
-            enemyActionSystem.HandlePlayerSuccessfullyPlayedCard();
-            return true;
+            actionRunner = runner;
         }
 
-        /// <summary>
-        /// Locks further plays, resolves end-turn hand (Retain-aware), then lets end-of-turn enemies strike.
-        /// Countdown enemies that already attacked this round are skipped automatically.
-        /// Prefer <see cref="BattleActionRunner.TryEndTurn"/> for presentation-driven flow.
-        /// </summary>
+        private BattleActionRunner ResolveActionRunner()
+        {
+            if (actionRunner != null && actionRunner.Player == this)
+                return actionRunner;
+            foreach (var runner in FindObjectsByType<BattleActionRunner>(FindObjectsSortMode.None))
+            {
+                if (runner.Player != this) continue;
+                actionRunner = runner;
+                return runner;
+            }
+            Debug.LogError("Player requires BattleActionRunner; synchronous gameplay bypass is disabled.", this);
+            return null;
+        }
+
+        /// <summary>Compatibility API: returns whether the asynchronous runner accepted the card.</summary>
+        public bool TryPlayCard(CardInstance card, EnemyBattleUnit primaryTarget = null)
+        {
+            var runner = ResolveActionRunner();
+            return runner != null && runner.TryStartCard(card, primaryTarget);
+        }
+
         public void RequestEndTurn()
         {
-            if (!IsAlive || _turnCommitted)
-                return;
-
-            if (deckController == null || enemyActionSystem == null)
-            {
-                Debug.LogError("PlayerBattleUnit missing deck or enemy system references.");
-                return;
-            }
-
-            _turnCommitted = true;
-            NotifyTurnStateChanged();
-            deckController.ResolveEndTurnHand();
-            enemyActionSystem.ResolveEndTurnAttacks();
+            ResolveActionRunner()?.TryEndTurn();
         }
 
         /// <summary>Called by attack effects when applying damage.</summary>

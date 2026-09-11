@@ -17,21 +17,13 @@ namespace CardBattle.Core
             {
                 case CardTargetMode.SingleEnemy:
                 {
-                    if (context.PrimaryTarget != null && context.PrimaryTarget.IsAlive)
+                    if (context.PrimaryTarget != null && context.PrimaryTarget.IsAlive && context.PrimaryTarget.isActiveAndEnabled)
                     {
                         result.Add(context.PrimaryTarget);
                         return result;
                     }
 
-                    for (int i = 0; i < context.Enemies.Count; i++)
-                    {
-                        var enemy = context.Enemies[i];
-                        if (enemy != null && enemy.IsAlive)
-                        {
-                            result.Add(enemy);
-                            break;
-                        }
-                    }
+                    // A committed single-target action never silently selects a different enemy.
                     break;
                 }
 
@@ -40,7 +32,7 @@ namespace CardBattle.Core
                     for (int i = 0; i < context.Enemies.Count; i++)
                     {
                         var enemy = context.Enemies[i];
-                        if (enemy != null && enemy.IsAlive)
+                        if (enemy != null && enemy.IsAlive && enemy.isActiveAndEnabled)
                             result.Add(enemy);
                     }
                     break;

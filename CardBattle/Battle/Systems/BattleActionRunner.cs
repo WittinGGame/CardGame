@@ -37,6 +37,10 @@ namespace CardBattle.Core
         [SerializeField] private float endTurnPause = 0.2f;
         [SerializeField] private float enemyResolveSafetyPause = 0.1f;
 
+        [SerializeField, Min(0.1f)] private float animationEventTimeout = 10f;
+
+        public PlayerBattleUnit Player => player;
+        public BattleActionExecution LastAction { get; private set; }
         public bool IsBusy { get; private set; }
         public event System.Action<bool> OnBusyStateChanged;
 
@@ -45,7 +49,9 @@ namespace CardBattle.Core
             battleOutcomeController.IsBattleEnded;
 
         public bool CanAcceptInput =>
+            isActiveAndEnabled &&
             !IsBusy &&
+            (enemyActionSystem == null || !enemyActionSystem.IsResolvingEnemyActions) &&
             !HasBattleEnded &&
             player != null &&
             player.CanAct &&
@@ -54,14 +60,13 @@ namespace CardBattle.Core
         private bool waitingForPlayerHit;
         private bool waitingForPlayerFinish;
         private bool playerAttackResolved;
-        private bool effectSequenceStarted;
-        private bool effectSequenceComplete;
         private CardPlayContext pendingPlayerCardContext;
         private Coroutine runningActionRoutine;
-        private Coroutine pendingEffectSequenceRoutine;
+        private bool runningSequence;
 
         private void OnEnable()
         {
+            player?.BindActionRunner(this);
             if (battleOutcomeController != null)
                 battleOutcomeController.OnBattleEnded += HandleBattleEnded;
         }
@@ -71,41 +76,48 @@ namespace CardBattle.Core
             if (battleOutcomeController != null)
                 battleOutcomeController.OnBattleEnded -= HandleBattleEnded;
 
-            if (runningActionRoutine != null)
-            {
-                StopCoroutine(runningActionRoutine);
-                runningActionRoutine = null;
-            }
-
-            StopPendingEffectSequence();
-            handCardSelectionController?.ForceCancelSelection();
-            CleanupPlayerAttackState();
-            SetBusy(false);
+            ResetRuntimeActionState();
         }
 
+        // Preserve the void UnityEvent entry point used by existing scenes/UI.
         public void TryPlayCard(CardInstance card, EnemyBattleUnit primaryTarget = null)
         {
-            if (HasBattleEnded ||
-                IsBusy ||
-                card?.Data == null ||
-                player == null ||
-                !player.IsAlive)
+            TryStartCard(card, primaryTarget);
+        }
+
+        /// <returns>Whether execution was accepted, not whether its asynchronous effects have finished.</returns>
+        public bool TryStartCard(CardInstance card, EnemyBattleUnit primaryTarget = null)
+        {
+            if (!CanAcceptInput || runningSequence)
+                return false;
+
+            var execution = new BattleActionExecution();
+            LastAction = execution;
+            if (card?.Data == null || !ValidateCardPlay(card))
             {
-                return;
+                execution.Complete(BattleActionResult.Failed, "Card or required systems are not ready.");
+                return false;
+            }
+            if (!HasValidPlayTarget(card, primaryTarget))
+            {
+                execution.Complete(BattleActionResult.Cancelled, "No valid target before execution.");
+                return false;
             }
 
-            runningActionRoutine = StartCoroutine(PlayCardSequence(card, primaryTarget));
+            // Validation and commit are synchronous, before AP/pile mutation and animation.
+            execution.Commit();
+            StartSequence(PlayCardSequence(card, primaryTarget, execution), execution);
+            return true;
         }
 
         public void ResetRuntimeActionState()
         {
+            LastAction?.Cancel("Battle action reset or disabled.");
+            enemyActionSystem?.ResetRuntimeActions();
             if (runningActionRoutine != null)
-            {
                 StopCoroutine(runningActionRoutine);
-                runningActionRoutine = null;
-            }
-
-            StopPendingEffectSequence();
+            runningActionRoutine = null;
+            runningSequence = false;
             handCardSelectionController?.ForceCancelSelection();
             CleanupPlayerAttackState();
             SetBusy(false);
@@ -114,141 +126,185 @@ namespace CardBattle.Core
 
         public void TryEndTurn()
         {
-            if (HasBattleEnded ||
-                IsBusy ||
-                player == null ||
-                !player.IsAlive ||
-                !player.CanAct)
+            if (!CanAcceptInput || runningSequence)
+                return;
+            var execution = new BattleActionExecution();
+            LastAction = execution;
+            if (deckController == null || enemyActionSystem == null)
             {
+                execution.Complete(BattleActionResult.Failed, "End turn systems are missing.");
                 return;
             }
-
-            runningActionRoutine = StartCoroutine(EndTurnSequence());
+            execution.Commit();
+            StartSequence(EndTurnSequenceCore(), execution);
         }
 
-        private IEnumerator PlayCardSequence(CardInstance card, EnemyBattleUnit primaryTarget)
+        private void StartSequence(IEnumerator routine, BattleActionExecution execution)
+        {
+            runningSequence = true;
+            SetBusy(true);
+            Coroutine handle = StartCoroutine(RunSequence(routine, execution));
+            // A coroutine can finish synchronously before StartCoroutine returns.
+            if (runningSequence && ReferenceEquals(LastAction, execution))
+                runningActionRoutine = handle;
+        }
+
+        private IEnumerator RunSequence(IEnumerator routine, BattleActionExecution execution)
         {
             try
             {
-                if (!ValidateCardPlay(card))
-                    yield break;
-
-                SetBusy(true);
-                RefreshExternalUI();
-                cardSfx?.PlayCardPlayed(card.Data.CardType);
-
-                int cost = card.Data.ApCost;
-                player.SpendApFromRunner(cost);
-
-                PlayedCardDestination destination = DeckController.ResolvePlayedCardDestination(card);
-                CardViewUI handViewForVfx =
-                    handUIController != null ? handUIController.GetViewForCard(card) : null;
-
-                // Destination is fixed before effects run. Only Graveyard should use Graveyard VFX.
-                // Future: branch to destination-specific VFX when available.
-                if (destination == PlayedCardDestination.Graveyard && graveyardVfx != null)
-                    graveyardVfx.PlaySingleCardToGraveyard(handViewForVfx);
-
-                deckController.PlayCardFromHand(card);
-
-                if (destination != PlayedCardDestination.Graveyard || graveyardVfx == null)
-                    pileCounterUI?.ForceSyncDisplayedToReal();
-
-                bool isAttack = card.Data.CardType == CardType.Attack;
-
-                if (isAttack)
-                {
-                    if (player?.View == null)
-                    {
-                        Debug.LogWarning("BattleActionRunner: Player view is missing, falling back to immediate resolve.");
-                        var fallbackContext = new CardPlayContext(
-                            player, card, enemyActionSystem.Enemies, primaryTarget);
-                        yield return ExecuteEffectSequence(fallbackContext);
-                    }
-                    else
-                    {
-                        pendingPlayerCardContext = new CardPlayContext(
-                            player, card, enemyActionSystem.Enemies, primaryTarget);
-                        waitingForPlayerHit = true;
-                        waitingForPlayerFinish = true;
-                        playerAttackResolved = false;
-                        effectSequenceStarted = false;
-                        effectSequenceComplete = false;
-
-                        SubscribePlayerViewEvents();
-                        player.View.PlayAttack();
-
-                        yield return new WaitUntil(() =>
-                            !waitingForPlayerFinish &&
-                            (!effectSequenceStarted || effectSequenceComplete));
-
-                        CleanupPlayerAttackState();
-                    }
-                }
-                else
-                {
-                    var context = new CardPlayContext(
-                        player, card, enemyActionSystem.Enemies, primaryTarget);
-                    yield return ExecuteEffectSequence(context);
-                    yield return new WaitForSeconds(nonAttackResolvePause);
-                }
-
-                if (HasBattleEnded)
-                {
-                    handCardSelectionController?.ForceCancelSelection();
-                    RefreshExternalUI();
-                    SetBusy(false);
-                    RefreshExternalUI();
-                    yield break;
-                }
-
-                enemyActionSystem.HandlePlayerSuccessfullyPlayedCard();
-
-                if (enemyActionSystem.IsResolvingEnemyActions)
-                {
-                    yield return new WaitUntil(() => !enemyActionSystem.IsResolvingEnemyActions);
-                }
-                else
-                {
-                    yield return new WaitForSeconds(enemyResolveSafetyPause);
-                }
-
-                RefreshExternalUI();
-                SetBusy(false);
-                RefreshExternalUI();
+                yield return execution.Run(routine, exception => Debug.LogException(exception, this));
+                execution.Complete(BattleActionResult.Successful);
             }
             finally
             {
-                runningActionRoutine = null;
+                execution.Complete(BattleActionResult.Cancelled, "Execution interrupted.");
+                if (ReferenceEquals(LastAction, execution))
+                {
+                    CleanupPlayerAttackState();
+                    handCardSelectionController?.ForceCancelSelection();
+                    runningActionRoutine = null;
+                    runningSequence = false;
+                    SetBusy(false);
+                    RefreshExternalUI();
+                }
             }
         }
 
-        private IEnumerator ExecuteEffectSequence(CardPlayContext context)
+        private bool HasValidPlayTarget(CardInstance card, EnemyBattleUnit target)
         {
-            if (cardEffectSequenceRunner != null)
+            if (card.Data.TargetMode == CardTargetMode.SingleEnemy)
             {
-                yield return cardEffectSequenceRunner.ExecuteEffectsSequentially(context);
+                if (target == null || !target.IsAlive || !target.isActiveAndEnabled)
+                    return false;
+                foreach (var enemy in enemyActionSystem.Enemies)
+                    if (enemy == target) return true;
+                return false;
+            }
+            if (card.Data.TargetMode == CardTargetMode.AllEnemies)
+            {
+                foreach (var enemy in enemyActionSystem.Enemies)
+                    if (enemy != null && enemy.IsAlive && enemy.isActiveAndEnabled) return true;
+                return false;
+            }
+            return card.Data.CardType != CardType.Attack;
+        }
+
+        private IEnumerator PlayCardSequence(CardInstance card, EnemyBattleUnit primaryTarget, BattleActionExecution execution)
+        {
+            SetBusy(true);
+            RefreshExternalUI();
+            cardSfx?.PlayCardPlayed(card.Data.CardType);
+
+            int cost = card.Data.ApCost;
+            player.SpendApFromRunner(cost);
+
+            PlayedCardDestination destination = DeckController.ResolvePlayedCardDestination(card);
+            CardViewUI handViewForVfx =
+                handUIController != null ? handUIController.GetViewForCard(card) : null;
+
+            // Destination is fixed before effects run. Only Graveyard should use Graveyard VFX.
+            // Future: branch to destination-specific VFX when available.
+            if (destination == PlayedCardDestination.Graveyard && graveyardVfx != null)
+                graveyardVfx.PlaySingleCardToGraveyard(handViewForVfx);
+
+            deckController.PlayCardFromHand(card);
+
+            if (destination != PlayedCardDestination.Graveyard || graveyardVfx == null)
+                pileCounterUI?.ForceSyncDisplayedToReal();
+
+            bool isAttack = card.Data.CardType == CardType.Attack;
+
+            if (isAttack)
+            {
+                if (player?.View == null)
+                {
+                    Debug.LogWarning("BattleActionRunner: Player view is missing, falling back to immediate resolve.");
+                    var fallbackContext = new CardPlayContext(
+                        player, card, enemyActionSystem.Enemies, primaryTarget);
+                    yield return ExecuteEffectSequence(fallbackContext);
+                }
+                else
+                {
+                    pendingPlayerCardContext = new CardPlayContext(
+                        player, card, enemyActionSystem.Enemies, primaryTarget);
+                    waitingForPlayerHit = true;
+                    waitingForPlayerFinish = true;
+                    playerAttackResolved = false;
+
+                    SubscribePlayerViewEvents();
+                    player.View.PlayAttack();
+
+                    float elapsed = 0f;
+                    while (waitingForPlayerHit && waitingForPlayerFinish)
+                    {
+                        elapsed += Time.deltaTime;
+                        if (elapsed >= Mathf.Max(0.1f, animationEventTimeout))
+                        {
+                            Debug.LogWarning("Player animation hit/finish timeout; resolving committed card once.", this);
+                            waitingForPlayerFinish = false;
+                            break;
+                        }
+                        yield return null;
+                    }
+                    waitingForPlayerHit = false;
+                    playerAttackResolved = true;
+                    yield return ExecuteEffectSequence(pendingPlayerCardContext);
+
+                    // Human hand selection/effects are not subject to the animation timeout.
+                    elapsed = 0f;
+                    while (waitingForPlayerFinish)
+                    {
+                        elapsed += Time.deltaTime;
+                        if (elapsed >= Mathf.Max(0.1f, animationEventTimeout))
+                        {
+                            Debug.LogWarning("Player animation finish timeout; completing committed card.", this);
+                            waitingForPlayerFinish = false;
+                            break;
+                        }
+                        yield return null;
+                    }
+
+                    CleanupPlayerAttackState();
+                }
+            }
+            else
+            {
+                var context = new CardPlayContext(
+                    player, card, enemyActionSystem.Enemies, primaryTarget);
+                yield return ExecuteEffectSequence(context);
+                yield return new WaitForSeconds(nonAttackResolvePause);
+            }
+
+            // Card completion precedes enemy reactions, even if the card killed the final target.
+            execution.Complete(BattleActionResult.Successful);
+            if (HasBattleEnded)
+            {
+                handCardSelectionController?.ForceCancelSelection();
+                RefreshExternalUI();
                 yield break;
             }
 
-            Debug.LogError(
-                "BattleActionRunner: CardEffectSequenceRunner is missing. " +
-                "Falling back to sync CardResolver (draws will not present).");
+            enemyActionSystem.HandlePlayerSuccessfullyPlayedCard();
 
-            if (cardResolver != null)
-                cardResolver.Resolve(context);
+            if (enemyActionSystem.IsResolvingEnemyActions)
+            {
+                yield return new WaitUntil(() => !enemyActionSystem.IsResolvingEnemyActions);
+            }
+            else
+            {
+                yield return new WaitForSeconds(enemyResolveSafetyPause);
+            }
+
+            RefreshExternalUI();
         }
 
-        private IEnumerator EndTurnSequence()
+
+        private IEnumerator ExecuteEffectSequence(CardPlayContext context)
         {
-            try
-            {
-                yield return EndTurnSequenceCore();
-            }
-            finally
-            {
-                runningActionRoutine = null;
-            }
+            if (cardEffectSequenceRunner == null || !cardEffectSequenceRunner.isActiveAndEnabled)
+                throw new System.InvalidOperationException("CardEffectSequenceRunner is unavailable during execution.");
+            yield return cardEffectSequenceRunner.ExecuteEffectsSequentially(context);
         }
 
         private IEnumerator EndTurnSequenceCore()
@@ -290,8 +346,6 @@ namespace CardBattle.Core
             }
 
             RefreshExternalUI();
-            SetBusy(false);
-            RefreshExternalUI();
         }
 
         private void SubscribePlayerViewEvents()
@@ -327,72 +381,14 @@ namespace CardBattle.Core
             if (HasValidAttackHitTarget(pendingPlayerCardContext))
                 combatSfx?.PlayAttackHit();
 
-            BeginPendingEffectSequenceOnce(pendingPlayerCardContext);
         }
 
         private void HandlePlayerActionFinished()
         {
             if (!waitingForPlayerFinish)
                 return;
-
-            if (waitingForPlayerHit && !playerAttackResolved)
-            {
-                waitingForPlayerHit = false;
-                playerAttackResolved = true;
-
-                if (pendingPlayerCardContext != null)
-                    BeginPendingEffectSequenceOnce(pendingPlayerCardContext);
-            }
-
+            // The owning coroutine resolves effects once, including a missing-hit fallback.
             waitingForPlayerFinish = false;
-        }
-
-        /// <summary>
-        /// Starts sequential effects exactly once for the current attack card
-        /// (hit event or finish-event fallback).
-        /// </summary>
-        private void BeginPendingEffectSequenceOnce(CardPlayContext context)
-        {
-            if (effectSequenceStarted || context == null)
-                return;
-
-            // Cancel any leftover coroutine without flipping started/complete flags.
-            CancelPendingEffectCoroutine();
-
-            effectSequenceStarted = true;
-            effectSequenceComplete = false;
-            pendingEffectSequenceRoutine = StartCoroutine(CoRunPendingEffectSequence(context));
-        }
-
-        private IEnumerator CoRunPendingEffectSequence(CardPlayContext context)
-        {
-            try
-            {
-                yield return ExecuteEffectSequence(context);
-            }
-            finally
-            {
-                effectSequenceComplete = true;
-                pendingEffectSequenceRoutine = null;
-            }
-        }
-
-        /// <summary>Stops the pending effect coroutine without mutating start/complete flags.</summary>
-        private void CancelPendingEffectCoroutine()
-        {
-            if (pendingEffectSequenceRoutine == null)
-                return;
-
-            StopCoroutine(pendingEffectSequenceRoutine);
-            pendingEffectSequenceRoutine = null;
-        }
-
-        /// <summary>Stops the pending effect sequence and marks it complete (reset / disable).</summary>
-        private void StopPendingEffectSequence()
-        {
-            CancelPendingEffectCoroutine();
-            effectSequenceStarted = false;
-            effectSequenceComplete = true;
         }
 
         private void CleanupPlayerAttackState()
@@ -402,10 +398,6 @@ namespace CardBattle.Core
             waitingForPlayerFinish = false;
             playerAttackResolved = false;
             pendingPlayerCardContext = null;
-            // Do not stop an in-flight effect sequence from here during normal wait completion;
-            // ResetRuntimeActionState / OnDisable stop it explicitly.
-            effectSequenceStarted = false;
-            effectSequenceComplete = false;
         }
 
         private void HandleBattleEnded(BattleOutcome outcome)
@@ -419,7 +411,8 @@ namespace CardBattle.Core
             if (player == null ||
                 deckController == null ||
                 enemyActionSystem == null ||
-                (cardEffectSequenceRunner == null && cardResolver == null))
+                !enemyActionSystem.isActiveAndEnabled ||
+                cardEffectSequenceRunner == null || !cardEffectSequenceRunner.isActiveAndEnabled)
             {
                 Debug.LogError("BattleActionRunner missing references.");
                 return false;
@@ -428,7 +421,7 @@ namespace CardBattle.Core
             if (HasBattleEnded)
                 return false;
 
-            if (!player.CanAct || !player.IsAlive)
+            if (!player.isActiveAndEnabled || !player.CanAct || !player.IsAlive)
                 return false;
 
             if (!deckController.IsInHand(card))
@@ -438,6 +431,12 @@ namespace CardBattle.Core
                 return false;
 
             return true;
+        }
+
+        [ContextMenu("Debug Print Last Action")]
+        private void DebugPrintLastAction()
+        {
+            Debug.Log($"[BattleActionRunner] Result={LastAction?.Result} | Committed={LastAction?.IsCommitted} | Busy={IsBusy} | Reason={LastAction?.Reason}", this);
         }
 
         private bool HasAliveEnemy()

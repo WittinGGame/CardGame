@@ -5,9 +5,9 @@ using UnityEngine;
 namespace CardBattle.Core
 {
     /// <summary>
-    /// Minimal bootstrap for testing the core battle loop without UI.
+    /// Encounter startup used by the map flow. Optional editor shortcuts use BattleActionRunner.
     ///
-    /// Controls:
+    /// Controls (editor only, opt-in):
     /// 1 = Play hand card at index 0
     /// 2 = Play hand card at index 1
     /// 3 = Play hand card at index 2
@@ -59,7 +59,10 @@ namespace CardBattle.Core
         public string LastRuntimeCleanupError { get; private set; } = string.Empty;
         public int RuntimeCleanupSuccessCount { get; private set; }
 
+        [SerializeField] private bool enableEditorShortcuts;
         private bool _initialized;
+        private bool startingBattle;
+        private BattleActionExecution startupExecution;
         private Coroutine startBattleRoutine;
 
         private void Start()
@@ -70,7 +73,9 @@ namespace CardBattle.Core
 
         private void Update()
         {
-            if (!_initialized)
+#if UNITY_EDITOR
+            if (!enableEditorShortcuts || !_initialized || startingBattle ||
+                battleActionRunner == null || !battleActionRunner.CanAcceptInput)
                 return;
 
             if (Input.GetKeyDown(KeyCode.Alpha1)) TryPlayCardAtHandIndex(0);
@@ -82,12 +87,13 @@ namespace CardBattle.Core
             if (Input.GetKeyDown(KeyCode.E)) EndTurn();
             if (Input.GetKeyDown(KeyCode.R)) StartTestBattle();
             if (Input.GetKeyDown(KeyCode.T)) PrintBattleState();
+#endif
         }
 
         [ContextMenu("Start Test Battle")]
         public void StartTestBattle()
         {
-            if (startBattleRoutine != null)
+            if (startingBattle)
             {
                 if (verboseLogs)
                 {
@@ -97,7 +103,39 @@ namespace CardBattle.Core
                 return;
             }
 
-            startBattleRoutine = StartCoroutine(StartTestBattleRoutine());
+            if (!isActiveAndEnabled) return;
+            startingBattle = true;
+            _initialized = false;
+            startupExecution = new BattleActionExecution();
+            startupExecution.Commit();
+            Coroutine handle = StartCoroutine(RunBattleStartup());
+            if (startingBattle) startBattleRoutine = handle;
+        }
+
+        private IEnumerator RunBattleStartup()
+        {
+            try
+            {
+                yield return startupExecution.Run(StartTestBattleRoutine(), exception => Debug.LogException(exception, this));
+            }
+            finally
+            {
+                startupExecution.Complete(_initialized ? BattleActionResult.Successful : BattleActionResult.Failed,
+                    _initialized ? string.Empty : "Battle startup did not finish.");
+                startingBattle = false;
+                startBattleRoutine = null;
+            }
+        }
+
+        private void OnDisable()
+        {
+            startupExecution?.Cancel("Bootstrap disabled.");
+            if (startBattleRoutine != null) StopCoroutine(startBattleRoutine);
+            startBattleRoutine = null;
+            startingBattle = false;
+            _initialized = false;
+            battleActionRunner?.ResetRuntimeActionState();
+            enemyActionSystem?.ResetRuntimeActions();
         }
 
         private IEnumerator StartTestBattleRoutine()
@@ -141,8 +179,13 @@ namespace CardBattle.Core
 
                 enemyActionSystem.ResetTurnCounter();
                 yield return enemyActionSystem.StartPlayerRoundRoutine();
+                if (enemyActionSystem.LastRoundStart?.Result != BattleActionResult.Successful)
+                    yield break;
 
                 _initialized = true;
+                // Round-start input gate has now closed; refresh controls after the final draw.
+                handUIController?.RefreshInteractivityExternal();
+                battleHUDController?.RefreshUIExternal();
 
                 if (verboseLogs)
                 {
@@ -241,7 +284,7 @@ namespace CardBattle.Core
                 return;
             }
 
-            var success = player.TryPlayCard(card, target);
+            var success = battleActionRunner != null && battleActionRunner.TryStartCard(card, target);
 
             if (verboseLogs)
             {
@@ -255,29 +298,8 @@ namespace CardBattle.Core
 
         public void EndTurn()
         {
-            if (!ValidateReferences())
-                return;
-
-            player.RequestEndTurn();
-
-            if (verboseLogs)
-            {
-                Debug.Log("=== End Turn ===");
-                PrintBattleState();
-            }
-
-            CheckSimpleBattleEnd();
-
-            if (player != null && player.IsAlive && HasAliveEnemy())
-            {
-                enemyActionSystem.StartPlayerRound();
-
-                if (verboseLogs)
-                {
-                    Debug.Log("=== New Player Round Started ===");
-                    PrintBattleState();
-                }
-            }
+            if (!ValidateReferences()) return;
+            battleActionRunner.TryEndTurn();
         }
 
         [ContextMenu("Print Battle State")]
@@ -340,6 +362,7 @@ namespace CardBattle.Core
             LastRuntimeCleanupAttempted = true;
 
             battleActionRunner?.ResetRuntimeActionState();
+            enemyActionSystem?.ResetRuntimeActions();
             targetSelectionSystem?.ForceCancelTargetSelection();
             // Hand selection is also force-cancelled inside ResetRuntimeActionState / hand reset.
             handUIController?.ResetHandRuntimeStateForNewBattle();
@@ -543,6 +566,11 @@ namespace CardBattle.Core
         private bool ValidateReferences()
         {
             bool valid = true;
+            if (battleActionRunner == null)
+            {
+                Debug.LogError("BattleTestBootstrap: BattleActionRunner reference is missing.");
+                valid = false;
+            }
 
             if (player == null)
             {
