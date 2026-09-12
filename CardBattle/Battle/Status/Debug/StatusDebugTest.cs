@@ -67,6 +67,26 @@ namespace CardBattle.Core
             DebugPrint();
         }
 
+        [ContextMenu("Contributions/Set Strength 2 Encounter + 1 Turn (2 ticks)")]
+        private void SetMixedStrengthContributions()
+        {
+            if (!Application.isPlaying || attacker == null) return;
+            attacker.ClearStatuses();
+            attacker.ApplyStatus(StatusEffectType.Strength, 2, StatusDurationType.Encounter, 0);
+            attacker.ApplyStatus(StatusEffectType.Strength, 1, StatusDurationType.Turn, 2);
+            DebugPrint();
+        }
+
+        [ContextMenu("Contributions/Set Strength 1 Turn (2 ticks) + 2 Encounter")]
+        private void SetMixedStrengthContributionsReversed()
+        {
+            if (!Application.isPlaying || attacker == null) return;
+            attacker.ClearStatuses();
+            attacker.ApplyStatus(StatusEffectType.Strength, 1, StatusDurationType.Turn, 2);
+            attacker.ApplyStatus(StatusEffectType.Strength, 2, StatusDurationType.Encounter, 0);
+            DebugPrint();
+        }
+
         [ContextMenu("Deal Test Attack Damage")]
         private void DealTestAttackDamage()
         {

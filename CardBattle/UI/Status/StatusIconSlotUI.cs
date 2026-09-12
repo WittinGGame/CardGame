@@ -36,7 +36,9 @@ namespace CardBattle.Core
 
             if (numberText != null)
             {
-                bool showNumber = !hideNumberWhenZero || data.DisplayNumber > 0;
+                // A mixed Turn/OwnerAction/UseCount aggregate has no single duration number.
+                bool ambiguousDuration = data.IsDebuff && data.HasMixedDurationTypes;
+                bool showNumber = !ambiguousDuration && (!hideNumberWhenZero || data.DisplayNumber > 0);
                 numberText.gameObject.SetActive(showNumber);
 
                 if (showNumber)

@@ -34,7 +34,7 @@ namespace CardBattle.Core
             if (amount <= 0 && type != StatusEffectType.Weak && type != StatusEffectType.Vulnerable)
                 return;
 
-            var existing = FindStatus(type);
+            var existing = FindCompatibleContribution(type, durationType, skipNextTurnTick);
             if (existing != null)
             {
                 if (amount > 0)
@@ -67,7 +67,7 @@ namespace CardBattle.Core
 
         public bool HasStatus(StatusEffectType type)
         {
-            return GetTotalAmount(type) > 0 || FindStatus(type) != null;
+            return HasActiveStatus(type);
         }
 
         public int GetTotalAmount(StatusEffectType type)
@@ -157,6 +157,10 @@ namespace CardBattle.Core
             return BuildStatusListText();
         }
 
+        /// <summary>
+        /// One UI entry per type. Amounts are summed; homogeneous duration counters use their maximum.
+        /// Mixed duration counters are hidden rather than combining incompatible units. Runtime entries stay separate.
+        /// </summary>
         public int BuildStatusDisplayData(List<StatusDisplayData> output)
         {
             if (output == null)
@@ -170,7 +174,28 @@ namespace CardBattle.Core
                 if (status.IsExpired)
                     continue;
 
-                output.Add(CreateDisplayData(status));
+                StatusDisplayData contribution = CreateDisplayData(status);
+                int existingIndex = output.FindIndex(entry => entry.Type == status.Type);
+                if (existingIndex < 0)
+                {
+                    output.Add(contribution);
+                    continue;
+                }
+
+                StatusDisplayData existing = output[existingIndex];
+                bool mixedDurationTypes = existing.HasMixedDurationTypes ||
+                    existing.DurationType != contribution.DurationType;
+                int amount = existing.Amount + contribution.Amount;
+                // Never compare turns, actions and uses as though they were the same clock.
+                int remainingDuration = mixedDurationTypes ? 0 :
+                    Mathf.Max(existing.RemainingDuration, contribution.RemainingDuration);
+                bool displaysAmount = status.Type == StatusEffectType.Strength ||
+                    status.Type == StatusEffectType.NextAttackBonus;
+                int displayNumber = displaysAmount ? amount : remainingDuration;
+
+                output[existingIndex] = new StatusDisplayData(
+                    existing.Type, amount, existing.DurationType, remainingDuration,
+                    displayNumber, existing.IsBuff, existing.IsDebuff, mixedDurationTypes);
             }
 
             return output.Count;
@@ -245,13 +270,19 @@ namespace CardBattle.Core
             return builder.ToString();
         }
 
-        private StatusInstance FindStatus(StatusEffectType type)
+        // Retain existing amount/max-duration refresh for compatible contributions only.
+        // A pending skipped Turn tick is a different lifecycle from an immediately ticking contribution.
+        private StatusInstance FindCompatibleContribution(
+            StatusEffectType type, StatusDurationType durationType, bool skipNextTurnTick)
         {
             for (int i = 0; i < statuses.Count; i++)
             {
                 var status = statuses[i];
-                if (status.Type == type && !status.IsExpired)
-                    return status;
+                if (status.Type != type || status.IsExpired || status.DurationType != durationType)
+                    continue;
+                if (durationType == StatusDurationType.Turn && status.SkipNextTurnTick != skipNextTurnTick)
+                    continue;
+                return status;
             }
 
             return null;
