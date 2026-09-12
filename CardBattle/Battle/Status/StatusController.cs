@@ -14,6 +14,44 @@ namespace CardBattle.Core
 
         public event Action OnStatusesChanged;
 
+        private BattleActionExecution ownerAction;
+        private readonly HashSet<StatusInstance> ownerActionContributions = new();
+
+        // Called once after validation, before any effects belonging to this owner's action.
+        public void BeginOwnerAction(BattleActionExecution execution)
+        {
+            if (execution == null || execution.IsComplete || ReferenceEquals(ownerAction, execution))
+                return;
+            if (ownerAction != null)
+                throw new InvalidOperationException("An owner action is already pending.");
+
+            ownerAction = execution;
+            ownerActionContributions.Clear();
+            foreach (var status in statuses)
+                if (status.DurationType == StatusDurationType.OwnerAction && !status.IsExpired)
+                    ownerActionContributions.Add(status);
+            execution.Completed += CompleteOwnerAction;
+        }
+
+        private void CompleteOwnerAction(BattleActionExecution execution)
+        {
+            if (!ReferenceEquals(ownerAction, execution))
+                return;
+            execution.Completed -= CompleteOwnerAction;
+            ownerAction = null;
+            bool successful = execution.Result == BattleActionResult.Successful;
+            if (successful)
+                foreach (var status in ownerActionContributions)
+                    if (statuses.Contains(status))
+                        status.TickOwnerAction();
+            ownerActionContributions.Clear();
+            if (successful)
+            {
+                RemoveExpiredStatuses();
+                NotifyChanged();
+            }
+        }
+
         public void SetOwner(BattleUnit value)
         {
             owner = value;
@@ -132,8 +170,11 @@ namespace CardBattle.Core
             NotifyChanged();
         }
 
+        // Manual debug compatibility only; gameplay ticks through action completion.
         public void TickOwnerActionDurationStatuses()
         {
+            if (ownerAction != null)
+                return;
             for (int i = 0; i < statuses.Count; i++)
                 statuses[i].TickOwnerAction();
 
@@ -279,6 +320,10 @@ namespace CardBattle.Core
             {
                 var status = statuses[i];
                 if (status.Type != type || status.IsExpired || status.DurationType != durationType)
+                    continue;
+                // New amounts must not inherit the current action's expiration eligibility.
+                if (durationType == StatusDurationType.OwnerAction && ownerAction != null &&
+                    ownerActionContributions.Contains(status))
                     continue;
                 if (durationType == StatusDurationType.Turn && status.SkipNextTurnTick != skipNextTurnTick)
                     continue;

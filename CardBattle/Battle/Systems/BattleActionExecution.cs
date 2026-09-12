@@ -15,6 +15,8 @@ namespace CardBattle.Core
         public bool IsComplete => Result != BattleActionResult.Pending;
         private bool cancellationRequested;
 
+        public event Action<BattleActionExecution> Completed;
+
         public void Cancel(string reason)
         {
             cancellationRequested = true;
@@ -35,6 +37,9 @@ namespace CardBattle.Core
                 return false;
             Result = result;
             Reason = reason;
+            var completed = Completed;
+            Completed = null;
+            completed?.Invoke(this);
             return true;
         }
 

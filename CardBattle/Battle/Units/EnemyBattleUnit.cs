@@ -287,6 +287,7 @@ namespace CardBattle.Core
             actionExecutionActive = true;
             lastActionResolved = false;
             execution.Commit();
+            StatusController?.BeginOwnerAction(execution);
             try
             {
                 yield return execution.Run(PerformAction(player, ResolveActionForExecution()),
@@ -349,8 +350,6 @@ namespace CardBattle.Core
                 if (action.ApplyStatusToPlayer)
                     ApplyPlayerStatusFromAction(player, action);
 
-                // Self-buff + attack: OwnerAction self buff is consumed after this damaging action.
-                TickStatusOwnerActionDuration();
             }
             else
             {
@@ -359,7 +358,7 @@ namespace CardBattle.Core
                 if (action.ApplyStatusToPlayer)
                     ApplyPlayerStatusFromAction(player, action);
 
-                // Pure self-buff (e.g. Battle Cry): keep OwnerAction until a future damaging action.
+                // Completion handles OwnerAction duration for every successful action kind.
                 lastActionResolved = true;
             }
 
