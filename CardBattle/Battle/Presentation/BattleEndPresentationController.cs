@@ -69,6 +69,12 @@ namespace CardBattle.Core
             if (delay > 0f)
                 yield return new WaitForSeconds(delay);
 
+            // Outcome is raised at the lethal hit, before action completion and animation fallback.
+            // Do not expose Reward/Run End while the old battle can still execute effects.
+            var runners = FindObjectsByType<BattleActionRunner>(FindObjectsSortMode.None);
+            while (HasPendingBattleActions(runners))
+                yield return null;
+
             presentationRoutine = null;
             IsPresentationPending = false;
             IsPresentationReady = true;
@@ -76,6 +82,14 @@ namespace CardBattle.Core
 
             Debug.Log($"[BattleEndPresentation] Ready: {outcome}");
             OnBattleEndPresentationReady?.Invoke(outcome);
+        }
+
+        private bool HasPendingBattleActions(BattleActionRunner[] runners)
+        {
+            foreach (var runner in runners)
+                if (runner != null && runner.OutcomeController == battleOutcomeController && runner.IsResolvingBattle)
+                    return true;
+            return false;
         }
 
         private float GetDelay(BattleOutcome outcome)

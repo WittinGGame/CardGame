@@ -80,6 +80,11 @@ namespace CardBattle.Core
         /// </summary>
         public IEnumerator SelectAndDiscardRoutine(int requestedDiscardCount)
         {
+            // A previous effect can end the battle before this selection starts.
+            // The outcome event already fired, so it cannot cancel a newly opened session.
+            if (battleOutcomeController != null && battleOutcomeController.IsBattleEnded)
+                yield break;
+
             int requested = Mathf.Max(0, requestedDiscardCount);
             RebuildCandidatesFromCurrentHand();
             int required = Mathf.Min(requested, CountValidCandidates());

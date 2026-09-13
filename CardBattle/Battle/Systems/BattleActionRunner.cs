@@ -40,6 +40,9 @@ namespace CardBattle.Core
         [SerializeField, Min(0.1f)] private float animationEventTimeout = 10f;
 
         public PlayerBattleUnit Player => player;
+        public BattleOutcomeController OutcomeController => battleOutcomeController;
+        public bool IsResolvingBattle => IsBusy ||
+            (enemyActionSystem != null && enemyActionSystem.IsResolvingEnemyActions);
         public BattleActionExecution LastAction { get; private set; }
         public bool IsBusy { get; private set; }
         public event System.Action<bool> OnBusyStateChanged;
