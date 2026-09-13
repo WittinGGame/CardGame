@@ -106,7 +106,7 @@ namespace CardBattle.Core
 
             // Validation and commit are synchronous, before AP/pile mutation and animation.
             execution.Commit();
-            player.StatusController?.BeginOwnerAction(execution);
+            player.StatusController?.BeginOwnerAction(execution, card.Data.CardType == CardType.Attack);
             StartSequence(PlayCardSequence(card, primaryTarget, execution), execution);
             return true;
         }

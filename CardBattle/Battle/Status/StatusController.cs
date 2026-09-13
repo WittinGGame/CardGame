@@ -16,9 +16,17 @@ namespace CardBattle.Core
 
         private BattleActionExecution ownerAction;
         private readonly HashSet<StatusInstance> ownerActionContributions = new();
+        private bool ownerActionIsAttack;
+        private int attackBonusAmount;
+        private readonly HashSet<StatusInstance> attackBonusContributions = new();
 
         // Called once after validation, before any effects belonging to this owner's action.
         public void BeginOwnerAction(BattleActionExecution execution)
+        {
+            BeginOwnerAction(execution, false);
+        }
+
+        public void BeginOwnerAction(BattleActionExecution execution, bool isAttack)
         {
             if (execution == null || execution.IsComplete || ReferenceEquals(ownerAction, execution))
                 return;
@@ -26,6 +34,16 @@ namespace CardBattle.Core
                 throw new InvalidOperationException("An owner action is already pending.");
 
             ownerAction = execution;
+            ownerActionIsAttack = isAttack;
+            attackBonusAmount = 0;
+            attackBonusContributions.Clear();
+            if (isAttack)
+                foreach (var status in statuses)
+                    if (status.Type == StatusEffectType.NextAttackBonus && !status.IsExpired)
+                    {
+                        attackBonusAmount += status.Amount;
+                        attackBonusContributions.Add(status);
+                    }
             ownerActionContributions.Clear();
             foreach (var status in statuses)
                 if (status.DurationType == StatusDurationType.OwnerAction && !status.IsExpired)
@@ -40,6 +58,14 @@ namespace CardBattle.Core
             execution.Completed -= CompleteOwnerAction;
             ownerAction = null;
             bool successful = execution.Result == BattleActionResult.Successful;
+            // Both lifecycles resolve after every damage packet, from the same result.
+            if (successful && ownerActionIsAttack)
+                foreach (var status in attackBonusContributions)
+                    if (statuses.Contains(status))
+                        status.ConsumeUse(); // Only UseCount changes; other duration types are retained.
+            ownerActionIsAttack = false;
+            attackBonusAmount = 0;
+            attackBonusContributions.Clear();
             if (successful)
                 foreach (var status in ownerActionContributions)
                     if (statuses.Contains(status))
@@ -125,23 +151,11 @@ namespace CardBattle.Core
         {
             int damage = baseDamage + GetTotalAmount(StatusEffectType.Strength);
 
-            int nextAttackBonus = GetTotalAmount(StatusEffectType.NextAttackBonus);
-            if (nextAttackBonus > 0)
-            {
-                damage += nextAttackBonus;
-
-                if (consumeOnUse)
-                {
-                    for (int i = statuses.Count - 1; i >= 0; i--)
-                    {
-                        var status = statuses[i];
-                        if (status.Type != StatusEffectType.NextAttackBonus)
-                            continue;
-
-                        status.ConsumeUse();
-                    }
-                }
-            }
+            // consumeOnUse is retained for API compatibility. Packets never consume statuses.
+            // Preview/debug calls outside an action read the live aggregate without spending it.
+            int nextAttackBonus = ownerActionIsAttack
+                ? attackBonusAmount : GetTotalAmount(StatusEffectType.NextAttackBonus);
+            damage += nextAttackBonus;
 
             if (HasActiveStatus(StatusEffectType.Weak))
                 damage = Mathf.FloorToInt(damage * weakDamageMultiplier);
@@ -320,6 +334,10 @@ namespace CardBattle.Core
             {
                 var status = statuses[i];
                 if (status.Type != type || status.IsExpired || status.DurationType != durationType)
+                    continue;
+                // Keep bonuses granted during an attack for a future attack, outside this snapshot.
+                if (type == StatusEffectType.NextAttackBonus && durationType == StatusDurationType.UseCount &&
+                    ownerActionIsAttack && attackBonusContributions.Contains(status))
                     continue;
                 // New amounts must not inherit the current action's expiration eligibility.
                 if (durationType == StatusDurationType.OwnerAction && ownerAction != null &&

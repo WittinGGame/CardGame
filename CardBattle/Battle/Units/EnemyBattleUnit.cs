@@ -287,10 +287,12 @@ namespace CardBattle.Core
             actionExecutionActive = true;
             lastActionResolved = false;
             execution.Commit();
-            StatusController?.BeginOwnerAction(execution);
+            // A missing action uses the existing fallback Strike.
+            var action = ResolveActionForExecution();
+            StatusController?.BeginOwnerAction(execution, action == null || action.DealsAttackDamage);
             try
             {
-                yield return execution.Run(PerformAction(player, ResolveActionForExecution()),
+                yield return execution.Run(PerformAction(player, action),
                     exception => Debug.LogException(exception, this));
                 if (!execution.IsComplete)
                     execution.Complete(lastActionResolved ? BattleActionResult.Successful : BattleActionResult.Failed,
