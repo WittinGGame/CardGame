@@ -47,7 +47,6 @@ namespace CardBattle.Core
             CurrentAp = Mathf.Max(0, apPerRound);
             _pendingAttackBonus = 0;
             OnDebugBuffChanged?.Invoke(DebugBuffCount);
-            ClearBlock();
             NotifyApChanged();
             NotifyTurnStateChanged();
         }
@@ -135,6 +134,7 @@ namespace CardBattle.Core
                 return;
 
             _turnCommitted = true;
+            EndOwnerCycle();
             NotifyTurnStateChanged();
         }
 
@@ -144,7 +144,7 @@ namespace CardBattle.Core
             _turnCommitted = true;
             CurrentAp = 0;
             _pendingAttackBonus = 0;
-            ClearBlock();
+            ResetOwnerCycleState();
             ClearStatuses();
             OnDebugBuffChanged?.Invoke(DebugBuffCount);
             NotifyApChanged();

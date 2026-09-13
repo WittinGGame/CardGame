@@ -48,6 +48,9 @@ namespace CardBattle.Core
         {
             ResetRuntimeActions();
             CurrentTurn = 0;
+            player?.ResetOwnerCycleState();
+            foreach (var enemy in enemies)
+                enemy?.ResetOwnerCycleState();
         }
 
         /// <summary>Designer helper to register enemies without code.</summary>
@@ -122,7 +125,9 @@ namespace CardBattle.Core
             if (turnPresentation != null)
                 yield return turnPresentation.PlayTurnIntro(CurrentTurn);
 
-            TickTurnDurationStatusesForPlayerRoundStart();
+            bool tickPlayerStatuses = tickStatusesOnPlayerRoundStart &&
+                !(skipStatusTickOnFirstPlayerRound && CurrentTurn <= 1);
+            player.BeginOwnerCycle(tickPlayerStatuses);
 
             // Reset enemy flags
             foreach (var enemy in enemies)
@@ -216,18 +221,30 @@ namespace CardBattle.Core
 
         private IEnumerator RunEndTurnAttacksSequentially(List<EnemyBattleUnit> actors)
         {
-            for (int i = 0; i < actors.Count; i++)
+            // Every living enemy advances, including countdown enemies absent from actors.
+            var cycleOwners = new List<EnemyBattleUnit>(enemies);
+            try
             {
-                var enemy = actors[i];
-                if (player == null || !player.IsAlive) yield break;
-                if (enemy == null || !enemy.isActiveAndEnabled) continue;
+                foreach (var enemy in cycleOwners)
+                    if (enemy != null && enemy.IsAlive)
+                        enemy.BeginOwnerCycle(tickStatusesOnPlayerRoundStart);
+                for (int i = 0; i < actors.Count; i++)
+                {
+                    var enemy = actors[i];
+                    if (player == null || !player.IsAlive) yield break;
+                    if (enemy == null || !enemy.isActiveAndEnabled) continue;
 
-                if (enemy.Behavior == EnemyBehaviorType.CountdownAttacker)
-                    yield return enemy.ExecuteEndTurnCountdownAttackRoutine(player);
-                else
-                    yield return enemy.ExecuteEndTurnAttackRoutine(player);
+                    if (enemy.Behavior == EnemyBehaviorType.CountdownAttacker)
+                        yield return enemy.ExecuteEndTurnCountdownAttackRoutine(player);
+                    else
+                        yield return enemy.ExecuteEndTurnAttackRoutine(player);
+                }
             }
-
+            finally
+            {
+                foreach (var enemy in cycleOwners)
+                    enemy?.EndOwnerCycle();
+            }
         }
 
         private void StartEnemySequence(IEnumerator routine)
@@ -288,15 +305,6 @@ namespace CardBattle.Core
 
             if (player != null && player.IsAlive)
                 player.TickStatusTurnDuration();
-
-            for (int i = 0; i < enemies.Count; i++)
-            {
-                EnemyBattleUnit enemy = enemies[i];
-                if (enemy == null || !enemy.IsAlive)
-                    continue;
-
-                enemy.TickStatusTurnDuration();
-            }
 
             if (verboseStatusTickLogs)
                 DebugPrintBattleStatuses();

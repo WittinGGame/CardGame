@@ -85,6 +85,7 @@ namespace CardBattle.Core
         public void BindEnemyData(EnemyData data)
         {
             CancelRuntimeAction();
+            ResetOwnerCycleState();
             enemyData = data;
             ApplyEnemyData();
             ClearStatuses();

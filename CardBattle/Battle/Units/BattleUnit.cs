@@ -9,6 +9,36 @@ namespace CardBattle.Core
         [SerializeField] protected int currentHp;
         [SerializeField] private StatusController statusController;
         protected int currentBlock;
+        private int protectedBlock;
+        private bool ownerCycleActive;
+
+        // Called at the owner's turn/phase start, never at an individual action boundary.
+        public void BeginOwnerCycle(bool tickStatuses = true)
+        {
+            if (ownerCycleActive)
+                return;
+            ownerCycleActive = true;
+            int previousBlock = currentBlock;
+            currentBlock = protectedBlock;
+            protectedBlock = 0;
+            statusController?.SetOwnerCycleActive(true);
+            if (tickStatuses)
+                TickStatusTurnDuration();
+            if (currentBlock != previousBlock)
+                NotifyBlockChanged();
+        }
+
+        public void EndOwnerCycle()
+        {
+            ownerCycleActive = false;
+            statusController?.SetOwnerCycleActive(false);
+        }
+
+        public void ResetOwnerCycleState()
+        {
+            EndOwnerCycle();
+            ClearBlock();
+        }
 
         public int MaxHp => maxHp;
         public int CurrentHp => currentHp;
@@ -53,6 +83,8 @@ namespace CardBattle.Core
             {
                 int absorbed = Mathf.Min(currentBlock, remaining);
                 currentBlock -= absorbed;
+                // Spend older Block first; any protected remainder keeps its original expiry.
+                protectedBlock = Mathf.Min(protectedBlock, currentBlock);
                 remaining -= absorbed;
                 NotifyBlockChanged();
 
@@ -86,11 +118,14 @@ namespace CardBattle.Core
                 return;
 
             currentBlock += amount;
+            if (!ownerCycleActive)
+                protectedBlock += amount;
             NotifyBlockChanged();
         }
 
         public virtual void ClearBlock()
         {
+            protectedBlock = 0;
             if (currentBlock == 0)
                 return;
 
@@ -134,6 +169,7 @@ namespace CardBattle.Core
         {
             maxHp = Mathf.Max(1, newMaxHp);
             currentHp = Mathf.Clamp(newCurrentHp, 0, maxHp);
+            ResetOwnerCycleState();
             ClearStatuses();
 
             OnHpChanged();

@@ -14,6 +14,13 @@ namespace CardBattle.Core
 
         public event Action OnStatusesChanged;
 
+        private bool ownerCycleActive;
+
+        public void SetOwnerCycleActive(bool active)
+        {
+            ownerCycleActive = active;
+        }
+
         private BattleActionExecution ownerAction;
         private readonly HashSet<StatusInstance> ownerActionContributions = new();
         private bool ownerActionIsAttack;
@@ -98,6 +105,10 @@ namespace CardBattle.Core
             if (amount <= 0 && type != StatusEffectType.Weak && type != StatusEffectType.Vulnerable)
                 return;
 
+            // Turn is the serialized name for OwnerCycle. Grants outside the owner's period
+            // survive the upcoming boundary, so the opponent gets a full period to interact.
+            if (durationType == StatusDurationType.Turn && !ownerCycleActive)
+                skipNextTurnTick = true;
             var existing = FindCompatibleContribution(type, durationType, skipNextTurnTick);
             if (existing != null)
             {
