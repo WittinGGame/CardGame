@@ -160,19 +160,24 @@ namespace CardBattle.Core
 
         public int ModifyOutgoingAttackDamage(int baseDamage, bool consumeOnUse)
         {
-            int damage = baseDamage + GetTotalAmount(StatusEffectType.Strength);
-
-            // consumeOnUse is retained for API compatibility. Packets never consume statuses.
-            // Preview/debug calls outside an action read the live aggregate without spending it.
-            int nextAttackBonus = ownerActionIsAttack
-                ? attackBonusAmount : GetTotalAmount(StatusEffectType.NextAttackBonus);
-            damage += nextAttackBonus;
-
-            if (HasActiveStatus(StatusEffectType.Weak))
-                damage = Mathf.FloorToInt(damage * weakDamageMultiplier);
-
+            int damage = CalculateOutgoingAttackDamage(baseDamage, ownerActionIsAttack
+                ? attackBonusAmount : GetTotalAmount(StatusEffectType.NextAttackBonus));
             RemoveExpiredStatuses();
             NotifyChanged();
+            return damage;
+        }
+
+        // Intent reads current contributions, never the executing action's bonus snapshot.
+        public int ProjectOutgoingAttackDamage(int baseDamage)
+        {
+            return CalculateOutgoingAttackDamage(baseDamage, GetTotalAmount(StatusEffectType.NextAttackBonus));
+        }
+
+        private int CalculateOutgoingAttackDamage(int baseDamage, int nextAttackBonus)
+        {
+            int damage = baseDamage + GetTotalAmount(StatusEffectType.Strength) + nextAttackBonus;
+            if (HasActiveStatus(StatusEffectType.Weak))
+                damage = Mathf.FloorToInt(damage * weakDamageMultiplier);
             return Mathf.Max(0, damage);
         }
 

@@ -225,6 +225,17 @@ namespace CardBattle.Core
             return statusController.ModifyIncomingAttackDamage(incomingDamage);
         }
 
+        /// <summary>Read-only incoming attack strength, before Block/HP. No action or status mutation.</summary>
+        public int ProjectAttackDamageAgainst(BattleUnit defender, int baseDamage)
+        {
+            // Current attack effects skip packets whose base damage is zero.
+            if (baseDamage <= 0)
+                return 0;
+            int outgoing = statusController != null
+                ? statusController.ProjectOutgoingAttackDamage(baseDamage) : Mathf.Max(0, baseDamage);
+            return defender != null ? defender.CalculateIncomingAttackDamage(outgoing) : outgoing;
+        }
+
         public virtual int TakeAttackDamage(BattleUnit attacker, int baseDamage)
         {
             int outgoingDamage = baseDamage;

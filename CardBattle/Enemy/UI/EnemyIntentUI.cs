@@ -32,6 +32,12 @@ namespace CardBattle.Core
         [SerializeField] private bool verboseLogs;
 
         private EnemyBattleUnit subscribedTarget;
+        private StatusController subscribedEnemyStatuses;
+        private StatusController subscribedPlayerStatuses;
+        private EnemyActionSystem battleSystem;
+        private PlayerBattleUnit player;
+
+        private void Start() => Refresh();
 
         private struct IntentVisualData
         {
@@ -73,6 +79,11 @@ namespace CardBattle.Core
 
         public void Refresh()
         {
+            if (isActiveAndEnabled)
+            {
+                SubscribeTarget();
+                RefreshStatusSubscriptions();
+            }
             if (target == null ||
                 !target.gameObject.activeInHierarchy ||
                 !target.IsAlive)
@@ -178,12 +189,62 @@ namespace CardBattle.Core
 
         private void UnsubscribeTarget()
         {
-            if (subscribedTarget == null)
-                return;
-
-            subscribedTarget.OnPlannedActionChanged -= HandlePlannedActionChanged;
+            if (subscribedTarget != null)
+                subscribedTarget.OnPlannedActionChanged -= HandlePlannedActionChanged;
             subscribedTarget = null;
+            if (subscribedEnemyStatuses != null)
+                subscribedEnemyStatuses.OnStatusesChanged -= Refresh;
+            if (subscribedPlayerStatuses != null)
+                subscribedPlayerStatuses.OnStatusesChanged -= Refresh;
+            subscribedEnemyStatuses = null;
+            subscribedPlayerStatuses = null;
+            battleSystem = null;
+            player = null;
         }
+
+        private void RefreshStatusSubscriptions()
+        {
+            if (battleSystem == null || !ContainsTarget(battleSystem))
+            {
+                battleSystem = null;
+                foreach (var system in FindObjectsByType<EnemyActionSystem>(FindObjectsSortMode.None))
+                    if (ContainsTarget(system))
+                    {
+                        battleSystem = system;
+                        break;
+                    }
+            }
+            player = battleSystem != null ? battleSystem.Player : null;
+            var enemyStatuses = target != null ? target.StatusController : null;
+            var playerStatuses = player != null ? player.StatusController : null;
+            if (subscribedEnemyStatuses != enemyStatuses)
+            {
+                if (subscribedEnemyStatuses != null)
+                    subscribedEnemyStatuses.OnStatusesChanged -= Refresh;
+                subscribedEnemyStatuses = enemyStatuses;
+                if (subscribedEnemyStatuses != null)
+                    subscribedEnemyStatuses.OnStatusesChanged += Refresh;
+            }
+            if (subscribedPlayerStatuses != playerStatuses)
+            {
+                if (subscribedPlayerStatuses != null)
+                    subscribedPlayerStatuses.OnStatusesChanged -= Refresh;
+                subscribedPlayerStatuses = playerStatuses;
+                if (subscribedPlayerStatuses != null)
+                    subscribedPlayerStatuses.OnStatusesChanged += Refresh;
+            }
+        }
+
+        private bool ContainsTarget(EnemyActionSystem system)
+        {
+            if (target == null) return false;
+            foreach (var enemy in system.Enemies)
+                if (enemy == target) return true;
+            return false;
+        }
+
+        private int ProjectDamage(int baseDamage) => target != null
+            ? target.ProjectAttackDamageAgainst(player, baseDamage) : Mathf.Max(0, baseDamage);
 
         private void HandlePlannedActionChanged(EnemyBattleUnit enemy)
         {
@@ -266,7 +327,7 @@ namespace CardBattle.Core
             }
         }
 
-        private static IntentVisualData BuildAttackVisual(EnemyActionData action, Sprite icon)
+        private IntentVisualData BuildAttackVisual(EnemyActionData action, Sprite icon)
         {
             string valueText = BuildAttackValueText(action);
             string debugText = BuildAttackText(action);
@@ -297,6 +358,7 @@ namespace CardBattle.Core
                 };
             }
 
+            attackDamage = ProjectDamage(attackDamage);
             Sprite icon = fallbackAttackIcon != null ? fallbackAttackIcon : attackIcon;
 
             return new IntentVisualData
@@ -319,14 +381,12 @@ namespace CardBattle.Core
             };
         }
 
-        private static string BuildAttackValueText(EnemyActionData action)
+        private string BuildAttackValueText(EnemyActionData action)
         {
             if (action == null || !action.DealsAttackDamage)
                 return string.Empty;
 
-            int damage = action.ResolveDamage();
-            if (damage <= 0)
-                return string.Empty;
+            int damage = ProjectDamage(action.ResolveDamage());
 
             int hitCount = action.ResolveHitCount();
             if (hitCount <= 1)
@@ -335,7 +395,7 @@ namespace CardBattle.Core
             return $"{damage}x{hitCount}";
         }
 
-        private static string BuildActionIntentText(EnemyActionData action)
+        private string BuildActionIntentText(EnemyActionData action)
         {
             if (action == null)
                 return string.Empty;
@@ -384,7 +444,7 @@ namespace CardBattle.Core
             }
         }
 
-        private static string BuildAttackText(EnemyActionData action)
+        private string BuildAttackText(EnemyActionData action)
         {
             if (action == null)
                 return "Attack";
@@ -392,7 +452,7 @@ namespace CardBattle.Core
             if (!action.DealsAttackDamage)
                 return "Attack";
 
-            int damage = action.ResolveDamage();
+            int damage = ProjectDamage(action.ResolveDamage());
             int hitCount = action.ResolveHitCount();
 
             if (hitCount <= 1)
