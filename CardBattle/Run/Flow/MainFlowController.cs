@@ -20,6 +20,7 @@ namespace CardBattle.Core
         [SerializeField] private TreeMapUIController treeMapUIController;
         [SerializeField] private RunEndController runEndController;
         [SerializeField] private EncounterFlowResetController encounterFlowResetController;
+        [SerializeField] private BonfireController bonfireController;
 
         [Header("UI Panels")]
         [SerializeField] private GameObject mainMenuPanel;
@@ -104,6 +105,7 @@ namespace CardBattle.Core
 
         public void ShowMainMenu()
         {
+            bonfireController?.ResetSession();
             SetPanelActive(mainMenuPanel, true);
             SetPanelActive(characterSelectPanel, false);
             SetPanelActive(gameplayRoot, false);
@@ -224,6 +226,7 @@ namespace CardBattle.Core
 
         public void ResetMainFlowForNewRun()
         {
+            bonfireController?.ResetSession();
             if (runEndController != null)
                 runEndController.ResetRunEndStateForNewRun();
 

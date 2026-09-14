@@ -242,7 +242,7 @@ namespace CardBattle.Core
             if (isBattleStartInProgress)
                 return false;
 
-            return controller.CanStartBattleFromNode(nodeId);
+            return controller.CanEnterNode(nodeId);
         }
 
         private static bool IsNodeCompleted(MapRuntimeController controller, string nodeId)
@@ -402,7 +402,7 @@ namespace CardBattle.Core
             if (!TryGetMapController(out MapRuntimeController controller))
                 return;
 
-            if (!controller.CanStartBattleFromNode(nodeId))
+            if (!controller.CanEnterNode(nodeId))
             {
                 if (verboseLogs)
                 {

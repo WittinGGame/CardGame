@@ -94,18 +94,29 @@ namespace CardBattle.Core
             return true;
         }
 
-        public bool CanStartBattleFromNode(string nodeId)
+        public bool CanEnterNode(string nodeId)
         {
-            if (!HasInitialized || CurrentMapState == null ||
-                string.IsNullOrWhiteSpace(nodeId))
-            {
-                return false;
-            }
-
             if (actData == null || !actData.TryGetNode(nodeId, out MapNodeData node))
                 return false;
 
-            if (!node.HasEncounter)
+            if (node.IsBattleNode)
+                return CanStartBattleFromNode(nodeId);
+
+            return node.NodeType == MapNodeType.Rest &&
+                   !node.HasEncounter && CanEnterNodeState(nodeId);
+        }
+
+        public bool CanStartBattleFromNode(string nodeId)
+        {
+            return actData != null &&
+                   actData.TryGetNode(nodeId, out MapNodeData node) &&
+                   node.IsBattleNode && node.HasEncounter && CanEnterNodeState(nodeId);
+        }
+
+        private bool CanEnterNodeState(string nodeId)
+        {
+            if (!HasInitialized || CurrentMapState == null ||
+                string.IsNullOrWhiteSpace(nodeId))
                 return false;
 
             if (HasPendingEncounterNode)

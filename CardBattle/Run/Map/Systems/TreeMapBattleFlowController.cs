@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 
 namespace CardBattle.Core
@@ -33,6 +34,10 @@ namespace CardBattle.Core
         private TreeMapUIController subscribedTreeMapUI;
         private EncounterCompletionController subscribedEncounterCompletion;
         private bool isStartingBattle;
+
+        // Selection is committed; the subscriber owns future Bonfire gameplay/UI.
+        // B1.1 leaves the node pending even when no subscriber is installed yet.
+        public event Action<MapNodeData> OnRestNodeSelected;
 
         private void OnEnable()
         {
@@ -78,7 +83,15 @@ namespace CardBattle.Core
                 return;
             }
 
-            if (!mapRuntimeController.CanStartBattleFromNode(nodeId))
+            if (mapRuntimeController.ActData != null &&
+                mapRuntimeController.ActData.TryGetNode(nodeId, out MapNodeData authoredNode) &&
+                authoredNode.NodeType == MapNodeType.Rest && authoredNode.HasEncounter)
+            {
+                LogError($"Rest node '{nodeId}' must not have an Encounter. Entry rejected.");
+                return;
+            }
+
+            if (!mapRuntimeController.CanEnterNode(nodeId))
             {
                 if (verboseLogs)
                 {
@@ -112,6 +125,16 @@ namespace CardBattle.Core
                 }
 
                 treeMapUIController?.Refresh();
+
+                if (mapRuntimeController.TryGetSelectedNode(out MapNodeData selectedNode) &&
+                    selectedNode.NodeType == MapNodeType.Rest)
+                {
+                    if (verboseLogs)
+                        Debug.Log($"[TreeMapBattleFlow] Rest node selected/pending: {nodeId}");
+
+                    OnRestNodeSelected?.Invoke(selectedNode);
+                    return;
+                }
 
                 if (activeRunAutoSaveController != null)
                 {
