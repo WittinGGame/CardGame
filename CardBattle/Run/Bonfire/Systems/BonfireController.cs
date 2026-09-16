@@ -3,7 +3,7 @@ using UnityEngine;
 
 namespace CardBattle.Core
 {
-    public class BonfireController : MonoBehaviour
+    public partial class BonfireController : MonoBehaviour
     {
         [SerializeField] private RunManager runManager;
         [SerializeField] private MapRuntimeController mapRuntimeController;
@@ -39,11 +39,13 @@ namespace CardBattle.Core
         public bool IsCompletedPendingSave => IsActive && nodeCompleted;
         public string LastError => lastError;
         public bool CanRetrySave => IsActive && !isApplyingChoice &&
-                                    (!checkpointSaved || nodeCompleted);
+                                    (!checkpointSaved || nodeCompleted || upgradeSavePending) &&
+                                    (!HasPendingUpgrade || IsPendingUpgradeValid());
         public bool CanLeave => IsActive && checkpointSaved && !choiceCommitted &&
-                                !isApplyingChoice && CurrentHp == MaxHp;
+                                !isApplyingChoice && !upgradeSelecting && !HasPendingUpgrade &&
+                                CurrentHp == MaxHp && GetEligibleUpgradeCards().Count == 0;
         public bool CanRest => IsActive && checkpointSaved && !choiceCommitted && !isApplyingChoice &&
-                               CurrentHp < MaxHp;
+                               !upgradeSelecting && !HasPendingUpgrade && CurrentHp < MaxHp;
 
         private RunManager ResolveRunManager() => runManager != null ? runManager : RunManager.Instance;
 
@@ -79,6 +81,8 @@ namespace CardBattle.Core
             if (sessionRun == manager.CurrentRun && sessionMap == mapRuntimeController.CurrentMapState &&
                 string.Equals(sessionNodeId, node.NodeId, StringComparison.Ordinal))
             {
+                if (HasPendingUpgrade && !IsPendingUpgradeValid())
+                    return RejectUpgrade("Saved Upgrade does not match this Rest node/card/catalog. No offers were changed.");
                 treeMapUIController?.Hide();
                 OnStateChanged?.Invoke();
                 return true;
@@ -92,6 +96,14 @@ namespace CardBattle.Core
             checkpointSaved = false;
             nodeCompleted = false;
             lastError = string.Empty;
+            ClearTransientUpgrade();
+            if (HasPendingUpgrade)
+            {
+                choiceCommitted = true;
+                upgradeSavePending = true;
+                if (!IsPendingUpgradeValid())
+                    return RejectUpgrade("Invalid pending Upgrade for this Rest node. Check ownership, definition and saved Bonus IDs.");
+            }
             treeMapUIController?.Hide();
             TryRetrySave();
             return true;
@@ -154,18 +166,27 @@ namespace CardBattle.Core
         {
             if (!IsSessionValid())
                 return false;
+            if (HasPendingUpgrade && !IsPendingUpgradeValid())
+                return RejectUpgrade("Pending Upgrade is invalid; save aborted without changing offers.");
             bool saved = activeRunAutoSaveController != null &&
-                activeRunAutoSaveController.SaveNow(nodeCompleted ? "BonfireCompleted" : "BonfirePending");
+                activeRunAutoSaveController.SaveNow(HasPendingUpgrade ? "BonfireUpgradeCommitted" :
+                    nodeCompleted ? "BonfireCompleted" : "BonfirePending");
+            if (!IsSessionValid()) return false;
             if (!saved)
             {
-                lastError = nodeCompleted
+                lastError = HasPendingUpgrade
+                    ? "Upgrade is committed but could not be saved. Retry Save; the same card and offers are locked."
+                    : nodeCompleted
                     ? "Progress could not be saved. Retry Save; your choice will not be applied again."
                     : "Unable to save this Rest stop. Retry Save before choosing an action.";
                 return false;
             }
             lastError = string.Empty;
             if (!nodeCompleted)
+            {
                 checkpointSaved = true;
+                upgradeSavePending = false;
+            }
             else
             {
                 ClearSession();
@@ -184,6 +205,7 @@ namespace CardBattle.Core
 
         private void ClearSession()
         {
+            ClearTransientUpgrade();
             sessionRun = null;
             sessionMap = null;
             sessionRunId = string.Empty;
@@ -239,6 +261,14 @@ namespace CardBattle.Core
                 return;
             if (!IsSessionValid())
                 ClearSession();
+            else if (HasPendingUpgrade)
+            {
+                choiceCommitted = true;
+                upgradeSelecting = false;
+                selectedRunCardInstanceId = string.Empty;
+                if (!IsPendingUpgradeValid())
+                    lastError = "Pending Upgrade is invalid. No card or offers were changed.";
+            }
             OnStateChanged?.Invoke();
         }
 

@@ -5,7 +5,7 @@ using UnityEngine;
 namespace CardBattle.Core
 {
     /// <summary>
-    /// Executes <see cref="CardData.Effects"/> one-at-a-time in array order,
+    /// Executes <see cref="CardInstance.EffectiveEffects"/> one-at-a-time in array order,
     /// yielding for draw presentation and manual hand selection.
     /// </summary>
     public class CardEffectSequenceRunner : MonoBehaviour
@@ -37,7 +37,7 @@ namespace CardBattle.Core
                 yield break;
             }
 
-            var effects = context.Card.Data.Effects;
+            var effects = context.Card.EffectiveEffects;
             if (!HasAnyValidEffect(effects))
             {
                 Debug.LogWarning(

@@ -19,6 +19,9 @@ namespace CardBattle.Core
         [Header("Debug")]
         [SerializeField] private bool verboseLogs = false;
 
+        public bool ForceApplyToPlayer => forceApplyToPlayer;
+        public StatusEffectType StatusType => statusType;
+
         public override string GetDescriptionText()
         {
             if (IsSelfTarget())

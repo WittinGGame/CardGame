@@ -5,7 +5,8 @@ namespace CardBattle.Core
     [Serializable]
     public class ActiveRunSaveData
     {
-        public int schemaVersion = 1;
+        public const int CurrentSchemaVersion = 2;
+        public int schemaVersion = CurrentSchemaVersion;
         public string savedAtUtc = string.Empty;
         public RunState runState;
         public RunMapState mapState;
@@ -20,7 +21,7 @@ namespace CardBattle.Core
         {
             return new ActiveRunSaveData
             {
-                schemaVersion = 1,
+                schemaVersion = CurrentSchemaVersion,
                 savedAtUtc = DateTime.UtcNow.ToString("o"),
                 runState = run != null ? run.Clone() : null,
                 mapState = map != null ? map.Clone() : null,

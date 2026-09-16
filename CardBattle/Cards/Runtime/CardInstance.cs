@@ -11,15 +11,26 @@ namespace CardBattle.Core
     {
         public CardData Data { get; }
         public Guid InstanceId { get; }
+        public string RunCardInstanceId { get; }
+        private readonly IReadOnlyList<CardEffectData> effectiveEffects;
+        public IReadOnlyList<CardEffectData> EffectiveEffects => effectiveEffects ?? Data.Effects;
 
         private readonly List<ICardModifier> _modifiers = new List<ICardModifier>();
 
         public IReadOnlyList<ICardModifier> Modifiers => _modifiers;
 
-        public CardInstance(CardData data, Guid? instanceId = null)
+        public CardInstance(CardData data, Guid? instanceId = null,
+            IReadOnlyList<CardEffectData> effectiveEffects = null, string runCardInstanceId = null)
         {
             Data = data ?? throw new ArgumentNullException(nameof(data));
             InstanceId = instanceId ?? Guid.NewGuid();
+            RunCardInstanceId = runCardInstanceId;
+            if (effectiveEffects != null)
+            {
+                var copy = new List<CardEffectData>(effectiveEffects.Count);
+                for (int i = 0; i < effectiveEffects.Count; i++) copy.Add(effectiveEffects[i]);
+                this.effectiveEffects = copy.AsReadOnly();
+            }
         }
 
         public void AddModifier(ICardModifier modifier)

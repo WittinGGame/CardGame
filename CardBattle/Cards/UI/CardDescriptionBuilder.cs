@@ -9,8 +9,23 @@ namespace CardBattle.Core
             if (data == null)
                 return string.Empty;
 
+            return BuildEffects(data, data.Effects);
+        }
+
+        public static string BuildForInstance(CardInstance card)
+        {
+            return card?.Data == null ? string.Empty : BuildEffects(card.Data, card.EffectiveEffects);
+        }
+
+        public static string BuildGuaranteedUpgrade(CardData data, CardUpgradeDefinition upgrade)
+        {
+            return data == null || upgrade == null || upgrade.BaseCard != data || !upgrade.HasValidSequence
+                ? string.Empty : BuildEffects(data, upgrade.GuaranteedEffects);
+        }
+
+        private static string BuildEffects(CardData data, IReadOnlyList<CardEffectData> effects)
+        {
             var lines = new List<string>();
-            var effects = data.Effects;
 
             if (effects != null)
             {

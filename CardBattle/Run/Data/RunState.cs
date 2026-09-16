@@ -17,6 +17,7 @@ namespace CardBattle.Core
         public int gold;
 
         public List<RunCardRecord> currentDeck;
+        public PendingCardUpgradeState pendingCardUpgrade;
 
         public RunState()
         {
@@ -38,6 +39,7 @@ namespace CardBattle.Core
             maxHp = Mathf.Max(1, startingMaxHp);
             currentHp = maxHp;
             gold = 0;
+            pendingCardUpgrade = null;
 
             EnsureDeckInitialized();
             currentDeck.Clear();
@@ -50,7 +52,7 @@ namespace CardBattle.Core
                 if (record == null)
                     continue;
 
-                currentDeck.Add(record.Clone());
+                currentDeck.Add(record.CopyAsNewOwnedCard());
             }
         }
 
@@ -107,7 +109,7 @@ namespace CardBattle.Core
                 return;
 
             EnsureDeckInitialized();
-            currentDeck.Add(record.Clone());
+            currentDeck.Add(record.CopyAsNewOwnedCard());
         }
 
         public bool RemoveCardAt(int index)
@@ -130,6 +132,7 @@ namespace CardBattle.Core
             currentHp = 0;
             maxHp = 0;
             gold = 0;
+            pendingCardUpgrade = null;
 
             EnsureDeckInitialized();
             currentDeck.Clear();
@@ -146,6 +149,7 @@ namespace CardBattle.Core
                 currentHp = currentHp,
                 maxHp = maxHp,
                 gold = gold,
+                pendingCardUpgrade = pendingCardUpgrade?.Clone(),
                 currentDeck = new List<RunCardRecord>()
             };
 

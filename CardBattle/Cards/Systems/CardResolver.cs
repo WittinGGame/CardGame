@@ -77,7 +77,7 @@ namespace CardBattle.Core
                 return 0;
 
             var data = context.Card.Data;
-            var effects = data.Effects;
+            var effects = context.Card.EffectiveEffects;
 
             if (!HasAnyValidEffect(effects))
             {

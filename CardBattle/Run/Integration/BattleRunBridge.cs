@@ -10,6 +10,7 @@ namespace CardBattle.Core
     {
         [Header("Data")]
         [SerializeField] private CardCatalog cardCatalog;
+        [SerializeField] private CardUpgradeCatalog cardUpgradeCatalog;
 
         [Header("Battle Scene")]
         [SerializeField] private DeckController deckController;
@@ -93,13 +94,13 @@ namespace CardBattle.Core
             if (!TryGetValidActiveRun(out RunState run))
                 return false;
 
-            if (!TryResolveDeckFromRun(run, out List<CardData> resolvedCards))
+            if (!TryResolveDeckFromRun(run, out List<CardInstance> resolvedCards))
                 return false;
 
             if (!TryValidatePlayerVitalsFromRun(run, out int maxHp, out int currentHp))
                 return false;
 
-            deckController.BuildFromCardDataList(resolvedCards);
+            deckController.BuildFromCardInstances(resolvedCards);
             player.InitializeVitals(maxHp, currentHp);
 
             LastPlayerVitalsApplied = true;
@@ -125,10 +126,10 @@ namespace CardBattle.Core
             if (!TryGetValidActiveRun(out RunState run))
                 return false;
 
-            if (!TryResolveDeckFromRun(run, out List<CardData> resolvedCards))
+            if (!TryResolveDeckFromRun(run, out List<CardInstance> resolvedCards))
                 return false;
 
-            deckController.BuildFromCardDataList(resolvedCards);
+            deckController.BuildFromCardInstances(resolvedCards);
 
             if (verboseLogs)
             {
@@ -291,7 +292,7 @@ namespace CardBattle.Core
             return true;
         }
 
-        private bool TryResolveDeckFromRun(RunState run, out List<CardData> resolvedCards)
+        private bool TryResolveDeckFromRun(RunState run, out List<CardInstance> resolvedCards)
         {
             resolvedCards = null;
 
@@ -313,7 +314,7 @@ namespace CardBattle.Core
                 return false;
             }
 
-            resolvedCards = new List<CardData>(run.currentDeck.Count);
+            resolvedCards = new List<CardInstance>(run.currentDeck.Count);
 
             for (int i = 0; i < run.currentDeck.Count; i++)
             {
@@ -329,21 +330,25 @@ namespace CardBattle.Core
                 {
                     Debug.LogWarning("[BattleRunBridge] Skipping RunCardRecord with blank card ID.");
                     LastMissingCardCount++;
+                    if (record.upgradeLevel != 0) return false;
                     continue;
                 }
-
-                // Phase 3D-A: upgradeLevel is retained in RunState.
-                // A later card-instance factory will apply upgrade modifiers.
 
                 if (!cardCatalog.TryGetCard(record.cardId, out CardData data))
                 {
                     Debug.LogWarning(
                         $"[BattleRunBridge] Card ID not found in catalog: '{record.cardId}'.");
                     LastMissingCardCount++;
+                    if (record.upgradeLevel != 0) return false;
                     continue;
                 }
 
-                resolvedCards.Add(data);
+                if (!RunCardResolver.TryResolve(record, data, cardUpgradeCatalog, out var instance))
+                {
+                    LastMissingCardCount++;
+                    return false;
+                }
+                resolvedCards.Add(instance);
             }
 
             LastResolvedCardCount = resolvedCards.Count;

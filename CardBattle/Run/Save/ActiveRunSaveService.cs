@@ -29,6 +29,14 @@ namespace CardBattle.Core
                 return false;
             }
 
+            string validationError = "Unsupported save schema.";
+            if (saveData.schemaVersion != ActiveRunSaveData.CurrentSchemaVersion ||
+                !RunCardPersistenceValidation.TryValidate(saveData.runState, false, out validationError))
+            {
+                Debug.LogWarning($"[ActiveRunSave] Save rejected: {validationError}");
+                return false;
+            }
+
             string path = SavePath;
             if (string.IsNullOrEmpty(path))
             {
@@ -91,6 +99,47 @@ namespace CardBattle.Core
 
                     saveData = null;
                     return false;
+                }
+
+                bool legacy = saveData.schemaVersion == 0 || saveData.schemaVersion == 1;
+                string validationError = "Unsupported save schema.";
+                if ((!legacy && saveData.schemaVersion != ActiveRunSaveData.CurrentSchemaVersion) ||
+                    !RunCardPersistenceValidation.TryValidate(saveData.runState, legacy, out validationError))
+                {
+                    Debug.LogWarning($"[ActiveRunSave] Load rejected: {validationError}");
+                    saveData = null;
+                    return false;
+                }
+
+                if (legacy)
+                {
+                    if (saveData.runState.currentDeck != null)
+                    {
+                        foreach (var card in saveData.runState.currentDeck)
+                        {
+                            if (string.IsNullOrWhiteSpace(card.runCardInstanceId))
+                                card.runCardInstanceId = System.Guid.NewGuid().ToString("N");
+                        }
+                    }
+                    saveData.schemaVersion = ActiveRunSaveData.CurrentSchemaVersion;
+                    // Persist migration before exposing IDs; repeat Continue must see the same IDs.
+                    if (!TrySave(saveData))
+                    {
+                        saveData = null;
+                        return false;
+                    }
+                }
+
+                if (saveData.runState.currentDeck != null)
+                {
+                    foreach (var card in saveData.runState.currentDeck)
+                    {
+                        if (card.upgradeLevel > 0 && string.IsNullOrEmpty(card.selectedBonusUpgradeId))
+                        {
+                            Debug.LogWarning("[ActiveRunSave] Upgraded record has no Bonus ID; preserving stored level without inventing a Bonus.");
+                            break;
+                        }
+                    }
                 }
 
                 if (verboseLogs)

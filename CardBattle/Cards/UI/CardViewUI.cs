@@ -334,7 +334,7 @@ namespace CardBattle.Core
                 artworkImage.sprite = data.Artwork;
 
             if (descriptionText != null)
-                descriptionText.text = CardDescriptionBuilder.Build(data);
+                descriptionText.text = CardDescriptionBuilder.BuildForInstance(card);
 
             ApplyStateVisuals();
         }

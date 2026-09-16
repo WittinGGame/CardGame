@@ -9,6 +9,7 @@ namespace CardBattle.Core
         public static RunManager Instance { get; private set; }
 
         public RunState CurrentRun { get; private set; }
+        private bool applyingPendingUpgrade;
 
         public bool HasActiveRun =>
             CurrentRun != null &&
@@ -158,6 +159,93 @@ namespace CardBattle.Core
             return true;
         }
 
+        // Return a copy so readers do not mutate persistent ownership through this query.
+        public bool TryGetCardSnapshot(string runCardInstanceId, out RunCardRecord card)
+        {
+            card = null;
+            if (!HasActiveRun || string.IsNullOrWhiteSpace(runCardInstanceId) ||
+                CurrentRun.currentDeck == null)
+                return false;
+
+            foreach (var record in CurrentRun.currentDeck)
+            {
+                if (record == null || record.runCardInstanceId != runCardInstanceId)
+                    continue;
+                if (card != null)
+                {
+                    card = null;
+                    return false; // Ambiguous ownership must not resolve to an arbitrary copy.
+                }
+                card = record.Clone();
+            }
+            return card != null;
+        }
+
+        public bool TryCommitUpgradeOffers(string nodeId, string cardInstanceId,
+            CardCatalog cards, CardUpgradeCatalog upgrades, System.Random random)
+        {
+            if (applyingPendingUpgrade || !HasActiveRun || string.IsNullOrWhiteSpace(nodeId) || cards == null ||
+                !TryGetCardSnapshot(cardInstanceId, out var card) ||
+                !cards.TryGetCard(card.cardId, out var baseCard)) return false;
+
+            var existing = CurrentRun.pendingCardUpgrade;
+            if (existing != null && existing.isCommitted)
+                return existing.nodeId == nodeId && existing.runCardInstanceId == cardInstanceId &&
+                    BonusUpgradeOfferGenerator.TryValidatePending(existing, card, baseCard, upgrades);
+
+            if (!RunCardPersistenceValidation.TryValidate(CurrentRun, false, out _) ||
+                card.upgradeLevel != 0 || !string.IsNullOrEmpty(card.selectedBonusUpgradeId) ||
+                !BonusUpgradeOfferGenerator.TryGenerate(baseCard, upgrades, random, out var offers)) return false;
+
+            var pending = new PendingCardUpgradeState
+            {
+                isCommitted = true, nodeId = nodeId, runCardInstanceId = cardInstanceId,
+                offeredBonusUpgradeIds = offers
+            };
+            if (!BonusUpgradeOfferGenerator.TryValidatePending(pending, card, baseCard, upgrades)) return false;
+            CurrentRun.pendingCardUpgrade = pending.Clone();
+            NotifyRunChanged();
+            return true;
+        }
+
+        // Bonfire supplies its existing map completion API. Publish run changes only after
+        // the owned card, node, and pending record have reached a consistent final state.
+        internal bool TryApplyPendingUpgrade(string nodeId, string bonusId, CardCatalog cards,
+            CardUpgradeCatalog upgrades, Func<bool> completeRestNode, out RunCardRecord applied)
+        {
+            applied = null;
+            if (applyingPendingUpgrade || !HasActiveRun || completeRestNode == null || cards == null) return false;
+            var run = CurrentRun;
+            var pending = run.pendingCardUpgrade;
+            if (pending == null || pending.nodeId != nodeId ||
+                !TryGetCardSnapshot(pending.runCardInstanceId, out var snapshot) ||
+                !cards.TryGetCard(snapshot.cardId, out var data) ||
+                !BonusUpgradeOfferGenerator.TryValidatePending(pending, snapshot, data, upgrades) ||
+                !pending.offeredBonusUpgradeIds.Contains(bonusId)) return false;
+            var record = run.currentDeck.Find(c => c != null && c.runCardInstanceId == pending.runCardInstanceId);
+            applyingPendingUpgrade = true;
+            try
+            {
+                record.upgradeLevel = 1;
+                record.selectedBonusUpgradeId = bonusId;
+                if (!completeRestNode())
+                {
+                    record.upgradeLevel = snapshot.upgradeLevel;
+                    record.selectedBonusUpgradeId = snapshot.selectedBonusUpgradeId;
+                    return false;
+                }
+                // Session replacement from a map callback must never change the new run.
+                if (CurrentRun != run || !run.isActive || run.pendingCardUpgrade != pending) return false;
+                run.pendingCardUpgrade = null;
+                applied = record.Clone();
+                NotifyRunChanged();
+                return true;
+            }
+            finally { applyingPendingUpgrade = false; }
+        }
+
+        public PendingCardUpgradeState GetPendingCardUpgradeSnapshot() => CurrentRun?.pendingCardUpgrade?.Clone();
+
         public RunState GetSnapshot()
         {
             if (CurrentRun == null)
@@ -170,6 +258,12 @@ namespace CardBattle.Core
         {
             if (restoredRun == null)
                 return false;
+
+            if (!RunCardPersistenceValidation.TryValidate(restoredRun, false, out string error))
+            {
+                Debug.LogWarning($"[RunManager] Restore rejected: {error}");
+                return false;
+            }
 
             CurrentRun = restoredRun.Clone();
 
@@ -210,6 +304,9 @@ namespace CardBattle.Core
                 return false;
 
             if (CurrentRun.currentHp != 0 || CurrentRun.maxHp != 0 || CurrentRun.gold != 0)
+                return false;
+
+            if (CurrentRun.pendingCardUpgrade != null)
                 return false;
 
             if (CurrentRun.currentDeck == null)

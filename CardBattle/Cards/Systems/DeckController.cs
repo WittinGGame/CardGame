@@ -84,6 +84,21 @@ namespace CardBattle.Core
             NotifyChanged();
         }
 
+        /// <summary>Accepts independently resolved battle copies; pile rules remain unchanged.</summary>
+        public void BuildFromCardInstances(IEnumerable<CardInstance> cards)
+        {
+            // Materialize first so an existing pile can safely be supplied as input.
+            var copies = new List<CardInstance>();
+            var ids = new HashSet<Guid>();
+            if (cards != null)
+                foreach (var card in cards)
+                    if (card != null && ids.Add(card.InstanceId)) copies.Add(card);
+            ClearAllPiles();
+            _deck.AddRange(copies);
+            ShuffleDeck();
+            NotifyChanged();
+        }
+
         /// <summary>Uses the serialized starter blueprint when no explicit list is provided.</summary>
         public void BuildFromInspectorBlueprint()
         {
