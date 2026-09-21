@@ -1299,7 +1299,7 @@ namespace CardBattle.Core
 
                 bool canPlay = player != null &&
                                player.CanAct &&
-                               player.CanSpendAp(card.Data.ApCost) &&
+                               player.CanSpendAp(card.EffectiveApCost) &&
                                deckController != null &&
                                deckController.IsInHand(card);
 

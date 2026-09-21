@@ -10,6 +10,10 @@ namespace CardBattle.Core
         [SerializeField] private string displayName;
         [SerializeField] private string description;
         [SerializeField] private CardEffectData[] effects;
+        [SerializeField] private bool overrideApCost;
+        [SerializeField, Min(0)] private int apCostOverride;
+        public bool OverrideApCost => overrideApCost;
+        public int ApCostOverride => apCostOverride;
         public string BonusId => bonusId;
         public string DisplayName => displayName;
         public string Description => description;
@@ -18,9 +22,10 @@ namespace CardBattle.Core
         // Effects retain the base card's target context; this is not a retargeting system.
         public bool IsCompatibleWith(CardData card)
         {
-            if (card == null || string.IsNullOrWhiteSpace(bonusId) || effects == null || effects.Length == 0)
+            if (card == null || string.IsNullOrWhiteSpace(bonusId) || (overrideApCost && apCostOverride < 0) || ((!overrideApCost) && (effects == null || effects.Length == 0)))
                 return false;
             bool enemyTarget = card.TargetMode == CardTargetMode.SingleEnemy || card.TargetMode == CardTargetMode.AllEnemies;
+            if (effects == null) return overrideApCost;
             foreach (var effect in effects)
             {
                 if (effect == null) return false;

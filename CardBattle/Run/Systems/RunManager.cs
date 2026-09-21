@@ -222,7 +222,30 @@ namespace CardBattle.Core
                 !cards.TryGetCard(snapshot.cardId, out var data) ||
                 !BonusUpgradeOfferGenerator.TryValidatePending(pending, snapshot, data, upgrades) ||
                 !pending.offeredBonusUpgradeIds.Contains(bonusId)) return false;
-            var record = run.currentDeck.Find(c => c != null && c.runCardInstanceId == pending.runCardInstanceId);
+            return TryApplyUpgradeState(run, pending, snapshot, bonusId, completeRestNode, out applied);
+        }
+
+        internal bool TryApplyResolvedUpgrade(string cardId, string mutationId, CardCatalog cards,
+            CardUpgradeCatalog upgrades, Func<bool> completeRestNode, out RunCardRecord applied)
+        {
+            applied = null;
+            if (applyingPendingUpgrade || !HasActiveRun || completeRestNode == null || cards == null || upgrades == null ||
+                CurrentRun.pendingCardUpgrade?.isCommitted == true ||
+                !TryGetCardSnapshot(cardId, out var snapshot) || snapshot.upgradeLevel != 0 ||
+                !string.IsNullOrEmpty(snapshot.selectedBonusUpgradeId) ||
+                !cards.TryGetCard(snapshot.cardId, out var data) ||
+                !upgrades.TryGetUpgrade(data, out var definition) || !definition.HasValidSequence) return false;
+            if (!string.IsNullOrEmpty(mutationId) &&
+                (!upgrades.TryGetBonus(mutationId, out var mutation) || !mutation.IsCompatibleWith(data))) return false;
+            return TryApplyUpgradeState(CurrentRun, CurrentRun.pendingCardUpgrade, snapshot,
+                mutationId ?? string.Empty, completeRestNode, out applied);
+        }
+
+        private bool TryApplyUpgradeState(RunState run, PendingCardUpgradeState pending,
+            RunCardRecord snapshot, string bonusId, Func<bool> completeRestNode, out RunCardRecord applied)
+        {
+            applied = null;
+            var record = run.currentDeck.Find(c => c != null && c.runCardInstanceId == snapshot.runCardInstanceId);
             applyingPendingUpgrade = true;
             try
             {

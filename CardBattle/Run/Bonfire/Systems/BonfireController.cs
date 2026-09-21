@@ -189,9 +189,11 @@ namespace CardBattle.Core
             }
             else
             {
+                var completedUpgrade = resolvedUpgrade;
                 ClearSession();
                 OnStateChanged?.Invoke();
                 treeMapUIController?.EnsureMapVisibleAndInteractive();
+                if (completedUpgrade != null) PublishUpgrade(OnUpgradeCompleted, completedUpgrade);
             }
             return true;
         }

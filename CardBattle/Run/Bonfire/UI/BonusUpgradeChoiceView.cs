@@ -27,7 +27,8 @@ namespace CardBattle.Core
             {
                 var lines = new List<string> { bonus.DisplayName };
                 if (!string.IsNullOrWhiteSpace(bonus.Description)) lines.Add(bonus.Description);
-                foreach (var effect in bonus.Effects)
+                if (bonus.OverrideApCost) lines.Add($"AP: {bonus.ApCostOverride}");
+                if (bonus.Effects != null) foreach (var effect in bonus.Effects)
                     if (effect != null && !string.IsNullOrWhiteSpace(effect.GetDescriptionText())) lines.Add(effect.GetDescriptionText());
                 label.text = string.Join("\n", lines);
             }

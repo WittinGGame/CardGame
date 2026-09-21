@@ -200,7 +200,7 @@ namespace CardBattle.Core
             RefreshExternalUI();
             cardSfx?.PlayCardPlayed(card.Data.CardType);
 
-            int cost = card.Data.ApCost;
+            int cost = card.EffectiveApCost;
             player.SpendApFromRunner(cost);
 
             PlayedCardDestination destination = DeckController.ResolvePlayedCardDestination(card);
@@ -431,7 +431,7 @@ namespace CardBattle.Core
             if (!deckController.IsInHand(card))
                 return false;
 
-            if (!player.CanSpendAp(card.Data.ApCost))
+            if (!player.CanSpendAp(card.EffectiveApCost))
                 return false;
 
             return true;

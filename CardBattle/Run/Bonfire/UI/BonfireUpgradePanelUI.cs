@@ -8,6 +8,12 @@ namespace CardBattle.Core
     // Keep this component on an always-active host, outside panelRoot.
     public class BonfireUpgradePanelUI : MonoBehaviour
     {
+        public enum UpgradeUIState { DeckSelection, PreviewSelection, ResolvingUpgrade, Completed }
+        public UpgradeUIState State { get; private set; } = UpgradeUIState.Completed;
+        [SerializeField] private BonfireUpgradePreviewUI previewScreen;
+        [SerializeField] private Button previewBackButton;
+        private bool showingPreview;
+        private bool resolving;
         [SerializeField] private BonfireController bonfireController;
         [SerializeField] private GameObject panelRoot;
         [SerializeField] private GameObject deckRoot;
@@ -32,13 +38,16 @@ namespace CardBattle.Core
 
         public void BindController(BonfireController controller)
         {
+            if (bonfireController != controller) showingPreview = false;
             Unsubscribe(); bonfireController = controller;
             if (isActiveAndEnabled) Subscribe();
             Refresh();
         }
         private void OnEnable()
         {
+            RemoveInputListeners();
             Subscribe();
+            if (previewBackButton != null) previewBackButton.onClick.AddListener(HandlePreviewBack);
             if (bonusChoices != null) foreach (var view in bonusChoices) if (view != null) view.OnSelected += HandleBonus;
             if (applyBonusButton != null) applyBonusButton.onClick.AddListener(HandleApplyBonus);
             if (backButton != null) backButton.onClick.AddListener(HandleBack);
@@ -49,21 +58,49 @@ namespace CardBattle.Core
         private void OnDisable()
         {
             Unsubscribe();
+            RemoveInputListeners();
+            showingPreview = false;
+            ClearRows(); if (panelRoot != null) panelRoot.SetActive(false);
+        }
+        private void RemoveInputListeners()
+        {
+            if (previewBackButton != null) previewBackButton.onClick.RemoveListener(HandlePreviewBack);
             if (bonusChoices != null) foreach (var view in bonusChoices) if (view != null) view.OnSelected -= HandleBonus;
             if (applyBonusButton != null) applyBonusButton.onClick.RemoveListener(HandleApplyBonus);
             if (backButton != null) backButton.onClick.RemoveListener(HandleBack);
             if (confirmButton != null) confirmButton.onClick.RemoveListener(HandleConfirm);
             if (retryButton != null) retryButton.onClick.RemoveListener(HandleRetry);
-            ClearRows(); if (panelRoot != null) panelRoot.SetActive(false);
         }
         private void Subscribe() { Unsubscribe(); subscribed = bonfireController; if (subscribed != null) subscribed.OnStateChanged += Refresh; }
         private void Unsubscribe() { if (subscribed != null) subscribed.OnStateChanged -= Refresh; subscribed = null; }
         private void HandleBonus(string id) { bonfireController?.TrySelectBonus(id); Refresh(); }
         private void HandleApplyBonus() { bonfireController?.TryApplySelectedBonus(); Refresh(); }
-        private void HandleBack() { bonfireController?.TryBackFromUpgrade(); Refresh(); }
-        private void HandleConfirm() { bonfireController?.TryConfirmUpgradeCard(); Refresh(); }
+        // Grid Back exits to Bonfire choices; Preview Back only changes this presentation state.
+        private void HandleBack()
+        {
+            if (!isActiveAndEnabled || State != UpgradeUIState.DeckSelection || resolving) return;
+            bonfireController?.TryBackFromUpgrade(); Refresh();
+        }
+        private void HandlePreviewBack()
+        {
+            if (!isActiveAndEnabled || State != UpgradeUIState.PreviewSelection || bonfireController == null || !bonfireController.CanBackFromUpgrade) return;
+            showingPreview = false; Refresh();
+        }
+        private void HandleConfirm()
+        {
+            if (!isActiveAndEnabled || State != UpgradeUIState.PreviewSelection || resolving || bonfireController == null || !bonfireController.CanConfirmUpgradeCard) return;
+            resolving = true; Refresh();
+            try { bonfireController.TryConfirmUpgradeCard(); }
+            finally { resolving = false; Refresh(); }
+        }
         private void HandleRetry() { bonfireController?.TryRetrySave(); Refresh(); }
-        private void HandleCard(string id) { bonfireController?.TrySelectUpgradeCard(id); Refresh(); }
+        private void HandleCard(string id)
+        {
+            if (!isActiveAndEnabled || State != UpgradeUIState.DeckSelection || resolving || bonfireController == null) return;
+            showingPreview = true;
+            if (!bonfireController.TrySelectUpgradeCard(id)) showingPreview = false;
+            Refresh();
+        }
 
         public void Refresh()
         {
@@ -73,8 +110,13 @@ namespace CardBattle.Core
             bool applied = bonfireController != null && bonfireController.HasAppliedUpgrade;
             bool visible = isActiveAndEnabled && (selecting || committed || applied || state == BonfireController.SessionState.InvalidUpgrade);
             if (panelRoot != null) panelRoot.SetActive(visible);
-            if (!visible) { ClearRows(); return; }
-            if (deckRoot != null) deckRoot.SetActive(selecting);
+            if (!visible) { showingPreview = false; State = UpgradeUIState.Completed; ClearRows(); return; }
+            bool validSelection = selecting && bonfireController.CanConfirmUpgradeCard;
+            if (!selecting && !resolving) showingPreview = false;
+            State = resolving || committed ? UpgradeUIState.ResolvingUpgrade : selecting
+                ? showingPreview && validSelection ? UpgradeUIState.PreviewSelection : UpgradeUIState.DeckSelection
+                : UpgradeUIState.Completed;
+            if (deckRoot != null) deckRoot.SetActive(State == UpgradeUIState.DeckSelection);
             if (selecting)
             {
                 var cards = bonfireController.GetRunDeckSnapshot(); EnsureRows(cards);
@@ -84,8 +126,10 @@ namespace CardBattle.Core
                 {
                     var card = cards[i];
                     bonfireController.TryGetUpgradeCardData(card?.runCardInstanceId, out var data, out _);
+                    bonfireController.TryResolveUpgradeCard(card?.runCardInstanceId, out var resolved);
                     rows[i].Bind(card, data, card != null && eligible.Contains(card.runCardInstanceId) && !bonfireController.IsBusy,
-                        card != null && card.runCardInstanceId == bonfireController.SelectedRunCardInstanceId);
+                        card != null && card.runCardInstanceId == bonfireController.SelectedRunCardInstanceId, false,
+                        resolved != null ? CardDescriptionBuilder.BuildForInstance(resolved) : null, resolved?.EffectiveApCost);
                 }
             }
             else ClearRows();
@@ -96,15 +140,17 @@ namespace CardBattle.Core
                 if (locked != null)
                 {
                     bonfireController.TryGetUpgradeCardData(locked.runCardInstanceId, out var data, out var lockedUpgrade);
-                    lockedCardView.Bind(locked, data, false, true, true, applied ? bonfireController.GetAppliedUpgradeDescription() : CardDescriptionBuilder.BuildGuaranteedUpgrade(data, lockedUpgrade));
+                    lockedCardView.Bind(locked, data, false, true, true, applied ? bonfireController.GetAppliedUpgradeDescription() : CardDescriptionBuilder.BuildGuaranteedUpgrade(data, lockedUpgrade), applied ? bonfireController.GetAppliedUpgradeApCost() : null);
                 }
             }
             string selectedId = selecting ? bonfireController.SelectedRunCardInstanceId : locked?.runCardInstanceId;
             bool hasPreview = bonfireController.TryGetUpgradeCardData(selectedId, out var baseData, out var definition) && definition != null && definition.HasValidSequence;
-            if (previewRoot != null) previewRoot.SetActive(hasPreview && (!committed || bonusRoot == null) && !applied);
+            if (previewRoot != null) previewRoot.SetActive(hasPreview && (State == UpgradeUIState.PreviewSelection || resolving) && !applied);
+            if (hasPreview && previewScreen != null && bonfireController.TryResolveUpgradeCard(selectedId, out var current))
+                previewScreen.Bind(current, definition, bonfireController.MutationChance);
             if (selectedNameText != null) selectedNameText.text = hasPreview ? baseData.DisplayName : "Select a card";
             if (currentText != null) currentText.text = hasPreview ? $"Current — {baseData.ApCost} AP\n{CardDescriptionBuilder.Build(baseData)}" : "";
-            if (upgradeText != null) upgradeText.text = hasPreview ? $"Guaranteed Upgrade — {baseData.ApCost} AP\n{CardDescriptionBuilder.BuildGuaranteedUpgrade(baseData, definition)}\n\n+ Random Bonus choice after Confirm" : "";
+            if (upgradeText != null) upgradeText.text = hasPreview ? $"Guaranteed Upgrade — {baseData.ApCost} AP\n{CardDescriptionBuilder.BuildGuaranteedUpgrade(baseData, definition)}\n\nCurse Mutation chance: {bonfireController.MutationChance:P0}" : "";
             if (bonusRoot != null) bonusRoot.SetActive(committed);
             var offers = bonfireController.GetOfferedBonusIds();
             if (bonusChoices != null)
@@ -117,12 +163,13 @@ namespace CardBattle.Core
                         view.Bind(bonus, bonfireController.SelectedBonusId == offers[i], bonfireController.CanSelectBonus);
                 }
             if (applyBonusButton != null) { applyBonusButton.gameObject.SetActive(committed); applyBonusButton.interactable = bonfireController.CanApplySelectedBonus; }
-            if (backButton != null) { backButton.gameObject.SetActive(selecting); backButton.interactable = bonfireController.CanBackFromUpgrade; }
-            if (confirmButton != null) { confirmButton.gameObject.SetActive(selecting); confirmButton.interactable = bonfireController.CanConfirmUpgradeCard; }
+            if (backButton != null) { backButton.gameObject.SetActive(State == UpgradeUIState.DeckSelection); backButton.interactable = bonfireController.CanBackFromUpgrade && !resolving; }
+            if (previewBackButton != null) { previewBackButton.gameObject.SetActive(State == UpgradeUIState.PreviewSelection); previewBackButton.interactable = bonfireController.CanBackFromUpgrade && !resolving; }
+            if (confirmButton != null) { confirmButton.gameObject.SetActive(State == UpgradeUIState.PreviewSelection); confirmButton.interactable = State == UpgradeUIState.PreviewSelection && bonfireController.CanConfirmUpgradeCard && !resolving; }
             if (retryButton != null) { retryButton.gameObject.SetActive(bonfireController.CanRetrySave); retryButton.interactable = bonfireController.CanRetrySave; }
             if (statusText != null) statusText.text = applied ? "Upgrade applied. Save retry required.\n" + bonfireController.LastError : committed
                 ? bonfireController.CanRetrySave ? "Card committed. Save retry required.\n" + bonfireController.LastError : bonusRoot != null ? "Card locked — select a Bonus, then Confirm Bonus." : "Card locked — waiting for Bonus choice."
-                : !string.IsNullOrEmpty(bonfireController.LastError) ? bonfireController.LastError : "Choose one eligible card.";
+                : !string.IsNullOrEmpty(bonfireController.LastError) ? bonfireController.LastError : resolving ? "Resolving Upgrade…" : State == UpgradeUIState.PreviewSelection ? "" : "Choose one eligible card.";
         }
 
         private void EnsureRows(IReadOnlyList<RunCardRecord> cards)

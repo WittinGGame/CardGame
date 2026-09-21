@@ -28,6 +28,7 @@ namespace CardBattle.Core
                 return false;
             }
             var effects = new List<CardEffectData>(definition.GuaranteedEffects);
+            int? effectiveApCost = null;
             if (!string.IsNullOrEmpty(record.selectedBonusUpgradeId))
             {
                 if (!upgradeCatalog.TryGetBonus(record.selectedBonusUpgradeId, out var bonus) || !bonus.IsCompatibleWith(baseCard))
@@ -35,14 +36,11 @@ namespace CardBattle.Core
                     Debug.LogError($"[RunCardResolver] Unresolvable/incompatible saved Bonus '{record.selectedBonusUpgradeId}' on '{record.cardId}'.");
                     return false;
                 }
-                effects.AddRange(bonus.Effects);
-            }
-            else
-            {
-                Debug.LogWarning($"[RunCardResolver] '{record.cardId}' has legacy/test Level 1 without a Bonus; using Guaranteed effects only.");
+                if (bonus.Effects != null) effects.AddRange(bonus.Effects);
+                if (bonus.OverrideApCost) effectiveApCost = bonus.ApCostOverride;
             }
             instance = new CardInstance(baseCard, effectiveEffects: effects,
-                runCardInstanceId: record.runCardInstanceId);
+                runCardInstanceId: record.runCardInstanceId, effectiveApCost: effectiveApCost);
             return true;
         }
     }

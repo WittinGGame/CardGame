@@ -317,7 +317,7 @@ namespace CardBattle.Core
             var data = card.Data;
 
             if (costText != null)
-                costText.text = data.ApCost.ToString();
+                costText.text = card.EffectiveApCost.ToString();
 
             if (nameText != null)
                 nameText.text = data.DisplayName;

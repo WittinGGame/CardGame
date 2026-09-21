@@ -10,6 +10,7 @@ namespace CardBattle.Core
     public class CardInstance
     {
         public CardData Data { get; }
+        public int EffectiveApCost { get; }
         public Guid InstanceId { get; }
         public string RunCardInstanceId { get; }
         private readonly IReadOnlyList<CardEffectData> effectiveEffects;
@@ -20,11 +21,12 @@ namespace CardBattle.Core
         public IReadOnlyList<ICardModifier> Modifiers => _modifiers;
 
         public CardInstance(CardData data, Guid? instanceId = null,
-            IReadOnlyList<CardEffectData> effectiveEffects = null, string runCardInstanceId = null)
+            IReadOnlyList<CardEffectData> effectiveEffects = null, string runCardInstanceId = null, int? effectiveApCost = null)
         {
             Data = data ?? throw new ArgumentNullException(nameof(data));
             InstanceId = instanceId ?? Guid.NewGuid();
             RunCardInstanceId = runCardInstanceId;
+            EffectiveApCost = Math.Max(0, effectiveApCost ?? data.ApCost);
             if (effectiveEffects != null)
             {
                 var copy = new List<CardEffectData>(effectiveEffects.Count);

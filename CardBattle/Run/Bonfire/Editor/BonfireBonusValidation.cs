@@ -39,7 +39,7 @@ namespace CardBattle.Core.Editor
                 var prefab=AssetDatabase.LoadAssetAtPath<GameObject>(BonfireUpgradeUISetup.PrefabPath);check(prefab!=null,"UI prefab exists");
                 var host=(GameObject)PrefabUtility.InstantiatePrefab(prefab,scene);host.transform.SetParent(canvas.transform,false);
                 var ui=host.GetComponent<BonfireUpgradePanelUI>();ui.BindController(bonfire);Call(ui,"OnEnable");
-                bonfire.TryBeginUpgrade(); bonfire.TrySelectUpgradeCard(run.CurrentRun.currentDeck[0].runCardInstanceId); bonfire.TryConfirmUpgradeCard(); ui.Refresh();
+                bonfire.TryBeginUpgrade(); bonfire.TrySelectUpgradeCard(run.CurrentRun.currentDeck[0].runCardInstanceId); CommitOffers(bonfire); ui.Refresh();
                 var pending = run.GetPendingCardUpgradeSnapshot(); string chosen = pending.runCardInstanceId;
                 var originalPending = pending.Clone(); string frozen = JsonUtility.ToJson(pending);
                 var views = Get<BonusUpgradeChoiceView[]>(ui, "bonusChoices"); foreach (var view in views) Call(view, "Awake");
@@ -130,6 +130,7 @@ namespace CardBattle.Core.Editor
         private static T Get<T>(object obj,string field)=>(T)obj.GetType().GetField(field,BindingFlags.NonPublic|BindingFlags.Instance).GetValue(obj);
         private static void Set(object obj,string field,object value)=>obj.GetType().GetField(field,BindingFlags.NonPublic|BindingFlags.Instance).SetValue(obj,value);
         private static void Call(object obj,string method)=>obj.GetType().GetMethod(method,BindingFlags.NonPublic|BindingFlags.Instance).Invoke(obj,null);
+        private static bool CommitOffers(BonfireController controller) => (bool)typeof(BonfireController).GetMethod("TryCommitUpgradeChoiceOffers", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(controller, null);
     }
 }
 #endif

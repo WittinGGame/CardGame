@@ -58,30 +58,30 @@ namespace CardBattle.Core.Editor
                 check(bonfire.CanRest, "Back leaves Rest available");
                 check(bonfire.TryBeginUpgrade() && bonfire.TrySelectUpgradeCard(first), "Select again");
                 run.CurrentRun.currentDeck[0].upgradeLevel = 1;
-                check(!bonfire.TryConfirmUpgradeCard() && run.CurrentRun.pendingCardUpgrade == null, "Level changed before Confirm rejected");
+                check(!CommitOffers(bonfire) && run.CurrentRun.pendingCardUpgrade == null, "Level changed before Confirm rejected");
                 run.CurrentRun.currentDeck[0].upgradeLevel = 0;
                 var removed = run.CurrentRun.currentDeck[0]; run.CurrentRun.currentDeck.RemoveAt(0);
-                check(!bonfire.TryConfirmUpgradeCard(), "Removed ownership rejected"); run.CurrentRun.currentDeck.Insert(0, removed);
+                check(!CommitOffers(bonfire), "Removed ownership rejected"); run.CurrentRun.currentDeck.Insert(0, removed);
                 Set(bonfire, "cardUpgradeCatalog", null);
-                check(!bonfire.TryConfirmUpgradeCard(), "Missing Upgrade definition rejected"); Set(bonfire, "cardUpgradeCatalog", upgrades);
+                check(!CommitOffers(bonfire), "Missing Upgrade definition rejected"); Set(bonfire, "cardUpgradeCatalog", upgrades);
                 cards.TryGetCard("strike", out var strike); upgrades.TryGetUpgrade(strike, out var definition);
                 var noPoolDefinition = ScriptableObject.CreateInstance<CardUpgradeDefinition>(); assets.Add(noPoolDefinition);
                 Set(noPoolDefinition, "baseCard", strike); Set(noPoolDefinition, "guaranteedEffects", new List<CardEffectData>(definition.GuaranteedEffects).ToArray());
                 var noPool = ScriptableObject.CreateInstance<CardUpgradeCatalog>(); assets.Add(noPool); Set(noPool, "upgrades", new List<CardUpgradeDefinition>{noPoolDefinition});
                 Set(bonfire, "cardUpgradeCatalog", noPool);
-                check(bonfire.GetEligibleUpgradeCards().Count == 0 && !bonfire.TryConfirmUpgradeCard(), "Empty pool before Confirm rejected"); Set(bonfire, "cardUpgradeCatalog", upgrades);
+                check(bonfire.GetEligibleUpgradeCards().Count == 2 && !CommitOffers(bonfire), "Empty pool allows default Upgrade but not reserved offers"); Set(bonfire, "cardUpgradeCatalog", upgrades);
                 bool reentrantAccepted = false;
-                Action attempt = () => { if (bonfire.IsBusy) reentrantAccepted |= bonfire.TryConfirmUpgradeCard() || bonfire.TryRest() || bonfire.TryLeave() || bonfire.TrySelectUpgradeCard(second); };
+                Action attempt = () => { if (bonfire.IsBusy) reentrantAccepted |= CommitOffers(bonfire) || bonfire.TryRest() || bonfire.TryLeave() || bonfire.TrySelectUpgradeCard(second); };
                 bonfire.OnStateChanged += attempt;
                 Action<RunState> duringRunChange = _ => attempt(); run.OnRunChanged += duringRunChange;
                 Set(save, "saveFileName", "");
-                check(bonfire.TryConfirmUpgradeCard(), "Commit accepted despite save failure");
+                check(CommitOffers(bonfire), "Commit accepted despite save failure");
                 check(!reentrantAccepted, "Reentrant calls rejected");
                 string frozen = JsonUtility.ToJson(run.GetPendingCardUpgradeSnapshot());
                 check(bonfire.State == BonfireController.SessionState.UpgradeCommitted && bonfire.HasCommittedChoice && bonfire.CanRetrySave, "Committed unsaved state");
                 check(run.CurrentRun.currentDeck[0].upgradeLevel == 0 && string.IsNullOrEmpty(run.CurrentRun.currentDeck[0].selectedBonusUpgradeId), "Persistent card remains base");
                 check(bonfire.GetCommittedUpgradeCardSnapshot().runCardInstanceId == first && bonfire.GetOfferedBonusIds().Count == 3 && new HashSet<string>(bonfire.GetOfferedBonusIds()).Count == 3, "Locked card and unique offers");
-                check(!bonfire.TryConfirmUpgradeCard() && !bonfire.TrySelectUpgradeCard(second) && !bonfire.TryBackFromUpgrade() && !bonfire.TryRest() && !bonfire.TryLeave(), "All alternate actions blocked");
+                check(!CommitOffers(bonfire) && !bonfire.TrySelectUpgradeCard(second) && !bonfire.TryBackFromUpgrade() && !bonfire.TryRest() && !bonfire.TryLeave(), "All alternate actions blocked");
                 check(!bonfire.TryRetrySave() && JsonUtility.ToJson(run.GetPendingCardUpgradeSnapshot()) == frozen, "Failed retry preserves offers");
                 check(bonfire.TryOpenSession(rest) && bonfire.CanRetrySave && JsonUtility.ToJson(run.GetPendingCardUpgradeSnapshot()) == frozen, "Same-session reentry preserves unsaved offers");
                 Set(save, "saveFileName", path);
@@ -120,6 +120,7 @@ namespace CardBattle.Core.Editor
             var go = new GameObject(typeof(T).Name) {hideFlags=HideFlags.HideAndDontSave}; SceneManager.MoveGameObjectToScene(go,scene); return go.AddComponent<T>();
         }
         private static void Set(object target,string field,object value) => target.GetType().GetField(field,BindingFlags.Instance|BindingFlags.NonPublic).SetValue(target,value);
+        private static bool CommitOffers(BonfireController controller) => (bool)typeof(BonfireController).GetMethod("TryCommitUpgradeChoiceOffers", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(controller, null);
     }
 }
 #endif

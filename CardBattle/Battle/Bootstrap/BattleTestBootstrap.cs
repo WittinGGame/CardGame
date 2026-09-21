@@ -330,7 +330,7 @@ namespace CardBattle.Core
                 var card = deckController.Hand[i];
                 if (card?.Data == null) continue;
 
-                sb.AppendLine($"Hand[{i}] = {card.Data.DisplayName} | Cost: {card.Data.ApCost} | Type: {card.Data.CardType}");
+                sb.AppendLine($"Hand[{i}] = {card.Data.DisplayName} | Cost: {card.EffectiveApCost} | Type: {card.Data.CardType}");
             }
 
             var enemies = enemyActionSystem.Enemies;

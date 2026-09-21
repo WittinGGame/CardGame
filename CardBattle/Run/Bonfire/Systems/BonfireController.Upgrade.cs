@@ -45,7 +45,7 @@ namespace CardBattle.Core
             return IsPendingSessionValid() && manager != null && cardCatalog != null && cardUpgradeCatalog != null &&
                 manager.TryGetCardSnapshot(id, out var card) && card.upgradeLevel == 0 && string.IsNullOrEmpty(card.selectedBonusUpgradeId) &&
                 cardCatalog.TryGetCard(card.cardId, out var data) &&
-                BonusUpgradeOfferGenerator.GetEligibleBonusIds(data, cardUpgradeCatalog).Count > 0;
+                cardUpgradeCatalog.TryGetUpgrade(data, out var upgrade) && upgrade.HasValidSequence;
         }
 
         public IReadOnlyList<RunCardRecord> GetRunDeckSnapshot()
@@ -97,7 +97,7 @@ namespace CardBattle.Core
         }
 
         // True means commitment accepted; CanRetrySave/LastError separately report persistence failure.
-        public bool TryConfirmUpgradeCard()
+        internal bool TryCommitUpgradeChoiceOffers()
         {
             if (!isActiveAndEnabled || !CanBackFromUpgrade) return false;
             if (!IsEligibleUpgradeCard(selectedRunCardInstanceId))
@@ -163,6 +163,7 @@ namespace CardBattle.Core
 
         private void ClearTransientUpgrade()
         {
+            resolvedUpgrade = null;
             selectedBonusId = string.Empty;
             appliedUpgrade = null;
             upgradeSelecting = false;
