@@ -18,12 +18,18 @@ namespace CardBattle.Core
         private bool upgradeSavePending;
         private string selectedRunCardInstanceId = string.Empty;
         private bool HasPendingUpgrade => sessionRun?.pendingCardUpgrade?.isCommitted == true;
+        public bool HasPendingMutationChoice => IsActive && HasPendingUpgrade &&
+            sessionRun.pendingCardUpgrade.mutationTriggered;
 
         public SessionState State => !IsActive ? SessionState.Inactive :
             HasPendingUpgrade ? (IsPendingUpgradeValid() ? SessionState.UpgradeCommitted : SessionState.InvalidUpgrade) :
             nodeCompleted ? SessionState.CompletedButUnsaved :
             upgradeSelecting ? SessionState.UpgradeCardSelection : SessionState.Choice;
         public string SelectedRunCardInstanceId => IsActive ? selectedRunCardInstanceId : string.Empty;
+        public bool IsWaitingForMutationChoice => IsActive && checkpointSaved &&
+            !upgradeSavePending && !nodeCompleted && HasPendingMutationChoice && IsPendingUpgradeValid();
+        public float PendingMutationChance => IsWaitingForMutationChoice
+            ? Mathf.Clamp01(sessionRun.pendingCardUpgrade.mutationChance) : 0f;
         public bool CanBeginUpgrade => IsActive && checkpointSaved && !isApplyingChoice && !choiceCommitted &&
             !upgradeSelecting && !HasPendingUpgrade && GetEligibleUpgradeCards().Count > 0;
         public bool CanBackFromUpgrade => IsActive && upgradeSelecting && !choiceCommitted && !HasPendingUpgrade && !isApplyingChoice;
@@ -138,6 +144,11 @@ namespace CardBattle.Core
             return IsPendingUpgradeValid()
                 ? new List<string>(sessionRun.pendingCardUpgrade.offeredBonusUpgradeIds).AsReadOnly()
                 : new List<string>().AsReadOnly();
+        }
+
+        public IReadOnlyList<string> GetOfferedMutationIds()
+        {
+            return IsWaitingForMutationChoice ? GetOfferedBonusIds() : new List<string>().AsReadOnly();
         }
 
         private bool IsPendingUpgradeValid()

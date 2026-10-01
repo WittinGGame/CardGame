@@ -40,6 +40,7 @@ namespace CardBattle.Core
             {
                 if (!string.IsNullOrEmpty(pending.nodeId) ||
                     !string.IsNullOrEmpty(pending.runCardInstanceId) ||
+                    pending.mutationTriggered || pending.mutationChance != 0f ||
                     (pending.offeredBonusUpgradeIds != null && pending.offeredBonusUpgradeIds.Count > 0))
                     return Fail("Uncommitted pending Upgrade contains selection data.", out error);
                 return true;
@@ -52,6 +53,9 @@ namespace CardBattle.Core
 
             if (pending.offeredBonusUpgradeIds == null || pending.offeredBonusUpgradeIds.Count == 0)
                 return Fail("Committed Upgrade has no offered Bonus IDs.", out error);
+
+            if (float.IsNaN(pending.mutationChance) || pending.mutationChance < 0f || pending.mutationChance > 1f)
+                return Fail("Pending Upgrade has an invalid Mutation chance.", out error);
 
             var offers = new HashSet<string>(StringComparer.Ordinal);
             foreach (string offer in pending.offeredBonusUpgradeIds)

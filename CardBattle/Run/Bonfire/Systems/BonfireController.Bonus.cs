@@ -5,7 +5,7 @@ namespace CardBattle.Core
     public partial class BonfireController
     {
         public bool CanSelectBonus => IsActive && !isApplyingChoice && !nodeCompleted &&
-            !upgradeSavePending && checkpointSaved && IsPendingUpgradeValid();
+            !upgradeSavePending && checkpointSaved && !HasPendingMutationChoice && IsPendingUpgradeValid();
         public bool CanApplySelectedBonus => CanSelectBonus &&
             sessionRun.pendingCardUpgrade.offeredBonusUpgradeIds.Contains(selectedBonusId);
 

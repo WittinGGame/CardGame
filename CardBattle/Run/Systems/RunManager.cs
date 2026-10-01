@@ -184,6 +184,20 @@ namespace CardBattle.Core
         public bool TryCommitUpgradeOffers(string nodeId, string cardInstanceId,
             CardCatalog cards, CardUpgradeCatalog upgrades, System.Random random)
         {
+            return TryCommitUpgradeOffers(nodeId, cardInstanceId, cards, upgrades, random, false, 0f);
+        }
+
+        public bool TryCommitMutationOffers(string nodeId, string cardInstanceId,
+            CardCatalog cards, CardUpgradeCatalog upgrades, System.Random random, float mutationChance)
+        {
+            return TryCommitUpgradeOffers(nodeId, cardInstanceId, cards, upgrades, random, true,
+                float.IsNaN(mutationChance) ? 0f : Mathf.Clamp01(mutationChance));
+        }
+
+        private bool TryCommitUpgradeOffers(string nodeId, string cardInstanceId,
+            CardCatalog cards, CardUpgradeCatalog upgrades, System.Random random,
+            bool mutationTriggered, float mutationChance)
+        {
             if (applyingPendingUpgrade || !HasActiveRun || string.IsNullOrWhiteSpace(nodeId) || cards == null ||
                 !TryGetCardSnapshot(cardInstanceId, out var card) ||
                 !cards.TryGetCard(card.cardId, out var baseCard)) return false;
@@ -191,6 +205,7 @@ namespace CardBattle.Core
             var existing = CurrentRun.pendingCardUpgrade;
             if (existing != null && existing.isCommitted)
                 return existing.nodeId == nodeId && existing.runCardInstanceId == cardInstanceId &&
+                    existing.mutationTriggered == mutationTriggered &&
                     BonusUpgradeOfferGenerator.TryValidatePending(existing, card, baseCard, upgrades);
 
             if (!RunCardPersistenceValidation.TryValidate(CurrentRun, false, out _) ||
@@ -200,6 +215,7 @@ namespace CardBattle.Core
             var pending = new PendingCardUpgradeState
             {
                 isCommitted = true, nodeId = nodeId, runCardInstanceId = cardInstanceId,
+                mutationTriggered = mutationTriggered, mutationChance = mutationChance,
                 offeredBonusUpgradeIds = offers
             };
             if (!BonusUpgradeOfferGenerator.TryValidatePending(pending, card, baseCard, upgrades)) return false;

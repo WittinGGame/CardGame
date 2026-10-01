@@ -62,29 +62,31 @@ namespace CardBattle.Core
                 (bonfireController.HasAppliedUpgrade || bonfireController.State == BonfireController.SessionState.UpgradeCardSelection ||
                  bonfireController.State == BonfireController.SessionState.UpgradeCommitted ||
                  bonfireController.State == BonfireController.SessionState.InvalidUpgrade);
-            if (panelRoot != null) panelRoot.SetActive(active && !upgradeVisible);
+            // Keep the Bonfire choices rendered beneath the Upgrade overlay so its background
+            // transition reveals the existing root instead of an empty frame. The root remains
+            // non-interactive while the overlay owns input.
+            if (panelRoot != null) panelRoot.SetActive(active);
             if (!active) return;
             if (hpText != null) hpText.text = $"{bonfireController.CurrentHp} / {bonfireController.MaxHp} HP";
             if (previewText != null) previewText.text = bonfireController.HasCommittedChoice
                 ? "Choice resolved"
                 : $"Rest: +{bonfireController.RestHealAmount} HP\nAfter Rest: {bonfireController.PreviewResultingHp} / {bonfireController.MaxHp}";
-            if (restButton != null) restButton.interactable = bonfireController.CanRest;
+            if (restButton != null) restButton.interactable = !upgradeVisible && bonfireController.CanRest;
             if (upgradeButton != null)
             {
-                bool selecting = bonfireController.State == BonfireController.SessionState.UpgradeCardSelection;
-                upgradeButton.interactable = selecting ? bonfireController.CanBackFromUpgrade : bonfireController.CanBeginUpgrade;
+                upgradeButton.interactable = !upgradeVisible && bonfireController.CanBeginUpgrade;
                 var label = upgradeButton.GetComponentInChildren<TextMeshProUGUI>(true);
-                if (label != null) label.text = selecting ? "Back" : "Upgrade";
+                if (label != null) label.text = "Upgrade";
             }
             if (leaveButton != null)
             {
                 leaveButton.gameObject.SetActive(bonfireController.CanLeave);
-                leaveButton.interactable = bonfireController.CanLeave;
+                leaveButton.interactable = !upgradeVisible && bonfireController.CanLeave;
             }
             if (retrySaveButton != null)
             {
                 retrySaveButton.gameObject.SetActive(bonfireController.CanRetrySave);
-                retrySaveButton.interactable = bonfireController.CanRetrySave;
+                retrySaveButton.interactable = !upgradeVisible && bonfireController.CanRetrySave;
             }
             if (statusText != null) statusText.text = !string.IsNullOrEmpty(bonfireController.LastError)
                 ? bonfireController.LastError
